@@ -1,0 +1,37 @@
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+.action {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  transition:
+    background var(--duration) var(--ease),
+    color var(--duration) var(--ease);
+}
+
+.action:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.action:active {
+  background: var(--pressed);
+}
+
+.error {
+  margin-right: var(--space-3);
+  color: var(--text-secondary);
+}
+
+/* Present for the file picker, never shown. The button opens it. */
+.file {
+  display: none;
+}

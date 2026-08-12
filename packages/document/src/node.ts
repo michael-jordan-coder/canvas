@@ -11,6 +11,19 @@ export function createNodeId(): NodeId {
   return `n${counter}` as NodeId
 }
 
+/**
+ * Pushes the id counter past everything in `ids`.
+ *
+ * Loading a saved file keeps its ids, so without this the next node created would collide
+ * with one already in the document and silently overwrite it.
+ */
+export function reserveNodeIds(ids: Iterable<NodeId>): void {
+  for (const id of ids) {
+    const value = Number.parseInt(id.slice(1), 10)
+    if (Number.isFinite(value) && value > counter) counter = value
+  }
+}
+
 export type NodeType = 'page' | 'frame' | 'rectangle' | 'ellipse'
 
 export interface BaseNode {
@@ -126,6 +139,14 @@ function cloneStroke(stroke: Stroke): Stroke {
  * field of every node type is accounted for when a new one is added.
  */
 export function cloneNode(node: SceneNode): SceneNode {
+  return cloneNodeAs(node, node.id)
+}
+
+/**
+ * Clone under a different id. Paste needs this: the same subtree cannot appear twice with
+ * the same ids, and `id` is readonly precisely so it cannot be reassigned after the fact.
+ */
+export function cloneNodeAs(node: SceneNode, id: NodeId): SceneNode {
   const shared = {
     name: node.name,
     visible: node.visible,
@@ -139,11 +160,11 @@ export function cloneNode(node: SceneNode): SceneNode {
 
   switch (node.type) {
     case 'page':
-      return { ...shared, id: node.id, type: 'page' }
+      return { ...shared, id, type: 'page' }
     case 'frame':
       return {
         ...shared,
-        id: node.id,
+        id,
         type: 'frame',
         clipsContent: node.clipsContent,
         cornerRadius: node.cornerRadius,
@@ -153,7 +174,7 @@ export function cloneNode(node: SceneNode): SceneNode {
     case 'rectangle':
       return {
         ...shared,
-        id: node.id,
+        id,
         type: 'rectangle',
         cornerRadius: node.cornerRadius,
         fills: node.fills.map(clonePaint),
@@ -162,7 +183,7 @@ export function cloneNode(node: SceneNode): SceneNode {
     case 'ellipse':
       return {
         ...shared,
-        id: node.id,
+        id,
         type: 'ellipse',
         fills: node.fills.map(clonePaint),
         strokes: node.strokes.map(cloneStroke),

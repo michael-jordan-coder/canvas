@@ -1,5 +1,12 @@
 import { multiply, type Mat2D, IDENTITY } from './math.js'
-import { canHaveChildren, cloneNode, createPage, type NodeId, type SceneNode } from './node.js'
+import {
+  canHaveChildren,
+  cloneNode,
+  createPage,
+  reserveNodeIds,
+  type NodeId,
+  type SceneNode,
+} from './node.js'
 import { History, type HistoryEntry, type NodeSnapshot, type SideState } from './history.js'
 
 export interface DocumentChange {
@@ -174,6 +181,37 @@ export class SceneDocument {
     return () => {
       this.#listeners.delete(listener)
     }
+  }
+
+  /**
+   * Replaces the entire contents, in place.
+   *
+   * In place matters: the editor holds one document as a module singleton and every React
+   * hook and the renderer are subscribed to it. Swapping in a new instance would leave all
+   * of them watching an object nothing writes to any more.
+   *
+   * History is dropped, because loading a file is not an edit you undo your way out of.
+   */
+  load(root: NodeId, nodes: readonly SceneNode[]): void {
+    const replaced = new Set<NodeId>(this.#nodes.keys())
+
+    this.#nodes = new Map(nodes.map((node) => [node.id, cloneNode(node)]))
+    this.#root = root
+    // The file keeps its ids, so the generator has to be pushed past them or the next node
+    // created would collide with one just loaded.
+    reserveNodeIds(this.#nodes.keys())
+
+    this.clearHistory()
+    this.#recording = null
+
+    // Everything that was here and everything that now is, so no subscriber keeps showing a
+    // node from the previous document.
+    for (const id of this.#nodes.keys()) replaced.add(id)
+    this.#version += 1
+    const change: DocumentChange = { version: this.#version, changed: replaced, structural: true }
+    this.#pending = new Set()
+    this.#pendingStructural = false
+    for (const listener of this.#listeners) listener(change)
   }
 
   // History ------------------------------------------------------------------------------

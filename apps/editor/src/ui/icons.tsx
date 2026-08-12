@@ -60,6 +60,22 @@ export function EllipseIcon(props: IconProps): ReactElement {
   )
 }
 
+export function DownloadIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <path {...stroke} d="M8 2.5v7.5m0 0L5 7.2M8 10l3-2.8M2.8 12.2v1.3h10.4v-1.3" />
+    </Svg>
+  )
+}
+
+export function UploadIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <path {...stroke} d="M8 10.5V3m0 0L5 5.8M8 3l3 2.8M2.8 12.2v1.3h10.4v-1.3" />
+    </Svg>
+  )
+}
+
 export function VisibleIcon(props: IconProps): ReactElement {
   return (
     <Svg {...props}>

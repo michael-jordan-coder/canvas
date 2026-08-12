@@ -1,6 +1,7 @@
 import type { ComponentType, ReactElement } from 'react'
 import { useUI, type ToolId } from '../state/uiStore'
 import { EllipseIcon, FrameIcon, HandIcon, MoveIcon, RectangleIcon, type IconProps } from './icons'
+import { FileActions } from './FileActions'
 import styles from './Toolbar.module.css'
 
 const TOOLS: ReadonlyArray<{ id: ToolId; label: string; Icon: ComponentType<IconProps> }> = [
@@ -29,6 +30,7 @@ export function Toolbar(): ReactElement {
           <Icon />
         </button>
       ))}
+      <FileActions />
     </div>
   )
 }

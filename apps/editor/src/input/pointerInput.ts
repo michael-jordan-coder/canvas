@@ -8,6 +8,7 @@ import {
   type Vec2,
 } from '@figma-canvas/document'
 import { screenToWorld, type Camera, type Viewport } from '@figma-canvas/renderer'
+import { duplicateNodes } from '../state/duplicate'
 import type { ToolId } from '../state/uiStore'
 
 export interface PointerInputOptions {
@@ -35,10 +36,13 @@ interface Drag {
   pointerId: number
   kind: 'move' | 'pan'
   startScreen: Vec2
+  startWorld: Vec2
   startCamera: Camera
   nodes: DraggedNode[]
   /** Opened on the first move that actually changes something, not on pointer down. */
   grouped: boolean
+  /** Option was held at pointer down, so the first move drags a copy instead. */
+  duplicateOnMove: boolean
 }
 
 /**
@@ -79,9 +83,11 @@ export function createPointerInput(options: PointerInputOptions): () => void {
         pointerId: event.pointerId,
         kind: 'pan',
         startScreen: screen,
+        startWorld: world,
         startCamera: options.getCamera(),
         nodes: [],
         grouped: false,
+        duplicateOnMove: false,
       }
       canvas.setPointerCapture(event.pointerId)
       return
@@ -110,26 +116,34 @@ export function createPointerInput(options: PointerInputOptions): () => void {
       pointerId: event.pointerId,
       kind: 'move',
       startScreen: screen,
+      startWorld: world,
       startCamera: options.getCamera(),
       grouped: false,
-      nodes: ids.flatMap((id) => {
-        const node = document.getNode(id)
-        if (!node || node.locked) return []
-        const parentInverse = invert(
-          node.parent ? document.worldTransform(node.parent) : IDENTITY_MATRIX,
-        )
-        return [
-          {
-            id,
-            parentInverse,
-            startTransform: { ...node.transform },
-            startLocal: applyToPoint(parentInverse, world),
-          },
-        ]
-      }),
+      // Held at pointer down, acted on at the first move. Option clicking without dragging
+      // should not leave a copy behind, which is how Figma behaves.
+      duplicateOnMove: event.altKey,
+      nodes: draggedNodesFor(ids, world),
     }
     canvas.setPointerCapture(event.pointerId)
   }
+
+  /** Everything needed to move a set of nodes with the pointer, resolved once at grab time. */
+  const draggedNodesFor = (ids: readonly NodeId[], world: Vec2): DraggedNode[] =>
+    ids.flatMap((id) => {
+      const node = document.getNode(id)
+      if (!node || node.locked) return []
+      const parentInverse = invert(
+        node.parent ? document.worldTransform(node.parent) : IDENTITY_MATRIX,
+      )
+      return [
+        {
+          id,
+          parentInverse,
+          startTransform: { ...node.transform },
+          startLocal: applyToPoint(parentInverse, world),
+        },
+      ]
+    })
 
   const onPointerMove = (event: PointerEvent): void => {
     if (!drag || event.pointerId !== drag.pointerId) return
@@ -159,7 +173,26 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     if (!moved) return
     if (!current.grouped) {
       current.grouped = true
+      // Opened before the duplicate, so the copy and every frame of the drag that follows
+      // collapse into one step. Undoing an option drag removes the copy outright.
       document.beginHistoryGroup()
+
+      if (current.duplicateOnMove) {
+        current.duplicateOnMove = false
+        // Zero offset: the copy starts exactly on the original and this gesture moves it.
+        const copies = duplicateNodes(
+          document,
+          current.nodes.map((dragged) => dragged.id),
+          { x: 0, y: 0 },
+        )
+        if (copies.length > 0) {
+          const copyIds = copies.map((copy) => copy.id)
+          options.setSelection(copyIds)
+          // Rebuilt rather than remapped, because a selection containing a frame and one of
+          // its own children collapses to fewer roots than it had ids.
+          current.nodes = draggedNodesFor(copyIds, current.startWorld)
+        }
+      }
     }
 
     // One transaction, so moving twenty nodes wakes the panels once rather than twenty times.
