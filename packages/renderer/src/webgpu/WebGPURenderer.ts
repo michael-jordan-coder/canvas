@@ -3,6 +3,7 @@ import { clipMatrix, pixelsToClip, type Viewport } from '../camera.js'
 import type { Renderer, RendererInit, RendererStats, ViewState } from '../Renderer.js'
 import { createGPUSurface, onDeviceLost, type GPUSurface } from './device.js'
 import { MatrixUniform, createMatrixBindGroupLayout } from './MatrixUniform.js'
+import { ClipRegions, createClipBindGroupLayout } from './ClipRegions.js'
 import { ShapeInstances } from './ShapeInstances.js'
 import { OverlayInstances } from './OverlayInstances.js'
 import { createShapePipeline } from './pipelines/shape.js'
@@ -23,6 +24,7 @@ class WebGPURenderer implements Renderer {
   #worldToClip: MatrixUniform
   #pixelsToClip: MatrixUniform
 
+  #clips: ClipRegions
   #shapes: ShapeInstances
   #overlay: OverlayInstances
   #shapePipeline: GPURenderPipeline
@@ -41,12 +43,14 @@ class WebGPURenderer implements Renderer {
     this.#worldToClip = new MatrixUniform(surface.device, layout, 'world to clip')
     this.#pixelsToClip = new MatrixUniform(surface.device, layout, 'pixels to clip')
 
-    this.#shapes = new ShapeInstances(surface.device)
+    const clipLayout = createClipBindGroupLayout(surface.device)
+    this.#clips = new ClipRegions(surface.device, clipLayout)
+    this.#shapes = new ShapeInstances(surface.device, this.#clips)
     this.#overlay = new OverlayInstances(surface.device)
 
     // Built once at startup. Compiling a pipeline mid frame is the classic way to produce
     // a stutter that only shows up the first time a user draws something.
-    this.#shapePipeline = createShapePipeline(surface.device, surface.format, layout)
+    this.#shapePipeline = createShapePipeline(surface.device, surface.format, layout, clipLayout)
     this.#overlayPipeline = createOverlayPipeline(surface.device, surface.format, layout)
   }
 
@@ -99,9 +103,11 @@ class WebGPURenderer implements Renderer {
     })
 
     const shapes = this.#shapes.buffer
-    if (shapes && this.#shapes.count > 0) {
+    const clips = this.#clips.bindGroup
+    if (shapes && clips && this.#shapes.count > 0) {
       pass.setPipeline(this.#shapePipeline)
       pass.setBindGroup(0, this.#worldToClip.bindGroup)
+      pass.setBindGroup(1, clips)
       pass.setVertexBuffer(0, shapes)
       // Four corners, one instance per shape. The entire document in a single call.
       pass.draw(4, this.#shapes.count)
@@ -132,6 +138,7 @@ class WebGPURenderer implements Renderer {
     this.#worldToClip.destroy()
     this.#pixelsToClip.destroy()
     this.#shapes.destroy()
+    this.#clips.destroy()
     this.#overlay.destroy()
     this.#surface.context.unconfigure()
     this.#surface.device.destroy()

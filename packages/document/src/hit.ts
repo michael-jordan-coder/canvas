@@ -9,6 +9,7 @@ import {
   type Vec2,
 } from './math.js'
 import { canHaveChildren, isPainted, type NodeId, type SceneNode } from './node.js'
+import { activeStroke, strokeOutset } from './paint.js'
 
 /**
  * Distance from a point to a rounded box, negative inside. The same function the fragment
@@ -23,8 +24,22 @@ function distanceToRoundedBox(p: Vec2, half: Vec2, radius: number): number {
   return outside + Math.min(Math.max(qx, qy), 0) - r
 }
 
-/** `point` is in the node's own space, where the node spans 0..size. */
+/**
+ * `point` is in the node's own space, where the node spans 0..size.
+ *
+ * A stroke that sits outside the edge is part of what you can see, so it is part of what you
+ * can click. An inside stroke adds nothing, which is the same reason it leaves the node's
+ * drawn footprint alone. Note the whole interior stays clickable even when a node has only a
+ * stroke and no fill: Figma would make you hit the outline itself, which is precise and
+ * unpleasant, and nothing here needs that yet.
+ */
 export function containsPoint(node: SceneNode, point: Vec2): boolean {
+  if (!isPainted(node)) return false
+  const stroke = activeStroke(node.strokes)
+  return withinShape(node, point, stroke ? strokeOutset(stroke) : 0)
+}
+
+function withinShape(node: SceneNode, point: Vec2, outset: number): boolean {
   if (!isPainted(node)) return false
 
   const half = { x: node.size.width / 2, y: node.size.height / 2 }
@@ -33,12 +48,27 @@ export function containsPoint(node: SceneNode, point: Vec2): boolean {
   const p = { x: point.x - half.x, y: point.y - half.y }
 
   if (node.type === 'ellipse') {
-    const nx = p.x / half.x
-    const ny = p.y / half.y
+    const nx = p.x / (half.x + outset)
+    const ny = p.y / (half.y + outset)
     return nx * nx + ny * ny <= 1
   }
 
-  return distanceToRoundedBox(p, half, node.cornerRadius) <= 0
+  // Growing the box rather than subtracting from the distance, because the corner radius
+  // grows with an outward stroke too: the outer edge of a stroke around a rounded corner is
+  // a wider arc, not the same arc pushed out squarely.
+  const grown = { x: half.x + outset, y: half.y + outset }
+  return distanceToRoundedBox(p, grown, node.cornerRadius + outset) <= 0
+}
+
+/**
+ * Whether a frame hides whatever sits at this point in its own space.
+ *
+ * The clip is the frame's geometry, so the stroke is deliberately left out of it: painting
+ * a thick outside stroke on a frame must not enlarge the region its children are allowed to
+ * appear in.
+ */
+function clipsAway(node: SceneNode, local: Vec2): boolean {
+  return node.type === 'frame' && node.clipsContent && !withinShape(node, local, 0)
 }
 
 /**
@@ -73,17 +103,20 @@ export function containerAt(document: SceneDocument, point: Vec2): SceneNode {
   const descend = (node: SceneNode, parent: Mat2D): SceneNode | null => {
     if (!node.visible || node.locked) return null
     const world = multiply(node.transform, parent)
+    const local = applyToPoint(invert(world), point)
 
-    const children = document.getChildren(node.id)
-    for (let index = children.length - 1; index >= 0; index -= 1) {
-      const child = children[index]
-      if (!child) continue
-      const found = descend(child, world)
-      if (found) return found
+    if (!clipsAway(node, local)) {
+      const children = document.getChildren(node.id)
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        const child = children[index]
+        if (!child) continue
+        const found = descend(child, world)
+        if (found) return found
+      }
     }
 
     if (!canHaveChildren(node)) return null
-    return containsPoint(node, applyToPoint(invert(world), point)) ? node : null
+    return containsPoint(node, local) ? node : null
   }
 
   for (const child of [...document.getChildren(page.id)].reverse()) {
@@ -132,7 +165,10 @@ function encloses(outer: Rect, inner: Rect): boolean {
 export function nodesIn(document: SceneDocument, rect: Rect): SceneNode[] {
   const found: SceneNode[] = []
 
-  const visit = (node: SceneNode, parent: Mat2D): void => {
+  // What is still visible after every enclosing clip, in world space, or null for unclipped.
+  // Rectangles are enough here because everything this function compares is already an axis
+  // aligned bound rather than the exact shape.
+  const visit = (node: SceneNode, parent: Mat2D, clip: Rect | null): void => {
     if (!node.visible || node.locked) return
     const world = multiply(node.transform, parent)
     const bounds = transformRect(world, {
@@ -142,20 +178,35 @@ export function nodesIn(document: SceneDocument, rect: Rect): SceneNode[] {
       height: node.size.height,
     })
 
+    // Clipped out entirely: nothing of this node or its children is on screen to catch.
+    const shown = clip ? intersection(clip, bounds) : bounds
+    if (!shown) return
+
     if (canHaveChildren(node)) {
-      if (encloses(rect, bounds)) {
+      if (encloses(rect, shown)) {
         found.push(node)
         return
       }
-      for (const child of document.getChildren(node.id)) visit(child, world)
+      const inner = node.type === 'frame' && node.clipsContent ? shown : clip
+      for (const child of document.getChildren(node.id)) visit(child, world, inner)
       return
     }
 
-    if (overlaps(rect, bounds)) found.push(node)
+    if (overlaps(rect, shown)) found.push(node)
   }
 
-  for (const child of document.getChildren(document.rootId)) visit(child, IDENTITY_MATRIX)
+  for (const child of document.getChildren(document.rootId)) visit(child, IDENTITY_MATRIX, null)
   return found
+}
+
+/** The overlap of two rects, or null when they do not touch. */
+function intersection(a: Rect, b: Rect): Rect | null {
+  const x = Math.max(a.x, b.x)
+  const y = Math.max(a.y, b.y)
+  const right = Math.min(a.x + a.width, b.x + b.width)
+  const bottom = Math.min(a.y + a.height, b.y + b.height)
+  if (right <= x || bottom <= y) return null
+  return { x, y, width: right - x, height: bottom - y }
 }
 
 function hitNode(
@@ -168,18 +219,24 @@ function hitNode(
   if (!node.visible) return null
 
   const world = multiply(node.transform, parent)
+  // Into the node's own space, where the containment test is a plain box or ellipse
+  // regardless of how the node is rotated or scaled in the world.
+  const local = applyToPoint(invert(world), point)
 
-  const children = document.getChildren(node.id)
-  for (let i = children.length - 1; i >= 0; i -= 1) {
-    const child = children[i]
-    if (!child) continue
-    const found = hitNode(document, child, world, point)
-    if (found) return found
+  // A child the frame clips out is not on screen, so it is not clickable either. Testing
+  // once here rather than per child is also what stops a big clipping frame paying for a
+  // walk over contents none of which can be reached.
+  if (!clipsAway(node, local)) {
+    const children = document.getChildren(node.id)
+    for (let i = children.length - 1; i >= 0; i -= 1) {
+      const child = children[i]
+      if (!child) continue
+      const found = hitNode(document, child, world, point)
+      if (found) return found
+    }
   }
 
   if (node.locked) return null
 
-  // Into the node's own space, where the containment test is a plain box or ellipse
-  // regardless of how the node is rotated or scaled in the world.
-  return containsPoint(node, applyToPoint(invert(world), point)) ? node : null
+  return containsPoint(node, local) ? node : null
 }

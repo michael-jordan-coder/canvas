@@ -33,7 +33,7 @@ beforeEach(() => {
 })
 
 const field = (index: number, slot: number): number =>
-  instanceAt(stub.written(), STRIDE, index, slot)
+  instanceAt(stub.written('overlay instances'), STRIDE, index, slot)
 
 describe('OverlayInstances', () => {
   it('draws nothing when nothing is selected', () => {

@@ -1,8 +1,20 @@
 import type { ReactElement } from 'react'
-import { isPainted, toHex, type RectangleNode, type SceneNode } from '@figma-canvas/document'
+import {
+  fromHex,
+  isPainted,
+  type FrameNode,
+  type PaintedNode,
+  type RectangleNode,
+  type RGBA,
+  type SceneNode,
+  type Stroke,
+  type StrokeAlign,
+} from '@figma-canvas/document'
 import { scene, useNode } from '../state/scene'
 import { useUI } from '../state/uiStore'
+import { ColorField } from './ColorField'
 import { NumberField } from './NumberField'
+import { SegmentedField } from './SegmentedField'
 import styles from './PropertiesPanel.module.css'
 
 export function PropertiesPanel(): ReactElement {
@@ -18,8 +30,6 @@ export function PropertiesPanel(): ReactElement {
 }
 
 function NodeProperties({ node }: { node: SceneNode }): ReactElement {
-  const fill = isPainted(node) ? node.fills[0] : undefined
-
   return (
     <div className={styles.sections}>
       <section className={styles.grid}>
@@ -64,17 +74,104 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
         )}
       </section>
 
-      {fill && (
-        <section className={styles.row}>
-          {/* An SVG presentation attribute rather than a style attribute, so the dynamic
-              color does not become inline CSS. */}
-          <svg className={styles.swatch} width="12" height="12" aria-hidden="true">
-            <rect width="12" height="12" fill={toHex(fill.color)} />
-            <rect width="12" height="12" fill="none" stroke="rgb(0 0 0 / 0.15)" />
-          </svg>
-          <span className={styles.hex}>{toHex(fill.color).slice(1).toUpperCase()}</span>
+      {node.type === 'frame' && (
+        <section className={styles.stack}>
+          <label className={styles.toggle}>
+            <input
+              type="checkbox"
+              className={styles.checkbox}
+              checked={node.clipsContent}
+              onChange={(event) =>
+                scene.update<FrameNode>(node.id, { clipsContent: event.target.checked })
+              }
+            />
+            Clip content
+          </label>
         </section>
       )}
+
+      {isPainted(node) && <FillSection node={node} />}
+      {isPainted(node) && <StrokeSection node={node} />}
     </div>
+  )
+}
+
+function FillSection({ node }: { node: PaintedNode }): ReactElement | null {
+  const fill = node.fills[0]
+  if (!fill) return null
+
+  return (
+    <section className={styles.stack}>
+      <ColorField
+        label="Fill"
+        color={fill.color}
+        onChange={(color: RGBA) =>
+          scene.update<PaintedNode>(node.id, { fills: [{ type: 'solid', color }] })
+        }
+      />
+    </section>
+  )
+}
+
+/** Figma's own default: a one unit line just inside the edge, so the footprint does not move. */
+const DEFAULT_STROKE: Stroke = { paint: fromHex('#1a1a1a'), weight: 1, align: 'inside' }
+
+const ALIGNMENTS = [
+  { value: 'inside', label: 'Inside' },
+  { value: 'center', label: 'Center' },
+  { value: 'outside', label: 'Outside' },
+] as const satisfies readonly { value: StrokeAlign; label: string }[]
+
+function StrokeSection({ node }: { node: PaintedNode }): ReactElement {
+  const stroke = node.strokes[0]
+
+  const set = (next: Partial<Stroke>): void => {
+    scene.update<PaintedNode>(node.id, { strokes: [{ ...(stroke ?? DEFAULT_STROKE), ...next }] })
+  }
+
+  if (!stroke) {
+    return (
+      <section className={styles.stack}>
+        <button
+          type="button"
+          className={styles.add}
+          onClick={() => scene.update<PaintedNode>(node.id, { strokes: [DEFAULT_STROKE] })}
+        >
+          Add stroke
+        </button>
+      </section>
+    )
+  }
+
+  return (
+    <section className={styles.stack}>
+      <div className={styles.headed}>
+        <ColorField
+          label="Stroke"
+          color={stroke.paint.color}
+          onChange={(color: RGBA) => set({ paint: { type: 'solid', color } })}
+        />
+        <button
+          type="button"
+          className={styles.remove}
+          aria-label="Remove stroke"
+          onClick={() => scene.update<PaintedNode>(node.id, { strokes: [] })}
+        >
+          &minus;
+        </button>
+      </div>
+      <SegmentedField
+        label="Align"
+        value={stroke.align}
+        options={ALIGNMENTS}
+        onChange={(align: StrokeAlign) => set({ align })}
+      />
+      <NumberField
+        wide
+        label="Weight"
+        value={stroke.weight}
+        onCommit={(weight) => set({ weight: Math.max(0, weight) })}
+      />
+    </section>
   )
 }

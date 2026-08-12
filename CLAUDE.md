@@ -161,7 +161,9 @@ Every silent bug this project has had was in that category.
 `?perf` (implied by `?stress`) shows a readout of instances drawn, instances culled, build time and
 frame time. Autosave is off in stress mode, so throwaway nodes are never persisted.
 
-Measured on a 10,000 node grid, CPU side:
+Measured on a 10,000 node grid, CPU side. **These were taken when an instance was 64 bytes and
+have not been retaken since it grew to 80 for the clip index**, so read the build rows as a floor
+rather than a current figure:
 
 | | |
 | --- | --- |
@@ -217,6 +219,18 @@ Built:
 - Pan and zoom, through a camera uniform holding one world to clip matrix. Moving the view is
   one 48 byte write and touches no geometry, which is why a document of any size pans as cheaply
   as an empty one.
+- Strokes, as a second instance of the same shape rather than a wider one. Given the SDF an
+  outline is the band `abs(d - offset) <= weight / 2`, so a stroke instance is the same 80 bytes
+  as a fill with two more slots filled in, and a node without one pays nothing. Alignment is
+  carried entirely by the sign of that offset: `-weight / 2` inside, `0` centred, `+weight / 2`
+  outside. `strokeOffset` and `strokeOutset` in `paint.ts` are the single source for it, shared
+  by packing, culling and hit testing.
+- `clipsContent`, as a per instance index into a storage buffer of clip records rather than a
+  scissor rect. Each record holds the frame's **inverse** world transform, its size and radius,
+  and the index of the clip enclosing it, so the fragment shader maps its own world position back
+  into each frame in turn and walks that chain outward. Nesting therefore needs no intersection
+  on the CPU, and a scaled frame clips correctly, which an axis aligned screen rectangle would
+  not. It also keeps the whole document in one draw call.
 
 Drawing is on demand, not a permanent `requestAnimationFrame` loop. `CanvasHost` redraws on
 resize and on document change, coalesced into one frame. An editor is static most of the time and
@@ -225,12 +239,34 @@ a loop running at 120Hz over a still document burns battery producing identical 
 The instance buffer rebuilds only when `document.version` changes, so it is untouched by panning.
 Shapes are packed back to front and blended in that order, which is why there is no depth buffer:
 overlapping translucent shapes need painter's order and a depth test would discard their blending.
+A node contributes its fill, then its whole subtree, then its stroke, so a frame's outline is not
+painted over by a child that fills it edge to edge. For a leaf that ordering is identical.
+
+Two rules in the shape shader are not obvious and both have a wrong version that still renders:
+
+- **`fwidth` is taken on the raw distance, before the `abs` that forms a stroke band.** That `abs`
+  creases down the middle of the band, and a derivative across the crease reads as enormous, which
+  paints a soft seam along the centre of every thick stroke.
+- **A sub-pixel stroke widens inward only.** The quad is padded on the CPU by the stroke's
+  geometric reach, so a hairline that grows symmetrically to stay visible at low zoom would push
+  past the quad and have its outside sliced off. Pinning the outer edge and moving the inner one
+  keeps the two in agreement at every zoom.
+
+Derivatives inside the clip walk would be illegal, since they are only defined in uniform control
+flow. `dpdx` and `dpdy` of the world position are taken once by the caller and pushed through each
+frame's inverse instead, which gives the pixel's footprint in that frame's units: what `fwidth`
+would have returned had it been callable there.
 
 - Hit testing (`packages/document/src/hit.ts`) and drag (`apps/editor/src/input/pointerInput.ts`).
   Hit testing uses the same rounded box distance function as the fragment shader, so what you can
-  click is exactly what you can see, corner radius bites included. Input reads the stores through
-  `getState` rather than subscribing, because a drag must not put a React render between the
-  pointer and the pixels.
+  click is exactly what you can see, corner radius bites included. That equivalence is the reason
+  every change to what gets drawn has to reach `hit.ts` in the same step: an outward stroke grows
+  the clickable area by its reach, and a clipping frame stops a click from finding a child it has
+  hidden. `nodesIn` carries the same clip as a world rect, so a marquee cannot catch an overhang
+  that is not on screen. A frame clips to its geometry and deliberately not to its stroke, since
+  painting a thick outline on a frame must not enlarge where its children may appear. Input reads
+  the stores through `getState` rather than subscribing, because a drag must not put a React
+  render between the pointer and the pixels.
 
 - The selection overlay: outline and eight handles, drawn by a second pipeline bound to a pixels
   to clip matrix instead of a world to clip one. That is the whole trick. Its geometry is built in
@@ -264,9 +300,15 @@ payloads never enter the conversation. Delegate to it and relay its one line bac
 
 A few things are worth knowing because the code looks finished but is not:
 
-- `Stroke` exists in the document model and nothing reads it. Given the SDF an outline is
-  `abs(d) - weight / 2`, so it is cheap when it comes.
-- `clipsContent` is stored on frames and ignored, so children currently draw outside their frame.
+- Only `fills[0]` and `strokes[0]` are read. The model holds arrays because Figma stacks paints,
+  and nothing above the first one is drawn.
+- Clipping is honoured per pixel but not yet used to cull. A subtree entirely outside its clipping
+  frame is still walked and packed, only to be thrown away by the fragment shader. Skipping it
+  would be a real win on a deep document and would also make the `culled` figure in the perf
+  readout a lie unless the skipped instances are counted some other way.
 - The selection outline is axis aligned. A rotated node would get an upright box around it.
+- The selection box and the resize handles follow the node's `size`, so an outward stroke sits
+  outside them. That is deliberate, because the handles edit `size` and have to line up with what
+  they change, but it does mean the box is not the drawn bounds.
 - The accent colour is hardcoded in `OverlayInstances` because the renderer has no access to CSS.
   It needs passing in when the theme toggle exists, since dark uses a lighter blue.

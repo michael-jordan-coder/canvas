@@ -1,9 +1,15 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { SceneDocument } from './document.js'
-import { hitTest } from './hit.js'
+import { hitTest, nodesIn } from './hit.js'
 import { translation } from './math.js'
-import { createEllipse, createFrame, createRectangle, type SceneNode } from './node.js'
-import { fromHex } from './paint.js'
+import {
+  createEllipse,
+  createFrame,
+  createRectangle,
+  type FrameNode,
+  type SceneNode,
+} from './node.js'
+import { fromHex, type StrokeAlign } from './paint.js'
 
 /**
  * Rectangle spans (-136,-96) to (4,-6) in world space, the ellipse is centred at (55,55)
@@ -104,8 +110,13 @@ describe('hitTest', () => {
 describe('containment through transforms', () => {
   it('tests in the node own space, so a scaled parent still hits correctly', () => {
     const document = new SceneDocument()
+    // Big enough to hold the child. A frame clips by default, and a frame with no size
+    // clips everything away.
     const parent = document.insert(
-      createFrame({ transform: { a: 2, b: 0, c: 0, d: 2, tx: 100, ty: 0 } }),
+      createFrame({
+        transform: { a: 2, b: 0, c: 0, d: 2, tx: 100, ty: 0 },
+        size: { width: 100, height: 100 },
+      }),
     )
     const child: SceneNode = document.insert(
       createRectangle({
@@ -118,5 +129,154 @@ describe('containment through transforms', () => {
     // The child covers local 10..30, which is world 120..160 after the parent's 2x.
     expect(hitTest(document, { x: 130, y: 20 })?.id).toBe(child.id)
     expect(hitTest(document, { x: 118, y: 20 })?.id).not.toBe(child.id)
+  })
+})
+
+describe('strokes and what you can click', () => {
+  function withStroke(align: StrokeAlign) {
+    const document = new SceneDocument()
+    const rectangle = document.insert(
+      createRectangle({
+        size: { width: 100, height: 60 },
+        strokes: [{ paint: fromHex('#ff0000'), weight: 10, align }],
+      }),
+    )
+    return { document, rectangle }
+  }
+
+  it('reaches out to an outside stroke, because that is drawn and can be seen', () => {
+    const { document, rectangle } = withStroke('outside')
+    // 6 past the right edge, inside the 10 wide band that sits entirely outside it.
+    expect(hitTest(document, { x: 106, y: 30 })?.id).toBe(rectangle.id)
+    expect(hitTest(document, { x: 112, y: 30 })).toBeNull()
+  })
+
+  it('grows by half a weight for a centred stroke', () => {
+    const { document, rectangle } = withStroke('center')
+    expect(hitTest(document, { x: 103, y: 30 })?.id).toBe(rectangle.id)
+    expect(hitTest(document, { x: 107, y: 30 })).toBeNull()
+  })
+
+  it('leaves the footprint alone for an inside stroke', () => {
+    const { document, rectangle } = withStroke('inside')
+    expect(hitTest(document, { x: 99, y: 30 })?.id).toBe(rectangle.id)
+    expect(hitTest(document, { x: 101, y: 30 })).toBeNull()
+  })
+
+  it('widens the corner arc with the stroke rather than squaring it off', () => {
+    const document = new SceneDocument()
+    const rounded = document.insert(
+      createRectangle({
+        size: { width: 100, height: 100 },
+        cornerRadius: 20,
+        strokes: [{ paint: fromHex('#ff0000'), weight: 20, align: 'outside' }],
+      }),
+    )
+    // The outer corner is an arc of radius 40 centred at (20,20), so the diagonal reaches
+    // 20 + 40/sqrt(2) = 48.3 from the centre. A squared off corner would have reached -20,-20.
+    const inside = 20 - 40 / Math.SQRT2 + 0.5
+    expect(hitTest(document, { x: inside, y: inside })?.id).toBe(rounded.id)
+    expect(hitTest(document, { x: -19, y: -19 })).toBeNull()
+  })
+
+  it('reaches out to an outside stroke on an ellipse too', () => {
+    const document = new SceneDocument()
+    const ellipse = document.insert(
+      createEllipse({
+        size: { width: 100, height: 100 },
+        strokes: [{ paint: fromHex('#ff0000'), weight: 10, align: 'outside' }],
+      }),
+    )
+    expect(hitTest(document, { x: 106, y: 50 })?.id).toBe(ellipse.id)
+    expect(hitTest(document, { x: 112, y: 50 })).toBeNull()
+  })
+
+  it('ignores a stroke with no weight', () => {
+    const document = new SceneDocument()
+    document.insert(
+      createRectangle({
+        size: { width: 100, height: 60 },
+        strokes: [{ paint: fromHex('#ff0000'), weight: 0, align: 'outside' }],
+      }),
+    )
+    expect(hitTest(document, { x: 104, y: 30 })).toBeNull()
+  })
+})
+
+describe('clipsContent', () => {
+  /** A 100 square frame with a child hanging 80 past its right edge. */
+  function clipped(clipsContent: boolean) {
+    const document = new SceneDocument()
+    const frame = document.insert(
+      createFrame({ size: { width: 100, height: 100 }, clipsContent }),
+    )
+    const child = document.insert(
+      createRectangle({ transform: translation(60, 40), size: { width: 80, height: 20 } }),
+      frame.id,
+    )
+    return { document, frame, child }
+  }
+
+  it('does not let you click the part of a child that is clipped away', () => {
+    const { document, child } = clipped(true)
+    // Inside the frame, so still visible and still the deepest hit.
+    expect(hitTest(document, { x: 90, y: 50 })?.id).toBe(child.id)
+    // Past the frame's right edge. Nothing is drawn there.
+    expect(hitTest(document, { x: 120, y: 50 })).toBeNull()
+  })
+
+  it('leaves the overhang clickable when the frame does not clip', () => {
+    const { document, child } = clipped(false)
+    expect(hitTest(document, { x: 120, y: 50 })?.id).toBe(child.id)
+  })
+
+  it('clips to the frame geometry, not to its stroke', () => {
+    const { document, frame } = clipped(true)
+    document.update<FrameNode>(frame.id, {
+      strokes: [{ paint: fromHex('#ff0000'), weight: 40, align: 'outside' }],
+    })
+    // The stroke reaches to 140, but a child is still only allowed inside 100.
+    expect(hitTest(document, { x: 120, y: 50 })?.id).toBe(frame.id)
+  })
+
+  it('honours the corner radius, so a clipped corner is really cut', () => {
+    const document = new SceneDocument()
+    const frame = document.insert(
+      createFrame({ size: { width: 100, height: 100 }, cornerRadius: 40, clipsContent: true }),
+    )
+    const child = document.insert(
+      createRectangle({ size: { width: 100, height: 100 } }),
+      frame.id,
+    )
+    expect(hitTest(document, { x: 50, y: 50 })?.id).toBe(child.id)
+    // Well outside the radius 40 arc centred at (40,40).
+    expect(hitTest(document, { x: 4, y: 4 })).toBeNull()
+  })
+
+  it('compounds through nested clipping frames', () => {
+    const document = new SceneDocument()
+    const outer = document.insert(createFrame({ size: { width: 100, height: 100 } }))
+    const inner = document.insert(
+      createFrame({ transform: translation(50, 0), size: { width: 100, height: 100 } }),
+      outer.id,
+    )
+    const child = document.insert(
+      createRectangle({ size: { width: 100, height: 100 } }),
+      inner.id,
+    )
+    // The child survives only where both frames overlap, world 50 to 100.
+    expect(hitTest(document, { x: 75, y: 50 })?.id).toBe(child.id)
+    expect(hitTest(document, { x: 120, y: 50 })).toBeNull()
+  })
+
+  it('keeps a clipped child out of a marquee that only touches its overhang', () => {
+    const { document } = clipped(true)
+    expect(nodesIn(document, { x: 110, y: 40, width: 40, height: 20 })).toEqual([])
+  })
+
+  it('still catches a clipped child where it is actually visible', () => {
+    const { document, child } = clipped(true)
+    const caught = nodesIn(document, { x: 80, y: 40, width: 40, height: 20 })
+    expect(caught.map((node) => node.id)).toContain(child.id)
   })
 })

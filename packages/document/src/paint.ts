@@ -25,6 +25,41 @@ export interface Stroke {
   align: StrokeAlign
 }
 
+/**
+ * Where the middle of the stroke sits, as a signed distance from the shape's edge.
+ *
+ * The renderer and hit testing both work from the same signed distance `d`, negative inside
+ * the shape. A stroke is the band `abs(d - offset) <= weight / 2`, so alignment is one number
+ * rather than three code paths.
+ */
+export function strokeOffset(stroke: Stroke): number {
+  switch (stroke.align) {
+    case 'inside':
+      return -stroke.weight / 2
+    case 'outside':
+      return stroke.weight / 2
+    case 'center':
+      return 0
+  }
+}
+
+/**
+ * How far the stroke reaches past the shape's own edge, never negative.
+ *
+ * This is what the quad has to be padded by before drawing, and what the clickable area has
+ * to grow by. An inside stroke returns 0, which is why it is the only alignment that leaves
+ * a node's footprint alone.
+ */
+export function strokeOutset(stroke: Stroke): number {
+  return Math.max(0, strokeOffset(stroke) + stroke.weight / 2)
+}
+
+/** The stroke a node actually paints, if any. One stroke for now, like one fill. */
+export function activeStroke(strokes: readonly Stroke[]): Stroke | undefined {
+  const stroke = strokes[0]
+  return stroke && stroke.weight > 0 ? stroke : undefined
+}
+
 export function solid(r: number, g: number, b: number, a = 1): SolidPaint {
   return { type: 'solid', color: { r, g, b, a } }
 }

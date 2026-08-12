@@ -5,13 +5,18 @@ interface NumberFieldProps {
   label: string
   value: number
   onCommit: (value: number) => void
+  /**
+   * Put the label in the panel's shared 40px column instead of the one character one, so a
+   * word like "Weight" lines up with the rows above it rather than sitting on its own grid.
+   */
+  wide?: boolean
 }
 
 /**
  * Commits on blur and on Enter, reverts on Escape. While typing, the draft string is held
  * locally so an intermediate value like "-" or "1." never reaches the document.
  */
-export function NumberField({ label, value, onCommit }: NumberFieldProps): ReactElement {
+export function NumberField({ label, value, onCommit, wide }: NumberFieldProps): ReactElement {
   const [draft, setDraft] = useState<string | null>(null)
   const rounded = Math.round(value * 100) / 100
 
@@ -23,7 +28,7 @@ export function NumberField({ label, value, onCommit }: NumberFieldProps): React
   }
 
   return (
-    <label className={styles.field}>
+    <label className={wide ? `${styles.field} ${styles.wide}` : styles.field}>
       <span className={styles.label}>{label}</span>
       <input
         className={styles.input}

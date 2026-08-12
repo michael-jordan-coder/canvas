@@ -27,18 +27,86 @@
   padding: var(--space-3);
 }
 
-.row {
+.stack {
   display: flex;
-  align-items: center;
-  gap: var(--space-3);
+  flex-direction: column;
+  gap: var(--space-1);
   padding: var(--space-3) calc(var(--space-3) + var(--space-2));
 }
 
-.swatch {
-  display: block;
-  flex: none;
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--row-height);
+  cursor: pointer;
 }
 
-.hex {
-  font-variant-numeric: tabular-nums;
+.checkbox {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  /* The one place a native control is allowed to be blue, and it means the same thing the
+     accent always means: this is on. */
+  accent-color: var(--accent);
+}
+
+/* A paint row with a control pinned to its right end. */
+.headed {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.headed > *:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.add,
+.remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--row-height);
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition:
+    background var(--duration) var(--ease),
+    color var(--duration) var(--ease);
+}
+
+.add {
+  justify-content: flex-start;
+  margin-left: calc(var(--space-2) * -1);
+}
+
+.remove {
+  flex: none;
+  width: var(--row-height);
+  padding: 0;
+}
+
+.add:hover,
+.remove:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.add:active,
+.remove:active {
+  background: var(--pressed);
+}
+
+.add:focus-visible,
+.remove:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }

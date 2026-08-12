@@ -1,23 +1,26 @@
 import source from '../shaders/shape.wgsl?raw'
 
-const BYTES_PER_INSTANCE = 64
+const BYTES_PER_INSTANCE = 80
 
 /**
  * One pipeline for every shape in the document.
  *
  * The vertex buffer steps per instance rather than per vertex, so the four quad corners are
- * shared by every shape and only the 64 bytes describing each one are read separately.
+ * shared by every shape and only the 80 bytes describing each one are read separately.
  */
 export function createShapePipeline(
   device: GPUDevice,
   format: GPUTextureFormat,
   cameraLayout: GPUBindGroupLayout,
+  clipLayout: GPUBindGroupLayout,
 ): GPURenderPipeline {
   const module = device.createShaderModule({ label: 'shape', code: source })
 
   return device.createRenderPipeline({
     label: 'shape',
-    layout: device.createPipelineLayout({ bindGroupLayouts: [cameraLayout] }),
+    // The clip table is a second group rather than a second binding in the first, so the
+    // overlay pipeline can keep sharing the matrix layout without knowing clips exist.
+    layout: device.createPipelineLayout({ bindGroupLayouts: [cameraLayout, clipLayout] }),
     vertex: {
       module,
       entryPoint: 'vs',
@@ -30,6 +33,7 @@ export function createShapePipeline(
             { shaderLocation: 1, offset: 16, format: 'float32x4' },
             { shaderLocation: 2, offset: 32, format: 'float32x4' },
             { shaderLocation: 3, offset: 48, format: 'float32x4' },
+            { shaderLocation: 4, offset: 64, format: 'float32x4' },
           ],
         },
       ],

@@ -1,36 +1,58 @@
 /**
  * A fake GPUDevice, enough to test the instance builders without a GPU.
  *
- * They only ever call `createBuffer` and `queue.writeBuffer`, so capturing the second gives
- * the exact bytes the GPU would have received. This is what makes packing bugs catchable:
- * a wrong offset or a missing field shows up as a number in the wrong slot rather than as a
- * shape drawn in the wrong place.
+ * They only ever create buffers and bind groups and call `queue.writeBuffer`, so capturing
+ * the last of those gives the exact bytes the GPU would have received. This is what makes
+ * packing bugs catchable: a wrong offset or a missing field shows up as a number in the
+ * wrong slot rather than as a shape drawn in the wrong place.
+ *
+ * Uploads are kept per buffer label, because more than one builder writes during a single
+ * sync and a single slot would only ever hold whichever went last.
  */
 export interface StubDevice {
   device: GPUDevice
-  /** The most recent upload, as floats. */
-  written(): Float32Array
+  /** The most recent upload to the named buffer, as floats. */
+  written(label?: string): Float32Array
+}
+
+const SHAPES = 'shape instances'
+
+interface StubBuffer {
+  label: string
+  destroy: () => void
 }
 
 export function createStubDevice(): StubDevice {
-  // A browser global the builders reference at runtime. Node has no such thing.
-  const global = globalThis as { GPUBufferUsage?: { VERTEX: number; COPY_DST: number } }
-  global.GPUBufferUsage ??= { VERTEX: 0x20, COPY_DST: 0x08 }
+  // Browser globals the builders reference at runtime. Node has no such thing, and the
+  // WebGPU types describe them as interfaces rather than plain records, so the cast goes
+  // through unknown.
+  const global = globalThis as unknown as {
+    GPUBufferUsage?: Record<string, number>
+    GPUShaderStage?: Record<string, number>
+  }
+  global.GPUBufferUsage ??= { VERTEX: 0x20, COPY_DST: 0x08, UNIFORM: 0x40, STORAGE: 0x80 }
+  global.GPUShaderStage ??= { VERTEX: 0x1, FRAGMENT: 0x2, COMPUTE: 0x4 }
 
-  let captured = new Float32Array(0)
+  const uploads = new Map<string, Float32Array>()
+  const empty = new Float32Array(0)
 
   const device = {
-    createBuffer: () => ({ destroy: () => {} }),
+    createBuffer: ({ label }: { label?: string }): StubBuffer => ({
+      label: label ?? '',
+      destroy: () => {},
+    }),
+    createBindGroupLayout: () => ({}),
+    createBindGroup: () => ({}),
     queue: {
-      writeBuffer: (_buffer: unknown, _offset: number, data: ArrayBuffer) => {
-        captured = new Float32Array(data)
+      writeBuffer: (buffer: StubBuffer, _offset: number, data: ArrayBuffer) => {
+        uploads.set(buffer.label, new Float32Array(data))
       },
     },
     // The real thing has dozens of members this never touches, so it is cast rather than
     // implemented. Narrowing that cast would mean stubbing the whole WebGPU surface.
   } as unknown as GPUDevice
 
-  return { device, written: () => captured }
+  return { device, written: (label = SHAPES) => uploads.get(label) ?? empty }
 }
 
 /** Reads field `slot` of instance `index`, given a stride in floats. */

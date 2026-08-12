@@ -6,13 +6,21 @@ import {
   createRectangle,
   fromHex,
   translation,
+  type StrokeAlign,
 } from '@figma-canvas/document'
 import type { Camera, Viewport } from '../camera.js'
+import { ClipRegions, createClipBindGroupLayout } from './ClipRegions.js'
 import { ShapeInstances } from './ShapeInstances.js'
-import { createStubDevice, instanceAt } from './testing/stubDevice.js'
+import { createStubDevice, instanceAt, type StubDevice } from './testing/stubDevice.js'
 
-/** linear (4) + origin and size (4) + colour (4) + params (4). */
-const STRIDE = 16
+/** The builder needs somewhere to record clipping frames, whether or not the scene has any. */
+function build(stubbed: StubDevice): ShapeInstances {
+  const clips = new ClipRegions(stubbed.device, createClipBindGroupLayout(stubbed.device))
+  return new ShapeInstances(stubbed.device, clips)
+}
+
+/** linear (4) + origin and size (4) + colour (4) + params (4) + flags (4). */
+const STRIDE = 20
 
 /** Wide enough that the seeded scene is entirely inside it, so nothing is culled. */
 const viewport: Viewport = { width: 2000, height: 2000 }
@@ -24,10 +32,13 @@ const FIELD = {
   width: 6,
   height: 7,
   red: 8,
+  green: 9,
   blue: 10,
   alpha: 11,
   cornerRadius: 12,
   kind: 13,
+  strokeWeight: 14,
+  strokeOffset: 15,
 } as const
 
 function scene() {
@@ -67,7 +78,7 @@ let instances: ShapeInstances
 beforeEach(() => {
   world = scene()
   stub = createStubDevice()
-  instances = new ShapeInstances(stub.device)
+  instances = build(stub)
   instances.sync(world.document, camera, viewport)
 })
 
@@ -121,6 +132,119 @@ describe('ShapeInstances', () => {
     // Same array instance means writeBuffer was never called again.
     expect(stub.written()).toBe(before)
   })
+
+  it('leaves the stroke fields at zero on a fill', () => {
+    expect(field(1, FIELD.strokeWeight)).toBe(0)
+    expect(field(1, FIELD.strokeOffset)).toBe(0)
+  })
+})
+
+describe('strokes', () => {
+  function stroked(align: StrokeAlign, weight = 4) {
+    const document = new SceneDocument()
+    const rectangle = document.insert(
+      createRectangle({
+        size: { width: 100, height: 60 },
+        fills: [fromHex('#0a7cff')],
+        strokes: [{ paint: fromHex('#ff0000'), weight, align }],
+      }),
+    )
+    const stubbed = createStubDevice()
+    const builder = build(stubbed)
+    builder.sync(document, camera, viewport)
+    return {
+      document,
+      rectangle,
+      builder,
+      at: (index: number, slot: number) => instanceAt(stubbed.written(), STRIDE, index, slot),
+    }
+  }
+
+  it('adds a second instance for the stroke, sharing the geometry of the fill', () => {
+    const { builder, at } = stroked('center')
+    expect(builder.count).toBe(2)
+    expect(at(1, FIELD.width)).toBe(at(0, FIELD.width))
+    expect(at(1, FIELD.originX)).toBe(at(0, FIELD.originX))
+    expect(at(1, FIELD.cornerRadius)).toBe(at(0, FIELD.cornerRadius))
+  })
+
+  it('gives the stroke its own colour rather than the fill colour', () => {
+    const { at } = stroked('center')
+    expect(at(0, FIELD.red)).toBeCloseTo(10 / 255, 4)
+    expect(at(1, FIELD.red)).toBe(1)
+    expect(at(1, FIELD.green)).toBe(0)
+  })
+
+  it('packs the stroke after the fill, so it paints on top of it', () => {
+    const { at } = stroked('center')
+    expect(at(0, FIELD.strokeWeight)).toBe(0)
+    expect(at(1, FIELD.strokeWeight)).toBe(4)
+  })
+
+  // The band is `abs(d - offset) <= weight / 2` around a distance that is negative inside
+  // the shape, so alignment is entirely carried by the sign of the offset.
+  it('turns alignment into a signed offset', () => {
+    expect(stroked('inside').at(1, FIELD.strokeOffset)).toBe(-2)
+    expect(stroked('center').at(1, FIELD.strokeOffset)).toBe(0)
+    expect(stroked('outside').at(1, FIELD.strokeOffset)).toBe(2)
+  })
+
+  it('draws a stroke on a node with no fill at all', () => {
+    const document = new SceneDocument()
+    document.insert(
+      createRectangle({
+        size: { width: 100, height: 60 },
+        strokes: [{ paint: fromHex('#ff0000'), weight: 2, align: 'center' }],
+      }),
+    )
+    const builder = build(createStubDevice())
+    builder.sync(document, camera, viewport)
+    expect(builder.count).toBe(1)
+  })
+
+  it('ignores a stroke with no weight', () => {
+    const { builder } = stroked('center', 0)
+    expect(builder.count).toBe(1)
+  })
+
+  it('puts a frame stroke after its children, so contents cannot paint over it', () => {
+    const document = new SceneDocument()
+    const frame = document.insert(
+      createFrame({
+        size: { width: 200, height: 200 },
+        fills: [fromHex('#ffffff')],
+        strokes: [{ paint: fromHex('#ff0000'), weight: 2, align: 'inside' }],
+      }),
+    )
+    document.insert(
+      createRectangle({ size: { width: 200, height: 200 }, fills: [fromHex('#000000')] }),
+      frame.id,
+    )
+    const stubbed = createStubDevice()
+    const builder = build(stubbed)
+    builder.sync(document, camera, viewport)
+
+    // Frame fill, child fill, then the frame's own stroke last.
+    expect(builder.count).toBe(3)
+    expect(instanceAt(stubbed.written(), STRIDE, 2, FIELD.strokeWeight)).toBe(2)
+  })
+
+  it('culls an outward stroke by its own reach, not the node box', () => {
+    const document = new SceneDocument()
+    // A 100 wide viewport sees x from -50 to 50 plus half a viewport of margin, so out to
+    // 100. The node starts at 130 and is invisible, but a 60 wide outside stroke reaches
+    // back to 100 and has to survive.
+    document.insert(
+      createRectangle({
+        transform: translation(130, 0),
+        size: { width: 40, height: 40 },
+        strokes: [{ paint: fromHex('#ff0000'), weight: 60, align: 'outside' }],
+      }),
+    )
+    const builder = build(createStubDevice())
+    builder.sync(document, { x: 0, y: 0, zoom: 1 }, { width: 100, height: 100 })
+    expect(builder.count).toBe(1)
+  })
 })
 
 describe('culling', () => {
@@ -145,7 +269,7 @@ describe('culling', () => {
 
   it('submits only what is near the view', () => {
     const document = spread()
-    const builder = new ShapeInstances(createStubDevice().device)
+    const builder = build(createStubDevice())
     builder.sync(document, { x: 0, y: 0, zoom: 1 }, small)
 
     expect(builder.count).toBeGreaterThan(0)
@@ -163,7 +287,7 @@ describe('culling', () => {
         fills: [fromHex('#0a7cff')],
       }),
     )
-    const builder = new ShapeInstances(createStubDevice().device)
+    const builder = build(createStubDevice())
     builder.sync(document, { x: 0, y: 0, zoom: 1 }, small)
     expect(builder.count).toBe(1)
   })
@@ -171,7 +295,7 @@ describe('culling', () => {
   it('does not rebuild while the camera stays inside the built margin', () => {
     const document = spread()
     const stubbed = createStubDevice()
-    const builder = new ShapeInstances(stubbed.device)
+    const builder = build(stubbed)
     builder.sync(document, { x: 0, y: 0, zoom: 1 }, small)
 
     const before = stubbed.written()
@@ -183,7 +307,7 @@ describe('culling', () => {
   it('rebuilds once the camera leaves the region it was built for', () => {
     const document = spread()
     const stubbed = createStubDevice()
-    const builder = new ShapeInstances(stubbed.device)
+    const builder = build(stubbed)
     builder.sync(document, { x: 0, y: 0, zoom: 1 }, small)
 
     const before = stubbed.written()
@@ -194,9 +318,152 @@ describe('culling', () => {
 
   it('shows everything when the whole scene fits on screen', () => {
     const document = spread()
-    const builder = new ShapeInstances(createStubDevice().device)
+    const builder = build(createStubDevice())
     builder.sync(document, { x: 10_000, y: 0, zoom: 0.02 }, { width: 4000, height: 4000 })
     expect(builder.culled).toBe(0)
     expect(builder.count).toBe(100)
+  })
+})
+
+describe('clipsContent', () => {
+  /** worldInverse as 3 padded columns, then size, radius and the enclosing clip. */
+  const CLIP_STRIDE = 16
+  const CLIP = {
+    a: 0,
+    b: 1,
+    pad0: 2,
+    c: 4,
+    d: 5,
+    pad1: 6,
+    tx: 8,
+    ty: 9,
+    one: 10,
+    width: 12,
+    height: 13,
+    radius: 14,
+    parent: 15,
+  } as const
+
+  const INSTANCE_CLIP = 16
+
+  function read(stubbed: StubDevice) {
+    return {
+      instance: (index: number, slot: number) =>
+        instanceAt(stubbed.written(), STRIDE, index, slot),
+      clip: (index: number, slot: number) =>
+        instanceAt(stubbed.written('clip regions'), CLIP_STRIDE, index, slot),
+    }
+  }
+
+  function frameWith(clipsContent: boolean) {
+    const document = new SceneDocument()
+    const frame = document.insert(
+      createFrame({
+        transform: translation(40, 25),
+        size: { width: 100, height: 80 },
+        cornerRadius: 6,
+        fills: [fromHex('#ffffff')],
+        clipsContent,
+      }),
+    )
+    document.insert(
+      createRectangle({ size: { width: 20, height: 20 }, fills: [fromHex('#0a7cff')] }),
+      frame.id,
+    )
+    const stubbed = createStubDevice()
+    const builder = build(stubbed)
+    builder.sync(document, camera, viewport)
+    return { document, frame, builder, ...read(stubbed) }
+  }
+
+  it('records nothing and points every instance at no clip when nothing clips', () => {
+    const { instance } = frameWith(false)
+    expect(instance(0, INSTANCE_CLIP)).toBe(-1)
+    expect(instance(1, INSTANCE_CLIP)).toBe(-1)
+  })
+
+  it('puts the children under the frame clip but not the frame itself', () => {
+    const { instance } = frameWith(true)
+    // A frame does not clip its own paint, which is what lets an outward stroke show.
+    expect(instance(0, INSTANCE_CLIP)).toBe(-1)
+    expect(instance(1, INSTANCE_CLIP)).toBe(0)
+  })
+
+  it('stores the inverse world transform, since the shader maps world back into the frame', () => {
+    const { clip } = frameWith(true)
+    expect(clip(0, CLIP.a)).toBe(1)
+    expect(clip(0, CLIP.d)).toBe(1)
+    expect(clip(0, CLIP.tx)).toBe(-40)
+    expect(clip(0, CLIP.ty)).toBe(-25)
+  })
+
+  it('pads each matrix column to 16 bytes', () => {
+    const { clip } = frameWith(true)
+    expect(clip(0, CLIP.pad0)).toBe(0)
+    expect(clip(0, CLIP.pad1)).toBe(0)
+    // The third column is a position, so its homogeneous coordinate is 1, not 0.
+    expect(clip(0, CLIP.one)).toBe(1)
+  })
+
+  it('carries the size and corner radius the clip is shaped by', () => {
+    const { clip } = frameWith(true)
+    expect(clip(0, CLIP.width)).toBe(100)
+    expect(clip(0, CLIP.height)).toBe(80)
+    expect(clip(0, CLIP.radius)).toBe(6)
+    expect(clip(0, CLIP.parent)).toBe(-1)
+  })
+
+  it('chains a nested clip to the one outside it', () => {
+    const document = new SceneDocument()
+    const outer = document.insert(
+      createFrame({ size: { width: 200, height: 200 }, fills: [fromHex('#ffffff')] }),
+    )
+    const inner = document.insert(
+      createFrame({
+        transform: translation(20, 20),
+        size: { width: 100, height: 100 },
+        fills: [fromHex('#eeeeee')],
+      }),
+      outer.id,
+    )
+    document.insert(
+      createRectangle({ size: { width: 40, height: 40 }, fills: [fromHex('#0a7cff')] }),
+      inner.id,
+    )
+    const stubbed = createStubDevice()
+    const builder = build(stubbed)
+    builder.sync(document, camera, viewport)
+    const { instance, clip } = read(stubbed)
+
+    expect(clip(0, CLIP.parent)).toBe(-1)
+    expect(clip(1, CLIP.parent)).toBe(0)
+    // Outer fill unclipped, inner fill clipped by the outer, leaf clipped by the inner.
+    expect(instance(0, INSTANCE_CLIP)).toBe(-1)
+    expect(instance(1, INSTANCE_CLIP)).toBe(0)
+    expect(instance(2, INSTANCE_CLIP)).toBe(1)
+  })
+
+  it('leaves a frame stroke on the outer clip, so it is not cut by its own frame', () => {
+    const document = new SceneDocument()
+    const frame = document.insert(
+      createFrame({
+        size: { width: 100, height: 100 },
+        fills: [fromHex('#ffffff')],
+        strokes: [{ paint: fromHex('#ff0000'), weight: 8, align: 'outside' }],
+      }),
+    )
+    document.insert(
+      createRectangle({ size: { width: 20, height: 20 }, fills: [fromHex('#0a7cff')] }),
+      frame.id,
+    )
+    const stubbed = createStubDevice()
+    const builder = build(stubbed)
+    builder.sync(document, camera, viewport)
+    const { instance } = read(stubbed)
+
+    // Frame fill, child fill, frame stroke.
+    expect(instance(0, INSTANCE_CLIP)).toBe(-1)
+    expect(instance(1, INSTANCE_CLIP)).toBe(0)
+    expect(instance(2, INSTANCE_CLIP)).toBe(-1)
   })
 })

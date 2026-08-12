@@ -1,0 +1,47 @@
+.field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--row-height);
+}
+
+.label {
+  flex: none;
+  width: 40px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+/*
+ * A native colour input, sized down to a swatch. Its own value carries the colour, which is
+ * how a per-node colour reaches the screen without ever becoming an inline style.
+ */
+.swatch {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: none;
+  cursor: pointer;
+}
+
+.swatch::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.swatch::-webkit-color-swatch {
+  border: none;
+  border-radius: 1px;
+}
+
+.swatch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.hex {
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}

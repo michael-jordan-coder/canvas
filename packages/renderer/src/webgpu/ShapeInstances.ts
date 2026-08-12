@@ -1,19 +1,25 @@
 import {
   IDENTITY,
+  activeStroke,
   invert,
   isPainted,
   multiply,
+  strokeOffset,
+  strokeOutset,
   transformRect,
   type Mat2D,
   type PaintedNode,
+  type RGBA,
   type Rect,
   type SceneDocument,
   type SceneNode,
+  type Stroke,
 } from '@figma-canvas/document'
 import { viewMatrix, type Camera, type Viewport } from '../camera.js'
+import { NO_CLIP, type ClipRegions } from './ClipRegions.js'
 
-/** linear (4) + origin and size (4) + color (4) + params (4). */
-const FLOATS_PER_INSTANCE = 16
+/** linear (4) + origin and size (4) + colour (4) + params (4) + flags (4). */
+const FLOATS_PER_INSTANCE = 20
 const BYTES_PER_INSTANCE = FLOATS_PER_INSTANCE * 4
 
 const KIND_RECTANGULAR = 0
@@ -74,6 +80,7 @@ function expand(rect: Rect, fraction: number): Rect {
  */
 export class ShapeInstances {
   #device: GPUDevice
+  #clips: ClipRegions
   #buffer: GPUBuffer | null = null
   #capacity = 0
   #data = new Float32Array(0)
@@ -83,15 +90,16 @@ export class ShapeInstances {
   /** The world region the current buffer was built for, viewport plus margin. */
   #coverage: Rect | null = null
 
-  constructor(device: GPUDevice) {
+  constructor(device: GPUDevice, clips: ClipRegions) {
     this.#device = device
+    this.#clips = clips
   }
 
   get count(): number {
     return this.#count
   }
 
-  /** Nodes skipped as off screen by the last build. */
+  /** Instances skipped as off screen by the last build. A stroke counts separately from its fill. */
   get culled(): number {
     return this.#culled
   }
@@ -111,18 +119,26 @@ export class ShapeInstances {
     this.#coverage = expand(view, CULL_MARGIN)
     this.#count = 0
     this.#culled = 0
+    this.#clips.reset()
 
     // Depth first from the root, accumulating the transform on the way down. Asking the
     // document for each node's world transform separately would walk back up to the root
     // once per node, turning an O(n) pass into O(n * depth).
     for (const child of document.getChildren(document.rootId)) {
-      this.#collect(document, child, IDENTITY, 1)
+      this.#collect(document, child, IDENTITY, 1, NO_CLIP)
     }
 
     this.#upload()
+    this.#clips.upload()
   }
 
-  #collect(document: SceneDocument, node: SceneNode, parent: Mat2D, opacity: number): void {
+  #collect(
+    document: SceneDocument,
+    node: SceneNode,
+    parent: Mat2D,
+    opacity: number,
+    clip: number,
+  ): void {
     // A hidden node hides its children with it.
     if (!node.visible) return
 
@@ -130,31 +146,65 @@ export class ShapeInstances {
     const world = multiply(node.transform, parent)
     const alpha = opacity * node.opacity
 
-    if (isPainted(node) && node.fills[0]) {
-      // Tested per node rather than per subtree, because `clipsContent` is not honoured yet
-      // and a child may sit well outside the bounds of its parent.
-      const bounds = transformRect(world, {
-        x: 0,
-        y: 0,
-        width: node.size.width,
-        height: node.size.height,
-      })
-      if (this.#coverage && intersects(this.#coverage, bounds)) this.#push(node, world, alpha)
-      else this.#culled += 1
-    }
+    const painted = isPainted(node) ? node : null
+    const fill = painted?.fills[0]
+    // The frame's own paint answers to the clip it sits in, not to its own. A frame does not
+    // clip itself, which is what lets an outward stroke on a clipping frame still show.
+    if (painted && fill) this.#submit(painted, world, alpha, fill.color, clip)
+
+    const inner =
+      node.type === 'frame' && node.clipsContent
+        ? this.#clips.push(world, node.size, node.cornerRadius, clip)
+        : clip
 
     for (const child of document.getChildren(node.id)) {
-      this.#collect(document, child, world, alpha)
+      this.#collect(document, child, world, alpha, inner)
     }
+
+    // After the children, so a frame's stroke sits above its contents rather than being
+    // painted over by them. A leaf has no children, so for a rectangle or an ellipse this is
+    // the same position it would have had before the loop.
+    const stroke = painted ? activeStroke(painted.strokes) : undefined
+    if (painted && stroke) this.#submit(painted, world, alpha, stroke.paint.color, clip, stroke)
   }
 
-  #push(node: PaintedNode, world: Mat2D, alpha: number): void {
-    const fill = node.fills[0]
-    if (!fill) return
+  /** Culls against the region the buffer was built for, then packs what survives. */
+  #submit(
+    node: PaintedNode,
+    world: Mat2D,
+    alpha: number,
+    color: RGBA,
+    clip: number,
+    stroke?: Stroke,
+  ): void {
+    // An outward stroke covers more ground than the node's own box, so it is culled against
+    // its own bounds rather than the node's. Tested per instance rather than per subtree,
+    // because a child may sit well outside the bounds of its parent unless the parent clips.
+    const pad = stroke ? strokeOutset(stroke) : 0
+    const bounds = transformRect(world, {
+      x: -pad,
+      y: -pad,
+      width: node.size.width + pad * 2,
+      height: node.size.height + pad * 2,
+    })
 
+    if (!this.#coverage || !intersects(this.#coverage, bounds)) {
+      this.#culled += 1
+      return
+    }
+    this.#push(node, world, alpha, color, clip, stroke)
+  }
+
+  #push(
+    node: PaintedNode,
+    world: Mat2D,
+    alpha: number,
+    color: RGBA,
+    clip: number,
+    stroke?: Stroke,
+  ): void {
     this.#reserve(this.#count + 1)
     const at = this.#count * FLOATS_PER_INSTANCE
-    const { color } = fill
 
     this.#data[at + 0] = world.a
     this.#data[at + 1] = world.b
@@ -173,8 +223,17 @@ export class ShapeInstances {
 
     this.#data[at + 12] = node.type === 'ellipse' ? 0 : node.cornerRadius
     this.#data[at + 13] = node.type === 'ellipse' ? KIND_ELLIPTICAL : KIND_RECTANGULAR
-    this.#data[at + 14] = 0
-    this.#data[at + 15] = 0
+    // Weight 0 marks a fill. Anything above it is a band around the shape's edge, and the
+    // offset says where that band sits relative to the edge.
+    this.#data[at + 14] = stroke ? stroke.weight : 0
+    this.#data[at + 15] = stroke ? strokeOffset(stroke) : 0
+
+    // Which clipping frame this instance answers to, or NO_CLIP. The other three floats are
+    // padding the vertex format needs anyway, so the next per instance flag is free.
+    this.#data[at + 16] = clip
+    this.#data[at + 17] = 0
+    this.#data[at + 18] = 0
+    this.#data[at + 19] = 0
 
     this.#count += 1
   }
