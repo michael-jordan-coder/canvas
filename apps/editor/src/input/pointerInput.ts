@@ -1,11 +1,18 @@
 import {
   applyToPoint,
+  containerAt,
+  createEllipse,
+  createFrame,
+  createRectangle,
+  fromHex,
   hitTest,
   invert,
+  nodesIn,
   type Mat2D,
   type NodeId,
   type Rect,
   type SceneDocument,
+  type SceneNode,
   type Vec2,
 } from '@figma-canvas/document'
 import {
@@ -27,11 +34,42 @@ export interface PointerInputOptions {
   getCamera: () => Camera
   setCamera: (camera: Camera) => void
   getTool: () => ToolId
+  setTool: (tool: ToolId) => void
   getSelection: () => readonly NodeId[]
   setSelection: (ids: readonly NodeId[]) => void
   toggleInSelection: (id: NodeId) => void
+  /** The rubber band rectangle in CSS pixels, or null when there is not one. */
+  setMarquee: (rect: Rect | null) => void
   /** Ask for a redraw. Document edits redraw on their own, camera moves do not. */
   requestDraw: () => void
+}
+
+/** Drawn when a shape tool is clicked rather than dragged. */
+const DEFAULT_SHAPE_SIZE = 100
+
+const SHAPE_TOOLS = new Set<ToolId>(['rectangle', 'ellipse', 'frame'])
+
+function createNodeForTool(tool: ToolId): SceneNode | null {
+  switch (tool) {
+    case 'rectangle':
+      return createRectangle({ fills: [fromHex('#c4c4c4')] })
+    case 'ellipse':
+      return createEllipse({ fills: [fromHex('#c4c4c4')] })
+    case 'frame':
+      return createFrame({ fills: [fromHex('#ffffff')] })
+    default:
+      return null
+  }
+}
+
+/** A rect from two corners, in any drag direction. */
+function rectBetween(a: Vec2, b: Vec2): Rect {
+  return {
+    x: Math.min(a.x, b.x),
+    y: Math.min(a.y, b.y),
+    width: Math.abs(b.x - a.x),
+    height: Math.abs(b.y - a.y),
+  }
 }
 
 interface DraggedNode {
@@ -48,7 +86,7 @@ interface ResizedNode extends ResizeTarget {
 
 interface Drag {
   pointerId: number
-  kind: 'move' | 'pan' | 'resize'
+  kind: 'move' | 'pan' | 'resize' | 'create' | 'marquee'
   startScreen: Vec2
   startWorld: Vec2
   startCamera: Camera
@@ -63,6 +101,12 @@ interface Drag {
   resizing?: ResizedNode[]
   /** Kept so a modifier pressed without moving the pointer can re-apply the resize. */
   lastScreen?: Vec2
+  /** Create only: the node once the drag has actually produced one, and its parent. */
+  created?: NodeId
+  createParent?: NodeId
+  createTool?: ToolId
+  /** Marquee only: what was selected before it started, kept so shift can extend it. */
+  marqueeBase?: readonly NodeId[]
 }
 
 interface Modifiers {
@@ -122,9 +166,29 @@ export function createPointerInput(options: PointerInputOptions): () => void {
 
     if (event.button !== 0) return
 
+    const tool = options.getTool()
+    if (SHAPE_TOOLS.has(tool)) {
+      drag = {
+        pointerId: event.pointerId,
+        kind: 'create',
+        startScreen: screen,
+        startWorld: world,
+        startCamera: options.getCamera(),
+        grouped: false,
+        duplicateOnMove: false,
+        nodes: [],
+        createTool: tool,
+        // Whatever frame the drag began inside becomes the parent, so the new shape moves
+        // with that frame afterwards rather than merely sitting on top of it.
+        createParent: containerAt(document, world).id,
+      }
+      canvas.setPointerCapture(event.pointerId)
+      return
+    }
+
     // Handles are tested before the shapes under them, because a handle sits on the very edge
     // of its node and the node would otherwise win every grab.
-    const grabbed = options.getTool() === 'move' ? handleUnder(screen) : null
+    const grabbed = tool === 'move' ? handleUnder(screen) : null
     if (grabbed) {
       const bounds = selectionWorldBounds(document, options.getSelection())
       if (bounds) {
@@ -161,7 +225,22 @@ export function createPointerInput(options: PointerInputOptions): () => void {
 
     const hit = hitTest(document, world)
     if (!hit) {
-      options.setSelection([])
+      // Empty canvas: clear, then rubber band. Clearing up front rather than on release is
+      // what makes a click on nothing feel immediate.
+      const base = event.shiftKey ? options.getSelection() : []
+      if (!event.shiftKey) options.setSelection([])
+      drag = {
+        pointerId: event.pointerId,
+        kind: 'marquee',
+        startScreen: screen,
+        startWorld: world,
+        startCamera: options.getCamera(),
+        grouped: false,
+        duplicateOnMove: false,
+        nodes: [],
+        marqueeBase: base,
+      }
+      canvas.setPointerCapture(event.pointerId)
       return
     }
 
@@ -233,6 +312,33 @@ export function createPointerInput(options: PointerInputOptions): () => void {
 
     if (drag.kind === 'resize') {
       applyResize(drag, screen, { fromCentre: event.altKey, constrain: event.shiftKey })
+      return
+    }
+
+    if (drag.kind === 'create') {
+      applyCreate(drag, screen, { fromCentre: event.altKey, constrain: event.shiftKey })
+      return
+    }
+
+    if (drag.kind === 'marquee') {
+      options.setMarquee(rectBetween(drag.startScreen, screen))
+
+      const caught = nodesIn(document, rectBetween(drag.startWorld, worldOf(screen))).map(
+        (node) => node.id,
+      )
+      // Shift extends whatever was already selected, matching shift clicking.
+      const base = drag.marqueeBase ?? []
+      const next = [...base, ...caught.filter((id) => !base.includes(id))]
+
+      // Only when it actually differs. Selection lives in React state, and writing it on
+      // every frame of the rubber band would re-render the layers tree sixty times a second
+      // to arrive at the same list.
+      const current = options.getSelection()
+      const changed =
+        next.length !== current.length || next.some((id, index) => id !== current[index])
+      if (changed) options.setSelection(next)
+
+      options.requestDraw()
       return
     }
 
@@ -327,9 +433,109 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     })
   }
 
+  /**
+   * Draws the new shape live as the pointer moves.
+   *
+   * The node is created on the first move rather than on pointer down, so a click that turns
+   * out to be a click and not a drag can take the default size path instead of leaving a
+   * zero sized node behind for a frame.
+   */
+  const applyCreate = (current: Drag, screen: Vec2, modifiers: Modifiers): void => {
+    const tool = current.createTool
+    const parentId = current.createParent
+    if (!tool || !parentId) return
+
+    const pointer = worldOf(screen)
+    let box = rectBetween(current.startWorld, pointer)
+    if (modifiers.constrain) {
+      const side = Math.max(box.width, box.height)
+      box = { ...box, width: side, height: side }
+    }
+    if (modifiers.fromCentre) {
+      // The start point becomes the centre rather than a corner.
+      const halfWidth = Math.abs(pointer.x - current.startWorld.x)
+      const halfHeight = Math.abs(pointer.y - current.startWorld.y)
+      const side = modifiers.constrain ? Math.max(halfWidth, halfHeight) : 0
+      const width = modifiers.constrain ? side * 2 : halfWidth * 2
+      const height = modifiers.constrain ? side * 2 : halfHeight * 2
+      box = {
+        x: current.startWorld.x - width / 2,
+        y: current.startWorld.y - height / 2,
+        width,
+        height,
+      }
+    }
+
+    if (!current.grouped) {
+      current.grouped = true
+      document.beginHistoryGroup()
+    }
+
+    // Positions are stored in the parent's space, so a shape drawn inside a scaled frame
+    // lands under the cursor rather than somewhere proportionally off.
+    const toParent = invert(document.worldTransform(parentId))
+    const origin = applyToPoint(toParent, { x: box.x, y: box.y })
+    const far = applyToPoint(toParent, { x: box.x + box.width, y: box.y + box.height })
+    const size = { width: Math.abs(far.x - origin.x), height: Math.abs(far.y - origin.y) }
+
+    if (!current.created) {
+      const node = createNodeForTool(tool)
+      if (!node) return
+      document.insert(node, parentId)
+      current.created = node.id
+      options.setSelection([node.id])
+    }
+
+    document.update(current.created, {
+      transform: { ...IDENTITY_MATRIX, tx: origin.x, ty: origin.y },
+      size,
+    })
+  }
+
+  /** A click with a shape tool, rather than a drag, drops a default sized node there. */
+  const createAtPoint = (current: Drag): void => {
+    const tool = current.createTool
+    const parentId = current.createParent
+    if (!tool || !parentId) return
+
+    const node = createNodeForTool(tool)
+    if (!node) return
+
+    const toParent = invert(document.worldTransform(parentId))
+    const origin = applyToPoint(toParent, current.startWorld)
+
+    document.transact(() => {
+      document.insert(node, parentId)
+      document.update(node.id, {
+        transform: { ...IDENTITY_MATRIX, tx: origin.x, ty: origin.y },
+        size: { width: DEFAULT_SHAPE_SIZE, height: DEFAULT_SHAPE_SIZE },
+      })
+      options.setSelection([node.id])
+    })
+  }
+
   const onPointerUp = (event: PointerEvent): void => {
     if (!drag || event.pointerId !== drag.pointerId) return
     if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId)
+
+    if (drag.kind === 'create') {
+      // Never moved, so it was a click. One default sized shape at the click point.
+      if (!drag.created) createAtPoint(drag)
+      if (drag.grouped) document.endHistoryGroup()
+      // Back to move, the way Figma's tools are one shot rather than modal. Without this,
+      // the very next click draws a second shape instead of selecting the first.
+      options.setTool('move')
+      drag = null
+      return
+    }
+
+    if (drag.kind === 'marquee') {
+      options.setMarquee(null)
+      options.requestDraw()
+      drag = null
+      return
+    }
+
     if (drag.grouped) document.endHistoryGroup()
     drag = null
   }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react'
+import type { Rect } from '@figma-canvas/document'
 import {
   DEFAULT_CAMERA,
   createWebGPURenderer,
@@ -23,6 +24,8 @@ export function CanvasHost(): ReactElement {
   // A ref, not state. The camera changes at pointer rate and no component renders from it,
   // so putting it in state would mean a React render per wheel event for nothing.
   const cameraRef = useRef<Camera>(DEFAULT_CAMERA)
+  // Also a ref: it changes on every frame of a rubber band and no component renders from it.
+  const marqueeRef = useRef<Rect | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -43,7 +46,11 @@ export function CanvasHost(): ReactElement {
       frame = requestAnimationFrame(() => {
         if (!renderer) return
         const startedAt = performance.now()
-        renderer.render({ camera: cameraRef.current, selection: useUI.getState().selection })
+        renderer.render({
+          camera: cameraRef.current,
+          selection: useUI.getState().selection,
+          marquee: marqueeRef.current,
+        })
         const finishedAt = performance.now()
 
         frameStats.frameMs = finishedAt - startedAt
@@ -106,9 +113,13 @@ export function CanvasHost(): ReactElement {
         cameraRef.current = next
       },
       getTool: () => useUI.getState().tool,
+      setTool: (tool) => useUI.getState().setTool(tool),
       getSelection: () => useUI.getState().selection,
       setSelection: (ids) => useUI.getState().setSelection(ids),
       toggleInSelection: (id) => useUI.getState().toggleInSelection(id),
+      setMarquee: (rect) => {
+        marqueeRef.current = rect
+      },
       requestDraw: draw,
     })
 

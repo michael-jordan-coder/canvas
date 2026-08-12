@@ -75,7 +75,13 @@ class WebGPURenderer implements Renderer {
     // Returns immediately unless the document changed or the view left the built region.
     this.#shapes.sync(this.#document, view.camera, this.#viewport)
     // Always rebuilt: it is expressed in screen pixels, so the camera moving changes it.
-    this.#overlay.sync(this.#document, view.selection, view.camera, this.#viewport)
+    this.#overlay.sync(
+      this.#document,
+      view.selection,
+      view.camera,
+      this.#viewport,
+      view.marquee,
+    )
 
     const encoder = device.createCommandEncoder()
     const pass = encoder.beginRenderPass({

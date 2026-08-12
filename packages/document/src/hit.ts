@@ -1,6 +1,14 @@
 import type { SceneDocument } from './document.js'
-import { applyToPoint, invert, multiply, type Mat2D, type Vec2 } from './math.js'
-import { isPainted, type SceneNode } from './node.js'
+import {
+  applyToPoint,
+  invert,
+  multiply,
+  transformRect,
+  type Mat2D,
+  type Rect,
+  type Vec2,
+} from './math.js'
+import { canHaveChildren, isPainted, type NodeId, type SceneNode } from './node.js'
 
 /**
  * Distance from a point to a rounded box, negative inside. The same function the fragment
@@ -52,6 +60,103 @@ export function hitTest(document: SceneDocument, point: Vec2): SceneNode | null 
 }
 
 const IDENTITY_MATRIX: Mat2D = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 }
+
+/**
+ * The deepest node that can hold children containing a world point, falling back to the page.
+ *
+ * This is what decides the parent of a newly drawn shape: draw inside a frame and the shape
+ * belongs to that frame, so it moves with it afterwards.
+ */
+export function containerAt(document: SceneDocument, point: Vec2): SceneNode {
+  const page = document.expectNode(document.rootId)
+
+  const descend = (node: SceneNode, parent: Mat2D): SceneNode | null => {
+    if (!node.visible || node.locked) return null
+    const world = multiply(node.transform, parent)
+
+    const children = document.getChildren(node.id)
+    for (let index = children.length - 1; index >= 0; index -= 1) {
+      const child = children[index]
+      if (!child) continue
+      const found = descend(child, world)
+      if (found) return found
+    }
+
+    if (!canHaveChildren(node)) return null
+    return containsPoint(node, applyToPoint(invert(world), point)) ? node : null
+  }
+
+  for (const child of [...document.getChildren(page.id)].reverse()) {
+    const found = descend(child, IDENTITY_MATRIX)
+    if (found) return found
+  }
+  return page
+}
+
+/** A node's axis aligned bounds in world space. */
+export function worldBounds(document: SceneDocument, id: NodeId): Rect | null {
+  const node = document.getNode(id)
+  if (!node) return null
+  return transformRect(document.worldTransform(id), {
+    x: 0,
+    y: 0,
+    width: node.size.width,
+    height: node.size.height,
+  })
+}
+
+function overlaps(a: Rect, b: Rect): boolean {
+  return (
+    a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
+  )
+}
+
+function encloses(outer: Rect, inner: Rect): boolean {
+  return (
+    inner.x >= outer.x &&
+    inner.y >= outer.y &&
+    inner.x + inner.width <= outer.x + outer.width &&
+    inner.y + inner.height <= outer.y + outer.height
+  )
+}
+
+/**
+ * Everything a marquee catches, in world space.
+ *
+ * Shapes are caught by touching the rect at all, which is what Figma does and what people
+ * expect from a rubber band. Containers are the exception: a frame is only caught when the
+ * marquee swallows it whole, and otherwise the marquee reaches inside and catches the
+ * children it touches. Without that, dragging a small box inside a large frame would select
+ * the frame, since the frame is certainly touching the rect.
+ */
+export function nodesIn(document: SceneDocument, rect: Rect): SceneNode[] {
+  const found: SceneNode[] = []
+
+  const visit = (node: SceneNode, parent: Mat2D): void => {
+    if (!node.visible || node.locked) return
+    const world = multiply(node.transform, parent)
+    const bounds = transformRect(world, {
+      x: 0,
+      y: 0,
+      width: node.size.width,
+      height: node.size.height,
+    })
+
+    if (canHaveChildren(node)) {
+      if (encloses(rect, bounds)) {
+        found.push(node)
+        return
+      }
+      for (const child of document.getChildren(node.id)) visit(child, world)
+      return
+    }
+
+    if (overlaps(rect, bounds)) found.push(node)
+  }
+
+  for (const child of document.getChildren(document.rootId)) visit(child, IDENTITY_MATRIX)
+  return found
+}
 
 function hitNode(
   document: SceneDocument,

@@ -1,4 +1,4 @@
-import type { NodeId, SceneDocument } from '@figma-canvas/document'
+import type { NodeId, Rect, SceneDocument } from '@figma-canvas/document'
 import type { Camera, Viewport } from './camera.js'
 
 export interface RendererInit {
@@ -16,6 +16,8 @@ export interface RendererInit {
 export interface ViewState {
   camera: Camera
   selection: readonly NodeId[]
+  /** The rubber band rectangle while one is being dragged, in CSS pixels. */
+  marquee?: Rect | null
 }
 
 /**

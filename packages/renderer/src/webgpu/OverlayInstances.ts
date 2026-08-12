@@ -18,6 +18,8 @@ const BYTES_PER_INSTANCE = FLOATS_PER_INSTANCE * 4
 const ACCENT = { r: 10 / 255, g: 124 / 255, b: 1, a: 1 }
 const HANDLE_FILL = { r: 1, g: 1, b: 1, a: 1 }
 const TRANSPARENT = { r: 0, g: 0, b: 0, a: 0 }
+/** Faint enough to read what is underneath, which is the whole point of a rubber band. */
+const MARQUEE_FILL = { r: 10 / 255, g: 124 / 255, b: 1, a: 0.1 }
 
 
 /**
@@ -51,13 +53,26 @@ export class OverlayInstances {
     selection: readonly NodeId[],
     camera: Camera,
     viewport: Viewport,
+    marquee?: Rect | null,
   ): void {
     this.#count = 0
-    if (selection.length === 0) return
+
+    if (marquee) {
+      // Already in CSS pixels, so it needs no camera at all: the rubber band is drawn where
+      // the pointer is, not where the world is.
+      this.#push(marquee, MARQUEE_FILL, ACCENT, OUTLINE_WIDTH, 0)
+    }
 
     // The same box the input layer hit tests against, so what you can grab is what you see.
-    const outline = selectionScreenBounds(document, selection, camera, viewport)
-    if (!outline) return
+    const outline =
+      selection.length > 0
+        ? selectionScreenBounds(document, selection, camera, viewport)
+        : null
+
+    if (!outline) {
+      if (this.#count > 0) this.#upload()
+      return
+    }
 
     this.#push(outline, TRANSPARENT, ACCENT, OUTLINE_WIDTH, 0)
 
