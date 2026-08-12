@@ -7,6 +7,28 @@
   touch-action: none;
 }
 
+/* Set from the input layer as a data attribute, so the cursors live here rather than being
+   assigned into element.style from JavaScript. */
+.canvas[data-handle='nw'],
+.canvas[data-handle='se'] {
+  cursor: nwse-resize;
+}
+
+.canvas[data-handle='ne'],
+.canvas[data-handle='sw'] {
+  cursor: nesw-resize;
+}
+
+.canvas[data-handle='n'],
+.canvas[data-handle='s'] {
+  cursor: ns-resize;
+}
+
+.canvas[data-handle='e'],
+.canvas[data-handle='w'] {
+  cursor: ew-resize;
+}
+
 .error {
   position: absolute;
   inset: auto 0 0 0;

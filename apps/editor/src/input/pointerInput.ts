@@ -4,11 +4,21 @@ import {
   invert,
   type Mat2D,
   type NodeId,
+  type Rect,
   type SceneDocument,
   type Vec2,
 } from '@figma-canvas/document'
-import { screenToWorld, type Camera, type Viewport } from '@figma-canvas/renderer'
+import {
+  handleAt,
+  screenToWorld,
+  selectionScreenBounds,
+  selectionWorldBounds,
+  type Camera,
+  type HandleId,
+  type Viewport,
+} from '@figma-canvas/renderer'
 import { duplicateNodes } from '../state/duplicate'
+import { anchorFor, resizedNode, scaleFactors, type ResizeTarget } from './resize'
 import type { ToolId } from '../state/uiStore'
 
 export interface PointerInputOptions {
@@ -32,9 +42,13 @@ interface DraggedNode {
   startLocal: Vec2
 }
 
+interface ResizedNode extends ResizeTarget {
+  id: NodeId
+}
+
 interface Drag {
   pointerId: number
-  kind: 'move' | 'pan'
+  kind: 'move' | 'pan' | 'resize'
   startScreen: Vec2
   startWorld: Vec2
   startCamera: Camera
@@ -43,6 +57,19 @@ interface Drag {
   grouped: boolean
   /** Option was held at pointer down, so the first move drags a copy instead. */
   duplicateOnMove: boolean
+  /** Resize only: which handle was grabbed, and the box as it was when it was grabbed. */
+  handle?: HandleId
+  startBounds?: Rect
+  resizing?: ResizedNode[]
+  /** Kept so a modifier pressed without moving the pointer can re-apply the resize. */
+  lastScreen?: Vec2
+}
+
+interface Modifiers {
+  /** Anchor to the centre rather than the opposite corner. */
+  fromCentre: boolean
+  /** Hold the aspect ratio. */
+  constrain: boolean
 }
 
 /**
@@ -95,6 +122,43 @@ export function createPointerInput(options: PointerInputOptions): () => void {
 
     if (event.button !== 0) return
 
+    // Handles are tested before the shapes under them, because a handle sits on the very edge
+    // of its node and the node would otherwise win every grab.
+    const grabbed = options.getTool() === 'move' ? handleUnder(screen) : null
+    if (grabbed) {
+      const bounds = selectionWorldBounds(document, options.getSelection())
+      if (bounds) {
+        drag = {
+          pointerId: event.pointerId,
+          kind: 'resize',
+          startScreen: screen,
+          startWorld: world,
+          startCamera: options.getCamera(),
+          grouped: false,
+          duplicateOnMove: false,
+          nodes: [],
+          handle: grabbed,
+          startBounds: bounds,
+          resizing: options.getSelection().flatMap((id) => {
+            const node = document.getNode(id)
+            if (!node || node.locked) return []
+            return [
+              {
+                id,
+                parentInverse: invert(
+                  node.parent ? document.worldTransform(node.parent) : IDENTITY_MATRIX,
+                ),
+                startTransform: { ...node.transform },
+                startSize: { ...node.size },
+              },
+            ]
+          }),
+        }
+        canvas.setPointerCapture(event.pointerId)
+        return
+      }
+    }
+
     const hit = hitTest(document, world)
     if (!hit) {
       options.setSelection([])
@@ -127,6 +191,14 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     canvas.setPointerCapture(event.pointerId)
   }
 
+  /** The handle under a screen point, or null. Also drives the cursor. */
+  const handleUnder = (screen: Vec2): HandleId | null => {
+    const selection = options.getSelection()
+    if (selection.length === 0) return null
+    const bounds = selectionScreenBounds(document, selection, options.getCamera(), viewportOf())
+    return bounds ? handleAt(bounds, screen) : null
+  }
+
   /** Everything needed to move a set of nodes with the pointer, resolved once at grab time. */
   const draggedNodesFor = (ids: readonly NodeId[], world: Vec2): DraggedNode[] =>
     ids.flatMap((id) => {
@@ -146,8 +218,23 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     })
 
   const onPointerMove = (event: PointerEvent): void => {
-    if (!drag || event.pointerId !== drag.pointerId) return
     const screen = screenOf(event)
+
+    if (!drag) {
+      // Not dragging, so this is only about what the cursor should look like. The value goes
+      // on a data attribute rather than into style, so the cursors stay in the stylesheet.
+      const hovered = options.getTool() === 'move' ? handleUnder(screen) : null
+      if (hovered) canvas.dataset['handle'] = hovered
+      else delete canvas.dataset['handle']
+      return
+    }
+
+    if (event.pointerId !== drag.pointerId) return
+
+    if (drag.kind === 'resize') {
+      applyResize(drag, screen, { fromCentre: event.altKey, constrain: event.shiftKey })
+      return
+    }
 
     if (drag.kind === 'pan') {
       // Screen pixels to world units. Dragging right moves the camera left.
@@ -211,6 +298,35 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     })
   }
 
+  const applyResize = (current: Drag, screen: Vec2, modifiers: Modifiers): void => {
+    const { handle, startBounds, resizing } = current
+    if (!handle || !startBounds || !resizing || resizing.length === 0) return
+
+    current.lastScreen = screen
+    const pointer = worldOf(screen)
+    // Recomputed every time rather than at grab time, so alt can be pressed or released
+    // partway through a resize and the anchor follows.
+    const anchor = anchorFor(handle, startBounds, modifiers.fromCentre)
+    const { sx, sy } = scaleFactors(startBounds, handle, anchor, pointer, {
+      constrain: modifiers.constrain,
+    })
+
+    if (!current.grouped) {
+      current.grouped = true
+      document.beginHistoryGroup()
+    }
+
+    document.transact(() => {
+      for (const target of resizing) {
+        // The anchor is shared in world space, but each node is written in its parent's, so
+        // it is mapped across per node. The factors themselves need no conversion.
+        const anchorInParent = applyToPoint(target.parentInverse, anchor)
+        const { transform, size } = resizedNode(target, anchorInParent, sx, sy)
+        document.update(target.id, { transform, size })
+      }
+    })
+  }
+
   const onPointerUp = (event: PointerEvent): void => {
     if (!drag || event.pointerId !== drag.pointerId) return
     if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId)
@@ -218,11 +334,28 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     drag = null
   }
 
+  /**
+   * A modifier pressed or released mid resize has to take effect at once.
+   *
+   * Without this, holding shift changes nothing until the pointer moves again, which reads
+   * as the shortcut being broken rather than merely late.
+   */
+  const reapplyResize = (event: KeyboardEvent): void => {
+    if (!drag || drag.kind !== 'resize' || !drag.lastScreen) return
+    if (event.key !== 'Alt' && event.key !== 'Shift') return
+    applyResize(drag, drag.lastScreen, {
+      fromCentre: event.altKey,
+      constrain: event.shiftKey,
+    })
+  }
+
   const onKeyDown = (event: KeyboardEvent): void => {
     if (event.code === 'Space') spaceHeld = true
+    reapplyResize(event)
   }
   const onKeyUp = (event: KeyboardEvent): void => {
     if (event.code === 'Space') spaceHeld = false
+    reapplyResize(event)
   }
 
   canvas.addEventListener('pointerdown', onPointerDown)

@@ -1,11 +1,11 @@
+import type { NodeId, Rect, SceneDocument } from '@figma-canvas/document'
+import type { Camera, Viewport } from '../camera.js'
 import {
-  multiply,
-  transformRect,
-  type NodeId,
-  type Rect,
-  type SceneDocument,
-} from '@figma-canvas/document'
-import { viewMatrix, type Camera, type Viewport } from '../camera.js'
+  handlePoints,
+  selectionScreenBounds,
+  HANDLE_SIZE,
+  OUTLINE_WIDTH,
+} from '../selection.js'
 
 /** rect (4) + fill (4) + stroke (4) + params (4). Same stride as a shape instance. */
 const FLOATS_PER_INSTANCE = 16
@@ -19,10 +19,6 @@ const ACCENT = { r: 10 / 255, g: 124 / 255, b: 1, a: 1 }
 const HANDLE_FILL = { r: 1, g: 1, b: 1, a: 1 }
 const TRANSPARENT = { r: 0, g: 0, b: 0, a: 0 }
 
-const HANDLE_SIZE = 8
-const OUTLINE_WIDTH = 1
-/** Below this, the edge handles would collide with the corner ones, so they are dropped. */
-const EDGE_HANDLE_MINIMUM = 24
 
 /**
  * The selection outline and its handles, built fresh every frame in CSS pixels.
@@ -57,42 +53,15 @@ export class OverlayInstances {
     viewport: Viewport,
   ): void {
     this.#count = 0
-    if (selection.length === 0) {
-      return
-    }
+    if (selection.length === 0) return
 
-    const bounds = this.#selectionBounds(document, selection, camera, viewport)
-    if (!bounds) return
+    // The same box the input layer hit tests against, so what you can grab is what you see.
+    const outline = selectionScreenBounds(document, selection, camera, viewport)
+    if (!outline) return
 
-    // Half pixel offset so a one pixel stroke, which straddles the boundary, lands on a
-    // whole pixel instead of across two.
-    const outline: Rect = {
-      x: Math.round(bounds.x) + 0.5,
-      y: Math.round(bounds.y) + 0.5,
-      width: Math.round(bounds.width),
-      height: Math.round(bounds.height),
-    }
     this.#push(outline, TRANSPARENT, ACCENT, OUTLINE_WIDTH, 0)
 
-    const right = outline.x + outline.width
-    const bottom = outline.y + outline.height
-    const middleX = outline.x + outline.width / 2
-    const middleY = outline.y + outline.height / 2
-
-    const points: Array<[number, number]> = [
-      [outline.x, outline.y],
-      [right, outline.y],
-      [outline.x, bottom],
-      [right, bottom],
-    ]
-    if (outline.width >= EDGE_HANDLE_MINIMUM) {
-      points.push([middleX, outline.y], [middleX, bottom])
-    }
-    if (outline.height >= EDGE_HANDLE_MINIMUM) {
-      points.push([outline.x, middleY], [right, middleY])
-    }
-
-    for (const [x, y] of points) {
+    for (const { x, y } of handlePoints(outline)) {
       const centreX = Math.round(x)
       const centreY = Math.round(y)
       this.#push(
@@ -110,45 +79,6 @@ export class OverlayInstances {
     }
 
     this.#upload()
-  }
-
-  /**
-   * Union of the selected nodes' bounds, in screen pixels.
-   *
-   * Axis aligned, so a rotated node gets an upright box around it rather than a rotated one.
-   * Nothing can rotate through the UI yet. When that changes, a single selection should
-   * carry the node's own basis instead of collapsing to an AABB.
-   */
-  #selectionBounds(
-    document: SceneDocument,
-    selection: readonly NodeId[],
-    camera: Camera,
-    viewport: Viewport,
-  ): Rect | null {
-    const view = viewMatrix(camera, viewport)
-    let minX = Infinity
-    let minY = Infinity
-    let maxX = -Infinity
-    let maxY = -Infinity
-
-    for (const id of selection) {
-      const node = document.getNode(id)
-      if (!node) continue
-      const screenFromLocal = multiply(document.worldTransform(id), view)
-      const box = transformRect(screenFromLocal, {
-        x: 0,
-        y: 0,
-        width: node.size.width,
-        height: node.size.height,
-      })
-      minX = Math.min(minX, box.x)
-      minY = Math.min(minY, box.y)
-      maxX = Math.max(maxX, box.x + box.width)
-      maxY = Math.max(maxY, box.y + box.height)
-    }
-
-    if (!Number.isFinite(minX)) return null
-    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
   }
 
   #push(
