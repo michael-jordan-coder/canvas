@@ -66,6 +66,19 @@ export function applyToPoint(m: Mat2D, p: Vec2): Vec2 {
   }
 }
 
+/**
+ * A direction rather than a position: the same map without the translation.
+ *
+ * An offset between two points has no origin to be moved from, so translating it would count
+ * the translation twice.
+ */
+export function applyToVector(m: Mat2D, v: Vec2): Vec2 {
+  return {
+    x: m.a * v.x + m.c * v.y,
+    y: m.b * v.x + m.d * v.y,
+  }
+}
+
 export function invert(m: Mat2D): Mat2D {
   const det = m.a * m.d - m.b * m.c
   if (det === 0) throw new Error('Matrix is not invertible')
@@ -97,4 +110,69 @@ export function transformRect(m: Mat2D, rect: Rect): Rect {
 
 export function rectContains(rect: Rect, p: Vec2): boolean {
   return p.x >= rect.x && p.y >= rect.y && p.x <= rect.x + rect.width && p.y <= rect.y + rect.height
+}
+
+/**
+ * The rotation baked into a matrix, in radians.
+ *
+ * Read off the first basis vector, which is where the x axis ended up. That is exact for the
+ * rotation and scale this editor produces, and it stays meaningful under a non uniform scale
+ * because it only asks about one axis.
+ */
+export function angleOf(m: Mat2D): number {
+  return Math.atan2(m.b, m.a)
+}
+
+/** Scale along each axis, with the y sign carrying any flip the matrix encodes. */
+export function scaleOf(m: Mat2D): Vec2 {
+  const determinant = m.a * m.d - m.b * m.c
+  return {
+    x: Math.hypot(m.a, m.b),
+    y: Math.hypot(m.c, m.d) * (determinant < 0 ? -1 : 1),
+  }
+}
+
+/** Rotation about an arbitrary point rather than the origin. */
+export function rotateAbout(centre: Vec2, radians: number): Mat2D {
+  return multiply(
+    multiply(translation(-centre.x, -centre.y), rotation(radians)),
+    translation(centre.x, centre.y),
+  )
+}
+
+/**
+ * The same matrix turned to an absolute angle, keeping its scale and translation.
+ *
+ * Skew is discarded, because the result is rebuilt from an angle and two scales and there is
+ * nowhere left to put it. Nothing in the editor produces skew, and Figma's rotation field
+ * behaves the same way.
+ */
+export function withAngle(m: Mat2D, radians: number): Mat2D {
+  const scale = scaleOf(m)
+  const cos = Math.cos(radians)
+  const sin = Math.sin(radians)
+  return {
+    a: scale.x * cos,
+    b: scale.x * sin,
+    c: -scale.y * sin,
+    d: scale.y * cos,
+    tx: m.tx,
+    ty: m.ty,
+  }
+}
+
+export function degrees(radians: number): number {
+  return (radians * 180) / Math.PI
+}
+
+export function radians(degrees: number): number {
+  return (degrees * Math.PI) / 180
+}
+
+/** Folds an angle into -180 to 180, so a field never reads 359 where it means -1. */
+export function normalizeDegrees(value: number): number {
+  const wrapped = ((value + 180) % 360 + 360) % 360 - 180
+  // -180 and 180 are the same angle. Preferring 180 keeps a half turn from flipping sign
+  // the moment it is typed in.
+  return wrapped === -180 ? 180 : wrapped
 }

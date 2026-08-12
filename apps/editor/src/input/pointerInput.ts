@@ -1,4 +1,5 @@
 import {
+  angleOf,
   applyToPoint,
   containerAt,
   createEllipse,
@@ -13,19 +14,35 @@ import {
   type Rect,
   type SceneDocument,
   type SceneNode,
+  type Size,
   type Vec2,
 } from '@figma-canvas/document'
 import {
-  handleAt,
+  grabAt,
   screenToWorld,
-  selectionScreenBounds,
+  selectionBox,
   selectionWorldBounds,
   type Camera,
+  type GrabId,
   type HandleId,
   type Viewport,
 } from '@figma-canvas/renderer'
 import { duplicateNodes } from '../state/duplicate'
-import { anchorFor, resizedNode, scaleFactors, type ResizeTarget } from './resize'
+import {
+  applyRotation,
+  rotateTargetsFor,
+  snapDelta,
+  worldCentre,
+  type RotateTarget,
+} from '../state/rotate'
+import {
+  anchorFor,
+  localBox,
+  resizedInPlace,
+  resizedNode,
+  scaleFactors,
+  type ResizeTarget,
+} from './resize'
 import type { ToolId } from '../state/uiStore'
 
 export interface PointerInputOptions {
@@ -84,9 +101,22 @@ interface ResizedNode extends ResizeTarget {
   id: NodeId
 }
 
+/**
+ * A single node resizes in its own frame, so dragging its east handle lengthens it along its
+ * own x axis however it is turned. Resolved once at grab time: the linear part does not change
+ * during a resize, but the translation does, so recomputing this mid gesture would drift.
+ */
+interface LocalResize {
+  id: NodeId
+  /** World to the node's own units, as it was when the handle was grabbed. */
+  worldInverse: Mat2D
+  startTransform: Mat2D
+  startSize: Size
+}
+
 interface Drag {
   pointerId: number
-  kind: 'move' | 'pan' | 'resize' | 'create' | 'marquee'
+  kind: 'move' | 'pan' | 'resize' | 'rotate' | 'create' | 'marquee'
   startScreen: Vec2
   startWorld: Vec2
   startCamera: Camera
@@ -99,6 +129,8 @@ interface Drag {
   handle?: HandleId
   startBounds?: Rect
   resizing?: ResizedNode[]
+  /** Set instead of `resizing` when exactly one node is selected. */
+  localResize?: LocalResize
   /** Kept so a modifier pressed without moving the pointer can re-apply the resize. */
   lastScreen?: Vec2
   /** Create only: the node once the drag has actually produced one, and its parent. */
@@ -107,6 +139,12 @@ interface Drag {
   createTool?: ToolId
   /** Marquee only: what was selected before it started, kept so shift can extend it. */
   marqueeBase?: readonly NodeId[]
+  /** Rotate only: the pivot in world space, the angle the pointer began at, and the targets. */
+  pivot?: Vec2
+  startAngle?: number
+  /** The one node's own angle at grab time, or null for a multiple selection. */
+  startNodeAngle?: number | null
+  rotating?: RotateTarget[]
 }
 
 interface Modifiers {
@@ -188,8 +226,34 @@ export function createPointerInput(options: PointerInputOptions): () => void {
 
     // Handles are tested before the shapes under them, because a handle sits on the very edge
     // of its node and the node would otherwise win every grab.
-    const grabbed = tool === 'move' ? handleUnder(screen) : null
-    if (grabbed) {
+    const grabbed = tool === 'move' ? grabUnder(screen) : null
+
+    if (grabbed === 'rotate') {
+      const ids = options.getSelection()
+      const pivot = selectionPivot(ids)
+      if (pivot) {
+        drag = {
+          pointerId: event.pointerId,
+          kind: 'rotate',
+          startScreen: screen,
+          startWorld: world,
+          startCamera: options.getCamera(),
+          grouped: false,
+          duplicateOnMove: false,
+          nodes: [],
+          pivot,
+          startAngle: Math.atan2(world.y - pivot.y, world.x - pivot.x),
+          // Only a single selection has an angle to land a snap on.
+          startNodeAngle:
+            ids.length === 1 && ids[0] ? angleOf(document.worldTransform(ids[0])) : null,
+          rotating: rotateTargetsFor(document, ids),
+        }
+        canvas.setPointerCapture(event.pointerId)
+        return
+      }
+    }
+
+    if (grabbed && grabbed !== 'rotate') {
       const bounds = selectionWorldBounds(document, options.getSelection())
       if (bounds) {
         drag = {
@@ -203,6 +267,7 @@ export function createPointerInput(options: PointerInputOptions): () => void {
           nodes: [],
           handle: grabbed,
           startBounds: bounds,
+          localResize: localResizeFor(options.getSelection()),
           resizing: options.getSelection().flatMap((id) => {
             const node = document.getNode(id)
             if (!node || node.locked) return []
@@ -270,12 +335,50 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     canvas.setPointerCapture(event.pointerId)
   }
 
-  /** The handle under a screen point, or null. Also drives the cursor. */
-  const handleUnder = (screen: Vec2): HandleId | null => {
+  /** What is under a screen point: a resize handle, the rotate handle, or nothing. */
+  const grabUnder = (screen: Vec2): GrabId | null => {
     const selection = options.getSelection()
     if (selection.length === 0) return null
-    const bounds = selectionScreenBounds(document, selection, options.getCamera(), viewportOf())
-    return bounds ? handleAt(bounds, screen) : null
+    // The drawn box, rotation included, so a handle on a turned node is grabbed where it
+    // actually sits rather than where an upright box would have put it.
+    const box = selectionBox(document, selection, options.getCamera(), viewportOf())
+    return box ? grabAt(box, screen) : null
+  }
+
+  /**
+   * The node to resize in its own frame, if the selection is exactly one.
+   *
+   * More than one has no shared basis to resize along, so the selection box is upright and so
+   * is the resize. That is the same rule `selectionBox` follows, which is what keeps the box
+   * you drag and the maths behind it agreeing.
+   */
+  const localResizeFor = (ids: readonly NodeId[]): LocalResize | undefined => {
+    if (ids.length !== 1) return undefined
+    const id = ids[0]
+    if (!id) return undefined
+    const node = document.getNode(id)
+    if (!node || node.locked) return undefined
+    return {
+      id,
+      worldInverse: invert(document.worldTransform(id)),
+      startTransform: { ...node.transform },
+      startSize: { ...node.size },
+    }
+  }
+
+  /**
+   * The point a rotation turns about.
+   *
+   * The centre of the one node when there is one, so it turns in place, and the centre of the
+   * selection's bounds otherwise, so a group swings together rather than each part spinning
+   * on its own spot.
+   */
+  const selectionPivot = (ids: readonly NodeId[]): Vec2 | null => {
+    if (ids.length === 1 && ids[0]) return worldCentre(document, ids[0])
+    const bounds = selectionWorldBounds(document, ids)
+    return bounds
+      ? { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }
+      : null
   }
 
   /** Everything needed to move a set of nodes with the pointer, resolved once at grab time. */
@@ -302,7 +405,7 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     if (!drag) {
       // Not dragging, so this is only about what the cursor should look like. The value goes
       // on a data attribute rather than into style, so the cursors stay in the stylesheet.
-      const hovered = options.getTool() === 'move' ? handleUnder(screen) : null
+      const hovered = options.getTool() === 'move' ? grabUnder(screen) : null
       if (hovered) canvas.dataset['handle'] = hovered
       else delete canvas.dataset['handle']
       return
@@ -312,6 +415,11 @@ export function createPointerInput(options: PointerInputOptions): () => void {
 
     if (drag.kind === 'resize') {
       applyResize(drag, screen, { fromCentre: event.altKey, constrain: event.shiftKey })
+      return
+    }
+
+    if (drag.kind === 'rotate') {
+      applyRotate(drag, screen, { fromCentre: event.altKey, constrain: event.shiftKey })
       return
     }
 
@@ -405,11 +513,33 @@ export function createPointerInput(options: PointerInputOptions): () => void {
   }
 
   const applyResize = (current: Drag, screen: Vec2, modifiers: Modifiers): void => {
-    const { handle, startBounds, resizing } = current
+    const { handle, startBounds, resizing, localResize } = current
     if (!handle || !startBounds || !resizing || resizing.length === 0) return
 
     current.lastScreen = screen
     const pointer = worldOf(screen)
+
+    if (localResize) {
+      // Everything in the node's own units: the box is at the origin, the anchor is a corner
+      // of it, and the pointer is mapped in. The functions below are the same ones the world
+      // aligned path uses, handed a different frame.
+      const box = localBox(localResize.startSize)
+      const anchor = anchorFor(handle, box, modifiers.fromCentre)
+      const local = applyToPoint(localResize.worldInverse, pointer)
+      const { sx, sy } = scaleFactors(box, handle, anchor, local, {
+        constrain: modifiers.constrain,
+      })
+
+      if (!current.grouped) {
+        current.grouped = true
+        document.beginHistoryGroup()
+      }
+
+      const { transform, size } = resizedInPlace(localResize, anchor, sx, sy)
+      document.update(localResize.id, { transform, size })
+      return
+    }
+
     // Recomputed every time rather than at grab time, so alt can be pressed or released
     // partway through a resize and the anchor follows.
     const anchor = anchorFor(handle, startBounds, modifiers.fromCentre)
@@ -431,6 +561,33 @@ export function createPointerInput(options: PointerInputOptions): () => void {
         document.update(target.id, { transform, size })
       }
     })
+  }
+
+  /**
+   * Turns the selection to follow the pointer around the pivot.
+   *
+   * The angle is measured from the pivot to the pointer and compared with where it was when
+   * the handle was grabbed, so the shape does not jump on the first move: what matters is how
+   * far the pointer has travelled around, not where on the handle it landed.
+   */
+  const applyRotate = (current: Drag, screen: Vec2, modifiers: Modifiers): void => {
+    const { pivot, rotating, startAngle } = current
+    if (!pivot || !rotating || rotating.length === 0 || startAngle === undefined) return
+
+    current.lastScreen = screen
+    const pointer = worldOf(screen)
+    const now = Math.atan2(pointer.y - pivot.y, pointer.x - pivot.x)
+    const raw = now - startAngle
+    const delta = modifiers.constrain
+      ? snapDelta(raw, current.startNodeAngle ?? null)
+      : raw
+
+    if (!current.grouped) {
+      current.grouped = true
+      document.beginHistoryGroup()
+    }
+
+    applyRotation(document, rotating, delta, pivot)
   }
 
   /**
@@ -560,22 +717,21 @@ export function createPointerInput(options: PointerInputOptions): () => void {
    * Without this, holding shift changes nothing until the pointer moves again, which reads
    * as the shortcut being broken rather than merely late.
    */
-  const reapplyResize = (event: KeyboardEvent): void => {
-    if (!drag || drag.kind !== 'resize' || !drag.lastScreen) return
+  const reapplyModifiers = (event: KeyboardEvent): void => {
+    if (!drag || !drag.lastScreen) return
     if (event.key !== 'Alt' && event.key !== 'Shift') return
-    applyResize(drag, drag.lastScreen, {
-      fromCentre: event.altKey,
-      constrain: event.shiftKey,
-    })
+    const modifiers = { fromCentre: event.altKey, constrain: event.shiftKey }
+    if (drag.kind === 'resize') applyResize(drag, drag.lastScreen, modifiers)
+    if (drag.kind === 'rotate') applyRotate(drag, drag.lastScreen, modifiers)
   }
 
   const onKeyDown = (event: KeyboardEvent): void => {
     if (event.code === 'Space') spaceHeld = true
-    reapplyResize(event)
+    reapplyModifiers(event)
   }
   const onKeyUp = (event: KeyboardEvent): void => {
     if (event.code === 'Space') spaceHeld = false
-    reapplyResize(event)
+    reapplyModifiers(event)
   }
 
   canvas.addEventListener('pointerdown', onPointerDown)

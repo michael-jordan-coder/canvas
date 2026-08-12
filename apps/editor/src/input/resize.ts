@@ -1,4 +1,4 @@
-import type { Mat2D, Rect, Size, Vec2 } from '@figma-canvas/document'
+import { applyToVector, type Mat2D, type Rect, type Size, type Vec2 } from '@figma-canvas/document'
 import type { HandleId } from '@figma-canvas/renderer'
 
 export interface ResizeAxes {
@@ -94,6 +94,11 @@ export function scaleFactors(
   return { sx, sy }
 }
 
+/** The node's own box, which is always at the origin: only `size` says how big it is. */
+export function localBox(size: Size): Rect {
+  return { x: 0, y: 0, width: size.width, height: size.height }
+}
+
 export interface ResizeTarget {
   parentInverse: Mat2D
   startTransform: Mat2D
@@ -120,6 +125,42 @@ export function resizedNode(
       ...target.startTransform,
       tx: anchor.x + (target.startTransform.tx - anchor.x) * sx,
       ty: anchor.y + (target.startTransform.ty - anchor.y) * sy,
+    },
+    size: {
+      width: target.startSize.width * sx,
+      height: target.startSize.height * sy,
+    },
+  }
+}
+
+/**
+ * A resize expressed in the node's own frame, which is the only version a rotated node can
+ * use.
+ *
+ * Growing `size` always grows the box away from the node's local origin, so a point that was
+ * at `anchorLocal` ends up at `anchorLocal * scale`. Holding it still therefore means moving
+ * the origin by the difference, and that difference is a direction in the node's frame, so it
+ * goes through the transform's linear part to become an offset in the parent's.
+ *
+ * `anchorLocal` is in the node's own units, unscaled and unrotated, which is what makes this
+ * indifferent to how the node is turned or how its parents are scaled.
+ */
+export function resizedInPlace(
+  target: Pick<ResizeTarget, 'startTransform' | 'startSize'>,
+  anchorLocal: Vec2,
+  sx: number,
+  sy: number,
+): { transform: Mat2D; size: Size } {
+  const shift = applyToVector(target.startTransform, {
+    x: anchorLocal.x * (1 - sx),
+    y: anchorLocal.y * (1 - sy),
+  })
+
+  return {
+    transform: {
+      ...target.startTransform,
+      tx: target.startTransform.tx + shift.x,
+      ty: target.startTransform.ty + shift.y,
     },
     size: {
       width: target.startSize.width * sx,

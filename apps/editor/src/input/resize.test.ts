@@ -1,6 +1,23 @@
 import { describe, expect, it } from 'vitest'
-import { IDENTITY, translation, type Rect } from '@figma-canvas/document'
-import { anchorFor, axesFor, handlePointFor, resizedNode, scaleFactors } from './resize'
+import {
+  IDENTITY,
+  applyToPoint,
+  multiply,
+  radians,
+  rotation,
+  scaling,
+  translation,
+  type Rect,
+} from '@figma-canvas/document'
+import {
+  anchorFor,
+  axesFor,
+  handlePointFor,
+  localBox,
+  resizedInPlace,
+  resizedNode,
+  scaleFactors,
+} from './resize'
 
 /** 100 wide, 50 tall, top left at the origin. */
 const box: Rect = { x: 0, y: 0, width: 100, height: 50 }
@@ -171,5 +188,111 @@ describe('resizedNode', () => {
   it('scales each axis independently for an edge drag', () => {
     const { size } = resizedNode(target, { x: 0, y: 0 }, 1.5, 1)
     expect(size).toEqual({ width: 150, height: 50 })
+  })
+})
+
+describe('resizedInPlace', () => {
+  const start = { startTransform: IDENTITY, startSize: { width: 100, height: 60 } }
+
+  it('grows away from the anchor and leaves the origin alone when anchored there', () => {
+    const result = resizedInPlace(start, { x: 0, y: 0 }, 2, 2)
+    expect(result.size).toEqual({ width: 200, height: 120 })
+    expect(result.transform.tx).toBeCloseTo(0, 10)
+    expect(result.transform.ty).toBeCloseTo(0, 10)
+  })
+
+  it('moves the origin so the far corner holds still', () => {
+    // Anchored at the bottom right, halving the box has to pull the origin in to meet it.
+    const result = resizedInPlace(start, { x: 100, y: 60 }, 0.5, 0.5)
+    expect(result.size).toEqual({ width: 50, height: 30 })
+    expect(result.transform.tx).toBeCloseTo(50, 10)
+    expect(result.transform.ty).toBeCloseTo(30, 10)
+  })
+
+  it('keeps the anchor still in world space on a rotated node', () => {
+    const turned = {
+      startTransform: multiply(rotation(radians(90)), translation(200, 100)),
+      startSize: { width: 100, height: 60 },
+    }
+    const anchor = { x: 0, y: 0 }
+    const before = applyToPoint(turned.startTransform, anchor)
+
+    const result = resizedInPlace(turned, anchor, 3, 3)
+    const after = applyToPoint(result.transform, anchor)
+
+    expect(after.x).toBeCloseTo(before.x, 10)
+    expect(after.y).toBeCloseTo(before.y, 10)
+  })
+
+  it('holds a far anchor still on a rotated node, which the world aligned path cannot', () => {
+    const turned = {
+      startTransform: multiply(rotation(radians(37)), translation(-40, 90)),
+      startSize: { width: 100, height: 60 },
+    }
+    const anchor = { x: 100, y: 60 }
+    const before = applyToPoint(turned.startTransform, anchor)
+
+    const result = resizedInPlace(turned, anchor, 0.4, 1.8)
+    // The anchor is at the far corner, so it is at (w, h) of the new box too.
+    const after = applyToPoint(result.transform, { x: anchor.x * 0.4, y: anchor.y * 1.8 })
+
+    expect(after.x).toBeCloseTo(before.x, 10)
+    expect(after.y).toBeCloseTo(before.y, 10)
+  })
+
+  it('grows along the node own axis, not the screen one', () => {
+    // Turned a quarter turn, so the node's local x points down the screen.
+    const turned = {
+      startTransform: rotation(radians(90)),
+      startSize: { width: 100, height: 60 },
+    }
+    const result = resizedInPlace(turned, { x: 0, y: 0 }, 2, 1)
+    expect(result.size.width).toBe(200)
+    expect(result.size.height).toBe(60)
+
+    // The far edge of the widened box has moved down the screen, not right.
+    const edge = applyToPoint(result.transform, { x: 200, y: 0 })
+    expect(edge.x).toBeCloseTo(0, 10)
+    expect(edge.y).toBeCloseTo(200, 10)
+  })
+
+  it('leaves the rotation and scale of the transform untouched', () => {
+    const turned = {
+      startTransform: multiply(multiply(scaling(2), rotation(radians(25))), translation(5, 7)),
+      startSize: { width: 100, height: 60 },
+    }
+    const result = resizedInPlace(turned, { x: 50, y: 30 }, 1.5, 0.5)
+    expect(result.transform.a).toBeCloseTo(turned.startTransform.a, 10)
+    expect(result.transform.b).toBeCloseTo(turned.startTransform.b, 10)
+    expect(result.transform.c).toBeCloseTo(turned.startTransform.c, 10)
+    expect(result.transform.d).toBeCloseTo(turned.startTransform.d, 10)
+  })
+
+  it('agrees with the world aligned path when the node is not rotated at all', () => {
+    const anchor = { x: 100, y: 60 }
+    const local = resizedInPlace(start, anchor, 0.5, 0.5)
+    const world = resizedNode(
+      { parentInverse: IDENTITY, ...start },
+      // The same anchor, which for an unrotated node at the origin is the same point.
+      anchor,
+      0.5,
+      0.5,
+    )
+    expect(local.transform.tx).toBeCloseTo(world.transform.tx, 10)
+    expect(local.transform.ty).toBeCloseTo(world.transform.ty, 10)
+    expect(local.size).toEqual(world.size)
+  })
+})
+
+describe('localBox', () => {
+  it('is always at the origin, since only size says how big a node is', () => {
+    expect(localBox({ width: 30, height: 40 })).toEqual({ x: 0, y: 0, width: 30, height: 40 })
+  })
+
+  it('feeds the existing anchor and handle maths unchanged', () => {
+    const box = localBox({ width: 100, height: 60 })
+    expect(anchorFor('se', box, false)).toEqual({ x: 0, y: 0 })
+    expect(handlePointFor('se', box)).toEqual({ x: 100, y: 60 })
+    expect(anchorFor('nw', box, false)).toEqual({ x: 100, y: 60 })
   })
 })

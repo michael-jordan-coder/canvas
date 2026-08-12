@@ -1,7 +1,11 @@
 import type { ReactElement } from 'react'
 import {
+  angleOf,
+  degrees,
   fromHex,
   isPainted,
+  normalizeDegrees,
+  radians,
   type FrameNode,
   type PaintedNode,
   type RectangleNode,
@@ -11,6 +15,7 @@ import {
   type StrokeAlign,
 } from '@figma-canvas/document'
 import { scene, useNode } from '../state/scene'
+import { setNodesAngle } from '../state/rotate'
 import { useUI } from '../state/uiStore'
 import { ColorField } from './ColorField'
 import { NumberField } from './NumberField'
@@ -56,6 +61,11 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
       </section>
 
       <section className={styles.grid}>
+        <NumberField
+          label="A"
+          value={normalizeDegrees(degrees(angleOf(scene.worldTransform(node.id))))}
+          onCommit={(value) => setNodesAngle(scene, [node.id], radians(value))}
+        />
         <NumberField
           label="%"
           value={Math.round(node.opacity * 100)}

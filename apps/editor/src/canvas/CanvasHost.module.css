@@ -29,6 +29,12 @@
   cursor: ew-resize;
 }
 
+/* There is no rotate cursor in CSS. Grab is the closest honest signal: it says this thing
+   moves under the pointer, and the handle itself already says which way. */
+.canvas[data-handle='rotate'] {
+  cursor: grab;
+}
+
 .error {
   position: absolute;
   inset: auto 0 0 0;

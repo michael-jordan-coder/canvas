@@ -268,15 +268,50 @@ would have returned had it been callable there.
   the stores through `getState` rather than subscribing, because a drag must not put a React
   render between the pointer and the pixels.
 
-- The selection overlay: outline and eight handles, drawn by a second pipeline bound to a pixels
-  to clip matrix instead of a world to clip one. That is the whole trick. Its geometry is built in
-  CSS pixels and never sees the camera, so a handle is 8px at 10% zoom and at 3000%, and a one
-  pixel outline stays one pixel. Both pipelines share `MatrixUniform`; they differ only in which
-  matrix they are bound to.
+- The selection overlay: outline, eight handles and the rotate handle on its stem, drawn by a
+  second pipeline bound to a pixels to clip matrix instead of a world to clip one. That is the
+  whole trick. Its geometry is built in CSS pixels and never sees the camera, so a handle is 8px
+  at 10% zoom and at 3000%, and a one pixel outline stays one pixel. Both pipelines share
+  `MatrixUniform`; they differ only in which matrix they are bound to.
+
+- Rotation. The transform was always a full affine, so the renderer needed no change at all: a
+  turned node draws correctly the moment its matrix says so. What rotation actually cost was
+  everything built on the assumption that a selection is upright.
 
 `Renderer.render` takes a `ViewState` rather than a camera, because selection is drawn but is not
 in the document. It is passed in once per frame instead of read, so the dependency keeps pointing
 one way. `CanvasHost` subscribes to the UI store separately to redraw when selection changes.
+
+## Rotation, and the one rule it added
+
+`SelectionBox` is an upright rect plus an angle, not four corner points. Everything asking where
+something is on the box maps the point in through `toBoxSpace` first, so `handleAt`, `handlePoints`
+and the overlay all kept the axis aligned code they already had and gained rotation for free.
+
+**A single selection carries its own basis; a multiple selection collapses to upright.** Two nodes
+at different angles have no shared basis, and that one rule decides three separate things: the box
+that is drawn, the box that is grabbed, and the frame a resize happens in. They agree because they
+all ask the same question.
+
+That is why resize has two paths. A single node resizes in its own frame, so dragging its east
+handle lengthens it along its own x axis however it is turned. The pure functions are the same
+ones the world aligned path uses, handed the node's local box and the pointer mapped into local
+space instead. Growing `size` always grows away from the local origin, so holding an anchor still
+means shifting the origin by `anchorLocal * (1 - scale)`, put through the transform's linear part
+to land in the parent's units. A multiple selection keeps the world aligned path.
+
+Rotation composes in world space and maps back through the inverse parent world. Adding to a
+node's local transform would be wrong for anything inside a rotated or scaled frame, since its
+local units are not the ones being turned.
+
+During a drag the rotation applied each frame is **absolute from the grab**, never accumulated.
+An incremental delta could not walk an angle back down, which is exactly what has to happen the
+instant shift is pressed mid gesture.
+
+The pivot differs by gesture on purpose. Dragging the handle turns one node about its own centre
+and a group about the centre of its bounds, so a group swings together. The panel's angle field
+turns every node about its own centre, because typing 30 into a row means each in place rather
+than sweeping them into an arc.
 
 Clicking selects the deepest node under the cursor, so a rectangle inside a frame selects the
 rectangle. Figma selects the outermost frame and makes you double click to descend. That is a UI
@@ -306,9 +341,13 @@ A few things are worth knowing because the code looks finished but is not:
   frame is still walked and packed, only to be thrown away by the fragment shader. Skipping it
   would be a real win on a deep document and would also make the `culled` figure in the perf
   readout a lie unless the skipped instances are counted some other way.
-- The selection outline is axis aligned. A rotated node would get an upright box around it.
 - The selection box and the resize handles follow the node's `size`, so an outward stroke sits
   outside them. That is deliberate, because the handles edit `size` and have to line up with what
   they change, but it does mean the box is not the drawn bounds.
+- Resizing a **multiple** selection that contains a rotated node still works along world axes, so
+  a turned node in the group is stretched rather than scaled along its own edges. Figma skews
+  nothing and neither does this, but the result is not what the handles imply.
+- A resize cannot flip a node through its anchor. `scaleFactors` clamps positive, because a
+  negative scale needs the SDF and hit testing to agree on what an inside out shape is.
 - The accent colour is hardcoded in `OverlayInstances` because the renderer has no access to CSS.
   It needs passing in when the theme toggle exists, since dark uses a lighter blue.

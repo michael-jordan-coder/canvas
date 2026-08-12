@@ -1,11 +1,25 @@
 import type { NodeId, Rect, SceneDocument } from '@figma-canvas/document'
 import type { Camera, Viewport } from '../camera.js'
 import {
+  fromBoxSpace,
   handlePoints,
-  selectionScreenBounds,
+  rotateHandlePoint,
+  selectionBox,
   HANDLE_SIZE,
   OUTLINE_WIDTH,
+  ROTATE_HANDLE_SIZE,
 } from '../selection.js'
+import type { Size, Vec2 } from '@figma-canvas/document'
+
+/** A rect of the given size around a centre point. */
+function centredAt(centre: Vec2, size: Size): Rect {
+  return {
+    x: centre.x - size.width / 2,
+    y: centre.y - size.height / 2,
+    width: size.width,
+    height: size.height,
+  }
+}
 
 /** rect (4) + fill (4) + stroke (4) + params (4). Same stride as a shape instance. */
 const FLOATS_PER_INSTANCE = 16
@@ -59,26 +73,45 @@ export class OverlayInstances {
 
     if (marquee) {
       // Already in CSS pixels, so it needs no camera at all: the rubber band is drawn where
-      // the pointer is, not where the world is.
-      this.#push(marquee, MARQUEE_FILL, ACCENT, OUTLINE_WIDTH, 0)
+      // the pointer is, not where the world is. Never rotated, whatever is selected.
+      this.#push(marquee, MARQUEE_FILL, ACCENT, OUTLINE_WIDTH, 0, 0)
     }
 
     // The same box the input layer hit tests against, so what you can grab is what you see.
-    const outline =
-      selection.length > 0
-        ? selectionScreenBounds(document, selection, camera, viewport)
-        : null
+    const box = selection.length > 0 ? selectionBox(document, selection, camera, viewport) : null
 
-    if (!outline) {
+    if (!box) {
       if (this.#count > 0) this.#upload()
       return
     }
 
-    this.#push(outline, TRANSPARENT, ACCENT, OUTLINE_WIDTH, 0)
+    this.#push(box.rect, TRANSPARENT, ACCENT, OUTLINE_WIDTH, 0, box.angle)
 
-    for (const { x, y } of handlePoints(outline)) {
-      const centreX = Math.round(x)
-      const centreY = Math.round(y)
+    // The stem first, so the round handle lands on top of the end of it rather than the
+    // other way round. Each is centred in the box's frame, mapped to where that centre is
+    // actually drawn, and then turned about itself. A rotation is rigid, so turning a quad
+    // about its own centre at the rotated centre is the same thing as turning the whole box.
+    const rotateAt = rotateHandlePoint(box.rect)
+    const stem = centredAt(fromBoxSpace(box, { x: rotateAt.x, y: (box.rect.y + rotateAt.y) / 2 }), {
+      width: OUTLINE_WIDTH,
+      height: box.rect.y - rotateAt.y,
+    })
+    this.#push(stem, ACCENT, TRANSPARENT, 0, 0, box.angle)
+
+    const knob = centredAt(fromBoxSpace(box, rotateAt), {
+      width: ROTATE_HANDLE_SIZE,
+      height: ROTATE_HANDLE_SIZE,
+    })
+    // A corner radius of half the side turns the rounded box into a circle, so the round
+    // handle costs nothing beyond the number in that slot.
+    this.#push(knob, HANDLE_FILL, ACCENT, OUTLINE_WIDTH, ROTATE_HANDLE_SIZE / 2, box.angle)
+
+    for (const point of handlePoints(box.rect)) {
+      // Handle centres come out in the box's own upright frame, so each one is placed where
+      // it is actually drawn before the quad is built around it.
+      const placed = fromBoxSpace(box, point)
+      const centreX = Math.round(placed.x)
+      const centreY = Math.round(placed.y)
       this.#push(
         {
           x: centreX - HANDLE_SIZE / 2,
@@ -90,6 +123,9 @@ export class OverlayInstances {
         ACCENT,
         OUTLINE_WIDTH,
         1,
+        // Turned with the box, so a handle reads as a corner of the shape rather than an
+        // upright pip sitting loose on top of it.
+        box.angle,
       )
     }
 
@@ -102,6 +138,7 @@ export class OverlayInstances {
     stroke: { r: number; g: number; b: number; a: number },
     strokeWidth: number,
     cornerRadius: number,
+    angle: number,
   ): void {
     this.#reserve(this.#count + 1)
     const at = this.#count * FLOATS_PER_INSTANCE
@@ -123,7 +160,7 @@ export class OverlayInstances {
 
     this.#data[at + 12] = strokeWidth
     this.#data[at + 13] = cornerRadius
-    this.#data[at + 14] = 0
+    this.#data[at + 14] = angle
     this.#data[at + 15] = 0
 
     this.#count += 1

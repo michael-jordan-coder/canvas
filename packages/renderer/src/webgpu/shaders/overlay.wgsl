@@ -16,7 +16,7 @@ struct Instance {
   @location(0) rect: vec4f,
   @location(1) fill: vec4f,
   @location(2) stroke: vec4f,
-  // Stroke width, corner radius.
+  // Stroke width, corner radius, rotation in radians about the rect's own centre.
   @location(3) params: vec4f,
 }
 
@@ -47,7 +47,15 @@ fn vs(@builtin(vertex_index) index: u32, instance: Instance) -> VertexOutput {
   let pad = instance.params.x * 0.5 + 1.5;
   let local = (CORNERS[index] * 2.0 - 1.0) * (half + pad);
 
-  let clip = screen.clipFromPixels * vec3f(centre + local, 1.0);
+  // Rotation is applied on the way out and `local` is passed on unturned, so the distance
+  // function below still sees an upright box. A rotation preserves lengths, so the pixel
+  // footprint fwidth reads off that interpolated value is unchanged by it too.
+  let turn = instance.params.z;
+  let c = cos(turn);
+  let s = sin(turn);
+  let placed = vec2f(local.x * c - local.y * s, local.x * s + local.y * c);
+
+  let clip = screen.clipFromPixels * vec3f(centre + placed, 1.0);
 
   var out: VertexOutput;
   out.position = vec4f(clip.xy, 0.0, 1.0);
