@@ -1,0 +1,17 @@
+{
+  "name": "figma-canvas",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.15.1",
+  "scripts": {
+    "dev": "pnpm --filter @figma-canvas/editor dev",
+    "build": "pnpm --filter @figma-canvas/editor build",
+    "preview": "pnpm --filter @figma-canvas/editor preview",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "@webgpu/types": "^0.1.71",
+    "typescript": "^7.0.2"
+  }
+}

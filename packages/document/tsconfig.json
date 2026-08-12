@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // No DOM on purpose. The document layer describes a scene, it never touches a
+    // canvas, a window or an element. Reaching for one here is a compile error.
+    "lib": ["ES2022"]
+  },
+  "include": ["src"]
+}

@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // DOM for the canvas element, @webgpu/types for the GPU API. No React: the renderer
+    // is driven by the app, it never knows a component exists.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["@webgpu/types"]
+  },
+  "include": ["src"]
+}
