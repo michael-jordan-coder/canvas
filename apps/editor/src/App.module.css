@@ -1,0 +1,19 @@
+.app {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100%;
+}
+
+.body {
+  display: grid;
+  grid-template-columns: var(--panel-width) 1fr var(--panel-width);
+  min-height: 0;
+}
+
+.viewport {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  /* Sits behind the canvas. If the GPU never clears, this is what you see. */
+  background: var(--panel-sunken);
+}

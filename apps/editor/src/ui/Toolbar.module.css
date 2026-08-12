@@ -1,0 +1,32 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--toolbar-height);
+  padding: 0 var(--space-3);
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.tool {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius);
+  color: var(--text);
+  transition: background var(--duration) var(--ease);
+}
+
+.tool:hover {
+  background: var(--hover);
+}
+
+.tool:active {
+  background: var(--pressed);
+}
+
+.tool[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--on-accent);
+}

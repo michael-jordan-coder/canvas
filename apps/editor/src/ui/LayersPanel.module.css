@@ -1,0 +1,91 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 var(--space-3);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--line);
+}
+
+.tree {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-2) 0;
+}
+
+/* Depth comes from nesting rather than a computed inline style, so the tree stays
+   declarative and rows keep a single full-width hit target. */
+.children {
+  padding-left: var(--space-4);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  height: var(--row-height);
+  padding-right: var(--space-2);
+  transition: background var(--duration) var(--ease);
+}
+
+.row:hover {
+  background: var(--hover);
+}
+
+.row[data-selected='true'] {
+  background: var(--accent-subtle);
+}
+
+.row[data-dimmed='true'] .label,
+.row[data-dimmed='true'] .name {
+  color: var(--text-disabled);
+}
+
+.name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding-left: var(--space-3);
+  color: var(--text);
+  text-align: left;
+}
+
+.label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Always present, never revealed on hover: an affordance that does not exist on touch
+   does not exist. */
+.visibility {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius);
+  color: var(--text-disabled);
+  transition:
+    color var(--duration) var(--ease),
+    background var(--duration) var(--ease);
+}
+
+.visibility:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.row[data-dimmed='true'] .visibility {
+  color: var(--text-secondary);
+}
