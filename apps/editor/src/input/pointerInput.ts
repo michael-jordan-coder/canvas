@@ -37,6 +37,8 @@ interface Drag {
   startScreen: Vec2
   startCamera: Camera
   nodes: DraggedNode[]
+  /** Opened on the first move that actually changes something, not on pointer down. */
+  grouped: boolean
 }
 
 /**
@@ -79,6 +81,7 @@ export function createPointerInput(options: PointerInputOptions): () => void {
         startScreen: screen,
         startCamera: options.getCamera(),
         nodes: [],
+        grouped: false,
       }
       canvas.setPointerCapture(event.pointerId)
       return
@@ -108,6 +111,7 @@ export function createPointerInput(options: PointerInputOptions): () => void {
       kind: 'move',
       startScreen: screen,
       startCamera: options.getCamera(),
+      grouped: false,
       nodes: ids.flatMap((id) => {
         const node = document.getNode(id)
         if (!node || node.locked) return []
@@ -144,9 +148,24 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     }
 
     const world = worldOf(screen)
+    const current = drag
+
+    // Nothing to record until the pointer has actually moved. Opening the group here rather
+    // than on pointer down means a click that never moves leaves the history untouched.
+    const moved = current.nodes.some((dragged) => {
+      const local = applyToPoint(dragged.parentInverse, world)
+      return local.x !== dragged.startLocal.x || local.y !== dragged.startLocal.y
+    })
+    if (!moved) return
+    if (!current.grouped) {
+      current.grouped = true
+      document.beginHistoryGroup()
+    }
+
     // One transaction, so moving twenty nodes wakes the panels once rather than twenty times.
+    // The group above then folds every frame of the gesture into a single undo step.
     document.transact(() => {
-      for (const dragged of drag?.nodes ?? []) {
+      for (const dragged of current.nodes) {
         const local = applyToPoint(dragged.parentInverse, world)
         document.update(dragged.id, {
           transform: {
@@ -162,6 +181,7 @@ export function createPointerInput(options: PointerInputOptions): () => void {
   const onPointerUp = (event: PointerEvent): void => {
     if (!drag || event.pointerId !== drag.pointerId) return
     if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId)
+    if (drag.grouped) document.endHistoryGroup()
     drag = null
   }
 

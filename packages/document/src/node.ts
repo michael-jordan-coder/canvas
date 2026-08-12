@@ -107,6 +107,69 @@ export function createRectangle(
   }
 }
 
+function clonePaint(paint: Paint): Paint {
+  return { type: 'solid', color: { ...paint.color } }
+}
+
+function cloneStroke(stroke: Stroke): Stroke {
+  return { paint: clonePaint(stroke.paint), weight: stroke.weight, align: stroke.align }
+}
+
+/**
+ * A copy deep enough that nothing in it is shared with the original.
+ *
+ * History depends on this completely. If a clone kept a reference to the live `children`
+ * array or to a paint, a later edit would reach back and quietly rewrite the past, and undo
+ * would restore whatever the present happens to be.
+ *
+ * Written out per type rather than spread generically so the compiler checks that every
+ * field of every node type is accounted for when a new one is added.
+ */
+export function cloneNode(node: SceneNode): SceneNode {
+  const shared = {
+    name: node.name,
+    visible: node.visible,
+    locked: node.locked,
+    opacity: node.opacity,
+    parent: node.parent,
+    children: [...node.children],
+    transform: { ...node.transform },
+    size: { ...node.size },
+  }
+
+  switch (node.type) {
+    case 'page':
+      return { ...shared, id: node.id, type: 'page' }
+    case 'frame':
+      return {
+        ...shared,
+        id: node.id,
+        type: 'frame',
+        clipsContent: node.clipsContent,
+        cornerRadius: node.cornerRadius,
+        fills: node.fills.map(clonePaint),
+        strokes: node.strokes.map(cloneStroke),
+      }
+    case 'rectangle':
+      return {
+        ...shared,
+        id: node.id,
+        type: 'rectangle',
+        cornerRadius: node.cornerRadius,
+        fills: node.fills.map(clonePaint),
+        strokes: node.strokes.map(cloneStroke),
+      }
+    case 'ellipse':
+      return {
+        ...shared,
+        id: node.id,
+        type: 'ellipse',
+        fills: node.fills.map(clonePaint),
+        strokes: node.strokes.map(cloneStroke),
+      }
+  }
+}
+
 export function createEllipse(init: Partial<Omit<EllipseNode, 'id' | 'type'>> = {}): EllipseNode {
   return {
     ...base('ellipse', 'Ellipse'),

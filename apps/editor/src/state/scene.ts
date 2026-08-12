@@ -9,12 +9,22 @@ import {
   type NodeId,
   type SceneNode,
 } from '@figma-canvas/document'
+import { useUI } from './uiStore'
 
 /**
  * One document for the running editor. The renderer will read this directly every frame;
  * React only ever reads it through the hooks below.
  */
 export const scene = new SceneDocument()
+
+/**
+ * Selection rides along with each undo step. The document holds it as an opaque value and
+ * never learns what it is, which keeps selection out of the file where it belongs.
+ */
+scene.setSideState<readonly NodeId[]>({
+  capture: () => useUI.getState().selection,
+  restore: (ids) => useUI.getState().setSelection(ids),
+})
 
 /*
  * A revision per node, so a panel showing one node wakes only when that node changes.
@@ -92,3 +102,5 @@ function seed(): void {
 }
 
 seed()
+// The starting document is not an edit, so it must not be undoable.
+scene.clearHistory()

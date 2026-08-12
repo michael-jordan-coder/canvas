@@ -1,5 +1,6 @@
 import { multiply, type Mat2D, IDENTITY } from './math.js'
-import { canHaveChildren, createPage, type NodeId, type SceneNode } from './node.js'
+import { canHaveChildren, cloneNode, createPage, type NodeId, type SceneNode } from './node.js'
+import { History, type HistoryEntry, type NodeSnapshot, type SideState } from './history.js'
 
 export interface DocumentChange {
   /** Monotonic. Cheap way for the renderer to ask "is anything different since my last frame". */
@@ -28,6 +29,16 @@ export class SceneDocument {
   #depth = 0
   #pending = new Set<NodeId>()
   #pendingStructural = false
+
+  #history = new History()
+  /** Before-snapshots for the step being built. Null between steps. */
+  #recording: Map<NodeId, NodeSnapshot> | null = null
+  #sideBefore: unknown = undefined
+  #side: { capture: () => unknown; restore: (value: unknown) => void } | null = null
+  /** True while undo or redo is writing, so restoring does not record itself as a new step. */
+  #applying = false
+  #group: HistoryEntry | null = null
+  #groupDepth = 0
 
   constructor() {
     const page = createPage()
@@ -93,6 +104,9 @@ export class SceneDocument {
   insert(node: SceneNode, parentId: NodeId = this.#root, index?: number): SceneNode {
     const parent = this.expectNode(parentId)
     if (!canHaveChildren(parent)) throw new Error(`${parent.type} cannot hold children`)
+    // Before the splice, so the parent is recorded with its original child order.
+    this.#captureBefore(parentId)
+    this.#captureBefore(node.id)
     this.#nodes.set(node.id, node)
     node.parent = parentId
     const at = index ?? parent.children.length
@@ -106,15 +120,26 @@ export class SceneDocument {
   remove(id: NodeId): void {
     const node = this.#nodes.get(id)
     if (!node || id === this.#root) return
-    for (const childId of [...node.children]) this.remove(childId)
-    if (node.parent) {
-      const parent = this.expectNode(node.parent)
-      parent.children = parent.children.filter((childId) => childId !== id)
-      this.#touch(parent.id, true)
-    }
-    this.#nodes.delete(id)
-    this.#touch(id, true)
-    this.#flush()
+
+    // Wrapped, because this recurses. Without the transaction each nested call would reach
+    // depth zero and commit its own history step, and by the last one the parent's recorded
+    // "before" would already have lost the children removed by the earlier ones. Undo would
+    // then restore an empty frame. One removal is one step, however deep the subtree.
+    this.transact(() => {
+      for (const childId of [...node.children]) this.remove(childId)
+      if (node.parent) {
+        // Captured before the filter below. On the first child of a subtree removal this
+        // also captures the parent while its children array is still intact, and first
+        // capture wins, so the subtree restores in its original order with no index tracking.
+        this.#captureBefore(node.parent)
+        const parent = this.expectNode(node.parent)
+        parent.children = parent.children.filter((childId) => childId !== id)
+        this.#touch(parent.id, true)
+      }
+      this.#captureBefore(id)
+      this.#nodes.delete(id)
+      this.#touch(id, true)
+    })
   }
 
   /**
@@ -124,6 +149,7 @@ export class SceneDocument {
   update<T extends SceneNode>(id: NodeId, patch: Partial<Omit<T, 'id' | 'type'>>): void {
     const node = this.#nodes.get(id)
     if (!node) return
+    this.#captureBefore(id)
     Object.assign(node, patch)
     this.#touch(id, false)
     this.#flush()
@@ -150,6 +176,138 @@ export class SceneDocument {
     }
   }
 
+  // History ------------------------------------------------------------------------------
+
+  get canUndo(): boolean {
+    return this.#history.canUndo
+  }
+
+  get canRedo(): boolean {
+    return this.#history.canRedo
+  }
+
+  /** Steps currently on the undo stack. */
+  get historyDepth(): number {
+    return this.#history.depth
+  }
+
+  /**
+   * Registers state that travels with an undo step but is not part of the document.
+   *
+   * The value is opaque here on purpose: the document must not learn what selection is.
+   * Note that the value is captured when the step commits, so an edit and the selection
+   * change that goes with it belong in the same `transact` if the redo is to be faithful.
+   */
+  setSideState<T>(side: SideState<T>): void {
+    this.#side = {
+      capture: side.capture,
+      restore: (value) => side.restore(value as T),
+    }
+  }
+
+  /**
+   * Merges everything until the matching end into a single undo step.
+   *
+   * A drag calls `update` once per frame, which without this would put sixty steps on the
+   * stack for one gesture. Callers should open the group on the first real change rather
+   * than on pointer down, so a click that never moves leaves no step behind.
+   */
+  beginHistoryGroup(): void {
+    this.#groupDepth += 1
+  }
+
+  endHistoryGroup(): void {
+    if (this.#groupDepth === 0) return
+    this.#groupDepth -= 1
+    if (this.#groupDepth === 0 && this.#group) {
+      this.#history.push(this.#group)
+      this.#group = null
+    }
+  }
+
+  undo(): boolean {
+    const entry = this.#history.takeUndo()
+    if (!entry) return false
+    this.#apply(entry.before, entry.sideBefore)
+    return true
+  }
+
+  redo(): boolean {
+    const entry = this.#history.takeRedo()
+    if (!entry) return false
+    this.#apply(entry.after, entry.sideAfter)
+    return true
+  }
+
+  /** Drops the past. Called after seeding, so the starting document cannot be undone away. */
+  clearHistory(): void {
+    this.#history.clear()
+    this.#group = null
+    this.#groupDepth = 0
+  }
+
+  #captureBefore(id: NodeId): void {
+    if (this.#applying) return
+    if (!this.#recording) {
+      this.#recording = new Map()
+      // Captured before the first mutation of the step, which is what makes undo restore
+      // the selection as it was rather than as the edit left it.
+      this.#sideBefore = this.#side ? this.#side.capture() : undefined
+    }
+    // First capture wins: within one step a node's "before" is how it started, not how it
+    // looked midway through.
+    if (this.#recording.has(id)) return
+    const node = this.#nodes.get(id)
+    this.#recording.set(id, node ? cloneNode(node) : null)
+  }
+
+  #commitRecording(): void {
+    const before = this.#recording
+    this.#recording = null
+    if (!before || this.#applying) return
+
+    const after = new Map<NodeId, NodeSnapshot>()
+    for (const id of before.keys()) {
+      const node = this.#nodes.get(id)
+      after.set(id, node ? cloneNode(node) : null)
+    }
+    const sideAfter = this.#side ? this.#side.capture() : undefined
+
+    if (this.#groupDepth > 0) {
+      if (!this.#group) {
+        this.#group = { before, after, sideBefore: this.#sideBefore, sideAfter }
+        return
+      }
+      // Oldest before, newest after, so the group reads as one step from where the gesture
+      // started to where it ended.
+      for (const [id, snapshot] of before) {
+        if (!this.#group.before.has(id)) this.#group.before.set(id, snapshot)
+      }
+      for (const [id, snapshot] of after) this.#group.after.set(id, snapshot)
+      this.#group.sideAfter = sideAfter
+      return
+    }
+
+    this.#history.push({ before, after, sideBefore: this.#sideBefore, sideAfter })
+  }
+
+  #apply(snapshots: Map<NodeId, NodeSnapshot>, side: unknown): void {
+    this.#applying = true
+    try {
+      for (const [id, snapshot] of snapshots) {
+        if (snapshot === null) this.#nodes.delete(id)
+        // Cloned on the way out too. Handing the stored snapshot to the live document would
+        // let the next edit mutate history itself.
+        else this.#nodes.set(id, cloneNode(snapshot))
+        this.#touch(id, true)
+      }
+      this.#flush()
+    } finally {
+      this.#applying = false
+    }
+    if (this.#side && side !== undefined) this.#side.restore(side)
+  }
+
   #touch(id: NodeId, structural: boolean): void {
     this.#pending.add(id)
     if (structural) this.#pendingStructural = true
@@ -158,6 +316,9 @@ export class SceneDocument {
   #flush(): void {
     if (this.#depth > 0 || this.#pending.size === 0) return
     this.#version += 1
+    // One transaction, one undo step. Nested transacts collapse into the outermost, because
+    // the flush they would have triggered is deferred until depth returns to zero.
+    this.#commitRecording()
     const change: DocumentChange = {
       version: this.#version,
       changed: this.#pending,

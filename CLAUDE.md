@@ -48,6 +48,39 @@ rectangle must not re-render the layers tree.
 
 Batch related edits in `scene.transact(...)`. Fifty nodes moving should wake the panels once.
 
+## Undo
+
+The model is **inverse snapshots of touched nodes**. Before any node is mutated it is cloned once
+per step, and at commit the same ids are cloned again. Undo restores the before clones, redo the
+after ones. There are no hand written inverse operations, and no copy of the whole tree.
+
+What makes it correct nearly for free: a node's clone includes its `children` array, so restoring
+a parent restores its child order exactly. Deleting a frame and undoing it brings the subtree back
+in its original order with no index bookkeeping anywhere.
+
+Three rules the code depends on, all of which have already caused a bug or would have:
+
+- **A transaction is a step.** `#flush` commits the recording, and nested `transact` calls collapse
+  into the outermost one. `remove` therefore wraps itself in a transaction, because it recurses:
+  without that, each nested call reached depth zero and committed separately, and the frame's
+  recorded "before" had already lost the children removed by the earlier steps.
+- **First capture wins.** Within a step a node's "before" is how it started, not how it looked
+  midway through.
+- **Clone on the way in and on the way out.** Handing a stored snapshot to the live document would
+  let the next edit rewrite the past.
+
+A drag is many transactions, one per frame, so `beginHistoryGroup` / `endHistoryGroup` merge them
+into one step: oldest before, newest after. The input layer opens the group on the first move that
+actually changes something rather than on pointer down, so a click that never moves leaves nothing
+behind.
+
+Selection travels with each step through `setSideState`, which takes an opaque capture and restore
+pair. The document never learns what selection is. **An edit and the selection change that goes
+with it belong in the same `transact`**, because the "after" value is captured when the step
+commits: delete outside a transaction and redo will restore a stale selection.
+
+History is capped at 200 steps and drops the oldest past that.
+
 ## Commands
 
 ```
@@ -124,17 +157,26 @@ rectangle. Figma selects the outermost frame and makes you double click to desce
 policy rather than a geometry question and it lives above `hitTest`, which is why the function
 returns the deepest hit and lets the caller decide.
 
-Not built yet, and deliberately so:
+## Planned work lives in Notion, not here
 
-- Strokes. `Stroke` exists in the document and nothing reads it. The SDF makes this cheap when it
-  comes: an outline is `abs(d) - weight / 2`.
-- Selection handles, and anything that draws in screen space rather than world space. Selection is
-  currently visible in the layers panel only.
-- Marquee selection, resize, rotate, and the shape tools actually creating anything.
-- Input: hit testing, drag, marquee, the tools actually doing anything.
-- Undo. Nothing about the current store shape assumes a particular approach, and command pattern
-  versus snapshot versus CRDT is a real fork worth deciding before the renderer hardens.
-- Text, images, boolean ops, auto layout, components, multiplayer.
+**This file does not list future work.** It describes what exists and why it is built the way it
+is. Planned and in progress work lives on the Figma Canvas Tasks board:
 
-When the WebGPU backend lands it is exported from `packages/renderer/src/index.ts`, created inside
-`CanvasHost`, and nothing above that file changes.
+https://app.notion.com/p/3bac9dc0ddd981bcb20aef1149effb4e
+
+Two records that both claim to say what is left will drift within a week, so they are split by
+job: Notion owns status, this file owns architecture. When something ships, describe it above and
+mark it Done on the board.
+
+**Do not open the board from the main session.** The `notion-tracker` agent
+(`.claude/agents/notion-tracker.md`) owns every read and write to it, so page ids and property
+payloads never enter the conversation. Delegate to it and relay its one line back.
+
+A few things are worth knowing because the code looks finished but is not:
+
+- `Stroke` exists in the document model and nothing reads it. Given the SDF an outline is
+  `abs(d) - weight / 2`, so it is cheap when it comes.
+- `clipsContent` is stored on frames and ignored, so children currently draw outside their frame.
+- The selection outline is axis aligned. A rotated node would get an upright box around it.
+- The accent colour is hardcoded in `OverlayInstances` because the renderer has no access to CSS.
+  It needs passing in when the theme toggle exists, since dark uses a lighter blue.
