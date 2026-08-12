@@ -1,4 +1,5 @@
 import type { NodeId, SceneDocument } from '@figma-canvas/document'
+import { reorderSelection } from '../state/order'
 
 export interface KeyboardInputOptions {
   document: SceneDocument
@@ -46,6 +47,19 @@ export function createKeyboardInput(options: KeyboardInputOptions): () => void {
       event.preventDefault()
       if (event.repeat) return
       scene.redo()
+      return
+    }
+
+    // Cmd+] and Cmd+[ step one place, adding alt jumps all the way, matching Figma.
+    if (accel && (event.key === ']' || event.key === '[')) {
+      event.preventDefault()
+      if (event.repeat) return
+      const forward = event.key === ']'
+      reorderSelection(
+        scene,
+        options.getSelection(),
+        event.altKey ? (forward ? 'front' : 'back') : forward ? 'forward' : 'backward',
+      )
       return
     }
 

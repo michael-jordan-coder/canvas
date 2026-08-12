@@ -81,6 +81,30 @@ commits: delete outside a transaction and redo will restore a stale selection.
 
 History is capped at 200 steps and drops the oldest past that.
 
+## Order and hierarchy
+
+The layers panel lists children **reversed**: index 0 is the back of the stack, because that is
+the order the instance buffer is packed and therefore painted, but the topmost thing on the canvas
+belongs at the top of the list. Anything computing a drop index has to account for that flip.
+
+`reparent` recomputes the node's local transform against its new parent so it stays exactly where
+it appears to be:
+
+```
+world  = local  then oldParentWorld
+local' = world  then inverse(newParentWorld)
+```
+
+Without that a node jumps the moment it enters a differently scaled frame. It also refuses a node's
+own descendant as a parent, which would detach that subtree from the tree and leak it.
+
+Z-order commands live in `apps/editor/src/state/order.ts`, not in the document: the scene model
+offers `reorder` to an index and the four commands people actually reach for are built on top.
+**The order the moves are applied in matters**, because each one shifts the indices of the nodes
+not yet moved. Stepping forward and jumping to the back both start from the node nearest that end;
+the other two start from the opposite one. Getting it wrong either collapses a multiple selection
+onto itself or reverses it, and both are covered by tests.
+
 ## Persistence and the clipboard
 
 `packages/document/src/serialize.ts` is the only place untrusted input enters the app, so it

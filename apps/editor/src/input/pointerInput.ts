@@ -536,6 +536,20 @@ export function createPointerInput(options: PointerInputOptions): () => void {
       return
     }
 
+    // A node dropped over a different frame joins it. Done on release rather than during the
+    // drag, so the tree does not churn while the pointer passes over things on its way.
+    if (drag.kind === 'move' && drag.grouped) {
+      const target = containerAt(document, worldOf(screenOf(event)))
+      document.transact(() => {
+        for (const dragged of drag?.nodes ?? []) {
+          const node = document.getNode(dragged.id)
+          // reparent already refuses a node's own descendant, so a frame dropped onto itself
+          // simply stays where it is.
+          if (node && node.parent !== target.id) document.reparent(dragged.id, target.id)
+        }
+      })
+    }
+
     if (drag.grouped) document.endHistoryGroup()
     drag = null
   }

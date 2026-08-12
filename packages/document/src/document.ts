@@ -1,4 +1,4 @@
-import { multiply, type Mat2D, IDENTITY } from './math.js'
+import { invert, multiply, type Mat2D, IDENTITY } from './math.js'
 import {
   canHaveChildren,
   cloneNode,
@@ -145,6 +145,87 @@ export class SceneDocument {
       }
       this.#captureBefore(id)
       this.#nodes.delete(id)
+      this.#touch(id, true)
+    })
+  }
+
+  /** Position among its siblings, or -1. Index 0 is the back of the stack. */
+  indexOf(id: NodeId): number {
+    const node = this.#nodes.get(id)
+    if (!node?.parent) return -1
+    return this.expectNode(node.parent).children.indexOf(id)
+  }
+
+  isAncestorOf(ancestorId: NodeId, id: NodeId): boolean {
+    let node = this.#nodes.get(id)
+    while (node?.parent) {
+      if (node.parent === ancestorId) return true
+      node = this.#nodes.get(node.parent)
+    }
+    return false
+  }
+
+  /** Moves a node among its siblings. Clamped, so callers can pass index - 1 without care. */
+  reorder(id: NodeId, index: number): void {
+    const node = this.#nodes.get(id)
+    if (!node?.parent) return
+    const parent = this.expectNode(node.parent)
+    const from = parent.children.indexOf(id)
+    if (from < 0) return
+    const to = Math.max(0, Math.min(parent.children.length - 1, index))
+    if (from === to) return
+
+    this.transact(() => {
+      this.#captureBefore(parent.id)
+      const next = [...parent.children]
+      next.splice(from, 1)
+      next.splice(to, 0, id)
+      parent.children = next
+      this.#touch(parent.id, true)
+    })
+  }
+
+  /**
+   * Moves a node to a different parent, leaving it exactly where it appears to be.
+   *
+   * The transform a node carries is relative to its parent, so moving it between parents
+   * without changing that transform makes it jump, and the jump is proportional to how
+   * differently the two parents are scaled. Recomputing it against the new parent is the
+   * whole job:
+   *
+   *   world  = local  then oldParentWorld
+   *   local' = world  then inverse(newParentWorld)
+   *
+   * Refuses to put a node inside itself or inside one of its own descendants, which would
+   * detach that subtree from the tree entirely and leak it.
+   */
+  reparent(id: NodeId, parentId: NodeId, index?: number): void {
+    const node = this.#nodes.get(id)
+    const parent = this.#nodes.get(parentId)
+    if (!node || !parent || id === this.#root) return
+    if (!canHaveChildren(parent)) return
+    if (id === parentId || this.isAncestorOf(id, parentId)) return
+
+    const world = this.worldTransform(id)
+    const parentWorld = this.worldTransform(parentId)
+
+    this.transact(() => {
+      if (node.parent) {
+        this.#captureBefore(node.parent)
+        const previous = this.expectNode(node.parent)
+        previous.children = previous.children.filter((childId) => childId !== id)
+        this.#touch(previous.id, true)
+      }
+
+      this.#captureBefore(parentId)
+      this.#captureBefore(id)
+
+      const at = Math.max(0, Math.min(parent.children.length, index ?? parent.children.length))
+      parent.children.splice(at, 0, id)
+      node.parent = parentId
+      node.transform = multiply(world, invert(parentWorld))
+
+      this.#touch(parentId, true)
       this.#touch(id, true)
     })
   }
