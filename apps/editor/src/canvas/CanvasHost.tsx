@@ -7,6 +7,7 @@ import {
   type Renderer,
 } from '@figma-canvas/renderer'
 import { scene } from '../state/scene'
+import { frameStats } from '../state/stats'
 import { useUI } from '../state/uiStore'
 import { createPointerInput } from '../input/pointerInput'
 import styles from './CanvasHost.module.css'
@@ -35,14 +36,23 @@ export function CanvasHost(): ReactElement {
     // Drawing is on demand rather than a permanent rAF loop. An editor is static most of
     // the time, and a loop that runs at 120Hz over a still document burns battery to
     // produce identical pixels.
+    let lastFrameAt = 0
+
     const draw = (): void => {
       cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(() =>
-        renderer?.render({
-          camera: cameraRef.current,
-          selection: useUI.getState().selection,
-        }),
-      )
+      frame = requestAnimationFrame(() => {
+        if (!renderer) return
+        const startedAt = performance.now()
+        renderer.render({ camera: cameraRef.current, selection: useUI.getState().selection })
+        const finishedAt = performance.now()
+
+        frameStats.frameMs = finishedAt - startedAt
+        frameStats.intervalMs = lastFrameAt === 0 ? 0 : startedAt - lastFrameAt
+        lastFrameAt = startedAt
+        const { instances, culled } = renderer.stats
+        frameStats.instances = instances
+        frameStats.culled = culled
+      })
     }
 
     const resize = (): void => {

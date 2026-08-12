@@ -1,6 +1,6 @@
 import type { SceneDocument } from '@figma-canvas/document'
 import { clipMatrix, pixelsToClip, type Viewport } from '../camera.js'
-import type { Renderer, RendererInit, ViewState } from '../Renderer.js'
+import type { Renderer, RendererInit, RendererStats, ViewState } from '../Renderer.js'
 import { createGPUSurface, onDeviceLost, type GPUSurface } from './device.js'
 import { MatrixUniform, createMatrixBindGroupLayout } from './MatrixUniform.js'
 import { ShapeInstances } from './ShapeInstances.js'
@@ -72,8 +72,8 @@ class WebGPURenderer implements Renderer {
     this.#worldToClip.update(clipMatrix(view.camera, this.#viewport))
     this.#pixelsToClip.update(pixelsToClip(this.#viewport))
 
-    // Returns immediately unless the document actually changed.
-    this.#shapes.sync(this.#document)
+    // Returns immediately unless the document changed or the view left the built region.
+    this.#shapes.sync(this.#document, view.camera, this.#viewport)
     // Always rebuilt: it is expressed in screen pixels, so the camera moving changes it.
     this.#overlay.sync(this.#document, view.selection, view.camera, this.#viewport)
 
@@ -113,6 +113,11 @@ class WebGPURenderer implements Renderer {
     pass.end()
 
     device.queue.submit([encoder.finish()])
+  }
+
+  /** What the last frame actually submitted. Read by the editor's performance readout. */
+  get stats(): RendererStats {
+    return { instances: this.#shapes.count, culled: this.#shapes.culled }
   }
 
   destroy(): void {

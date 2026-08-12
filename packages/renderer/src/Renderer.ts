@@ -23,7 +23,15 @@ export interface ViewState {
  * against this interface and never against WebGPU itself, so the backend stays replaceable
  * and testable without a GPU.
  */
+export interface RendererStats {
+  /** Instances submitted by the last frame. */
+  instances: number
+  /** Instances skipped as off screen by the last instance buffer build. */
+  culled: number
+}
+
 export interface Renderer {
+  readonly stats: RendererStats
   /**
    * `viewport` is CSS pixels, `dpr` is the device pixel ratio. The renderer owns the
    * backing store size, the host only reports what the element measured.

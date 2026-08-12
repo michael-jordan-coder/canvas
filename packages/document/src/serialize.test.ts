@@ -1,0 +1,211 @@
+import { describe, expect, it } from 'vitest'
+import { SceneDocument } from './document.js'
+import { translation } from './math.js'
+import { createEllipse, createFrame, createRectangle, type SceneNode } from './node.js'
+import { fromHex } from './paint.js'
+import {
+  InvalidDocumentError,
+  instantiateSubtree,
+  parseDocument,
+  parseSubtree,
+  serializeDocument,
+  serializeSubtree,
+} from './serialize.js'
+
+function scene() {
+  const document = new SceneDocument()
+  const frame = document.insert(
+    createFrame({
+      name: 'Frame 1',
+      transform: translation(-160, -120),
+      size: { width: 320, height: 240 },
+      fills: [fromHex('#ffffff')],
+    }),
+  )
+  const rectangle = document.insert(
+    createRectangle({
+      name: 'Rectangle',
+      transform: translation(24, 24),
+      size: { width: 140, height: 90 },
+      fills: [fromHex('#0a7cff')],
+      cornerRadius: 4,
+    }),
+    frame.id,
+  )
+  document.insert(
+    createEllipse({
+      name: 'Ellipse',
+      transform: translation(170, 130),
+      size: { width: 90, height: 90 },
+    }),
+    frame.id,
+  )
+  return { document, frame, rectangle }
+}
+
+/** Everything that has to survive a round trip. */
+const shapeOf = (document: SceneDocument): unknown =>
+  [...document.walk()].map((node: SceneNode) => ({
+    id: node.id,
+    type: node.type,
+    name: node.name,
+    parent: node.parent,
+    children: node.children,
+    transform: node.transform,
+    size: node.size,
+    opacity: node.opacity,
+    visible: node.visible,
+    fills: 'fills' in node ? node.fills : undefined,
+  }))
+
+/** Through actual JSON, so anything unserialisable shows up. */
+const roundTrip = (document: SceneDocument): SceneDocument => {
+  const parsed = parseDocument(JSON.parse(JSON.stringify(serializeDocument(document))) as unknown)
+  const loaded = new SceneDocument()
+  loaded.load(parsed.root, parsed.nodes)
+  return loaded
+}
+
+describe('document round trip', () => {
+  it('reproduces the tree exactly', () => {
+    const { document } = scene()
+    const loaded = roundTrip(document)
+    expect(shapeOf(loaded)).toEqual(shapeOf(document))
+    expect(loaded.rootId).toBe(document.rootId)
+    expect(loaded.size).toBe(document.size)
+  })
+
+  it('does not let a newly created node collide with a loaded id', () => {
+    const { document } = scene()
+    const loaded = roundTrip(document)
+
+    const added = loaded.insert(createRectangle({ name: 'After load' }))
+    expect(loaded.expectNode(added.id).name).toBe('After load')
+    expect(loaded.size).toBe(document.size + 1)
+  })
+
+  it('notifies once and is not undoable', () => {
+    const { document } = scene()
+    const target = new SceneDocument()
+    target.insert(createRectangle({ name: 'Old' }))
+
+    let notified = 0
+    target.subscribe(() => {
+      notified += 1
+    })
+
+    const parsed = parseDocument(JSON.parse(JSON.stringify(serializeDocument(document))) as unknown)
+    target.load(parsed.root, parsed.nodes)
+
+    expect(notified).toBe(1)
+    expect(target.canUndo).toBe(false)
+  })
+})
+
+describe('validation', () => {
+  const page = {
+    id: 'n1',
+    type: 'page',
+    name: 'p',
+    visible: true,
+    locked: false,
+    opacity: 1,
+    parent: null,
+    children: [],
+    transform: { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 },
+    size: { width: 0, height: 0 },
+  }
+
+  it('rejects json that is not ours', () => {
+    expect(() => parseDocument({ hello: 'world' })).toThrow(InvalidDocumentError)
+  })
+
+  it('names the field that failed', () => {
+    expect(() =>
+      parseDocument({
+        kind: 'figma-canvas/document',
+        version: 1,
+        root: 'n1',
+        nodes: [{ ...page, opacity: 'nope' }],
+      }),
+    ).toThrow(/nodes\[0\]\.opacity is not a finite number/)
+  })
+
+  it('refuses a schema from the future rather than half reading it', () => {
+    expect(() =>
+      parseDocument({ kind: 'figma-canvas/document', version: 99, root: 'n1', nodes: [page] }),
+    ).toThrow(/version 99/)
+  })
+
+  it('rejects a root that is not in the file', () => {
+    expect(() =>
+      parseDocument({ kind: 'figma-canvas/document', version: 1, root: 'nX', nodes: [] }),
+    ).toThrow(/root does not name a node/)
+  })
+
+  it('rejects an unknown node type', () => {
+    expect(() =>
+      parseDocument({
+        kind: 'figma-canvas/document',
+        version: 1,
+        root: 'n1',
+        nodes: [{ ...page, type: 'hologram' }],
+      }),
+    ).toThrow(/is not a node type/)
+  })
+})
+
+describe('copy and paste', () => {
+  it('takes the children along with the node', () => {
+    const { document, frame } = scene()
+    const subtree = serializeSubtree(document, [frame.id])
+    expect(subtree.nodes).toHaveLength(3)
+    expect(subtree.roots).toHaveLength(1)
+  })
+
+  it('collapses a selection that contains both a parent and its child', () => {
+    const { document, frame, rectangle } = scene()
+    const subtree = serializeSubtree(document, [frame.id, rectangle.id])
+    expect(subtree.roots).toEqual([frame.id])
+    expect(subtree.nodes.filter((node) => node.name === 'Rectangle')).toHaveLength(1)
+  })
+
+  it('pastes a copy that is independent of the original', () => {
+    const { document, frame } = scene()
+    const before = document.size
+
+    const parsed = parseSubtree(
+      JSON.parse(JSON.stringify(serializeSubtree(document, [frame.id]))) as unknown,
+    )
+    const created = instantiateSubtree(document, parsed, document.rootId, { x: 10, y: 10 })
+    const copy = created[0]
+    if (!copy) throw new Error('paste produced nothing')
+
+    expect(document.size).toBe(before + 3)
+    expect(copy.id).not.toBe(frame.id)
+    expect(document.getChildren(copy.id).map((node) => node.name)).toEqual([
+      'Rectangle',
+      'Ellipse',
+    ])
+    expect(document.expectNode(copy.id).transform.tx).toBe(-150)
+    // Children keep their own local positions, only the root is offset.
+    expect(document.getChildren(copy.id)[0]?.transform.tx).toBe(24)
+
+    document.update(copy.id, { name: 'Copy' })
+    expect(document.expectNode(frame.id).name).toBe('Frame 1')
+  })
+
+  it('is a single undo step however many nodes it contains', () => {
+    const { document, frame } = scene()
+    document.clearHistory()
+
+    instantiateSubtree(document, serializeSubtree(document, [frame.id]), document.rootId, {
+      x: 10,
+      y: 10,
+    })
+    expect(document.historyDepth).toBe(1)
+
+    document.undo()
+    expect(document.size).toBe(4)
+  })
+})

@@ -8,10 +8,14 @@
     "dev": "pnpm --filter @figma-canvas/editor dev",
     "build": "pnpm --filter @figma-canvas/editor build",
     "preview": "pnpm --filter @figma-canvas/editor preview",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "pnpm typecheck && pnpm test"
   },
   "devDependencies": {
     "@webgpu/types": "^0.1.71",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
   }
 }

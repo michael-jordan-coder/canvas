@@ -11,7 +11,8 @@
   },
   "devDependencies": {
     "@webgpu/types": "^0.1.71",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
   },
   "dependencies": {
     "@figma-canvas/document": "workspace:*"

@@ -10,6 +10,8 @@ import {
   type SceneNode,
 } from '@figma-canvas/document'
 import { useUI } from './uiStore'
+import { readSaved, startAutosave } from './persistence'
+import { seedStressScene, stressCountFromLocation } from './stress'
 
 /**
  * One document for the running editor. The renderer will read this directly every frame;
@@ -101,6 +103,17 @@ function seed(): void {
   })
 }
 
-seed()
-// The starting document is not an edit, so it must not be undoable.
+const stressCount = stressCountFromLocation()
+if (stressCount > 0) {
+  seedStressScene(scene, stressCount)
+} else {
+  const saved = readSaved()
+  if (saved) scene.load(saved.root, saved.nodes)
+  else seed()
+}
+// Neither the seed nor a load is an edit, so neither must be undoable.
 scene.clearHistory()
+
+// Autosave is off in stress mode. Persisting ten thousand throwaway nodes would then load
+// them again on the next ordinary visit.
+if (stressCount === 0) startAutosave(scene)

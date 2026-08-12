@@ -81,13 +81,79 @@ commits: delete outside a transaction and redo will restore a stale selection.
 
 History is capped at 200 steps and drops the oldest past that.
 
+## Persistence and the clipboard
+
+`packages/document/src/serialize.ts` is the only place untrusted input enters the app, so it
+validates by hand rather than trusting a cast, and every failure names the path that failed
+(`nodes[3].opacity is not a finite number`) instead of saying "invalid". `SCHEMA_VERSION` is
+written into every file and a future version is refused rather than half read.
+
+The saved shape is flat: a list of nodes, with structure carried by each node's `children`.
+
+`document.load(root, nodes)` replaces the contents **in place**. That is not an implementation
+detail: the editor holds one document as a module singleton and every React hook and the renderer
+subscribe to it, so swapping in a new instance would leave them all watching an object nothing
+writes to. Loading also pushes the id generator past every id in the file, since a loaded document
+keeps its ids and the next node created would otherwise collide with one of them.
+
+The editor autosaves to `localStorage` 600ms after edits stop, and flushes on `pagehide` so a tab
+close does not drop the pending write. A save that will not parse is moved to
+`figma-canvas:document.unreadable` rather than overwritten, because silently starting from a blank
+document looks exactly like losing someone's work. **To get the seeded scene back, clear
+`figma-canvas:document` in local storage.**
+
+Copy, cut and paste use the real clipboard events rather than the async clipboard API, so the JSON
+rides on the system clipboard: paste works between two tabs of the editor, with no permission
+prompt and no user gesture needed to read. Text from anywhere else fails to parse and is ignored,
+which is not an error.
+
+Paste and duplicate share `instantiateSubtree`, which assigns fresh ids and rewrites every parent
+and child reference to match. A selection containing both a frame and one of its own children
+collapses to just the frame, so the child is not pasted twice.
+
 ## Commands
 
 ```
 pnpm dev         editor on :5173
 pnpm build
 pnpm typecheck   every package
+pnpm test        vitest, whole workspace
+pnpm test:watch
+pnpm check       typecheck and test together
 ```
+
+Tests sit next to what they cover as `*.test.ts`. Vitest resolves the `@figma-canvas/*` imports
+through the pnpm links, so tests import the packages exactly as the app does, with no build step.
+
+The renderer is testable without a GPU: `createStubDevice` in
+`packages/renderer/src/webgpu/testing/` captures the exact bytes `writeBuffer` would have received.
+That is what makes packing bugs catchable, because a wrong offset shows up as a number in the wrong
+slot rather than as a shape drawn in the wrong place. **Geometry and packing must have a test.**
+Every silent bug this project has had was in that category.
+
+## Performance
+
+`?stress=10000` seeds a grid of that many nodes instead of loading the saved document, and
+`?perf` (implied by `?stress`) shows a readout of instances drawn, instances culled, build time and
+frame time. Autosave is off in stress mode, so throwaway nodes are never persisted.
+
+Measured on a 10,000 node grid, CPU side:
+
+| | |
+| --- | --- |
+| Insert 10,000 nodes | 14ms, once |
+| Build the buffer, nothing culled | 16.3ms for 10,000 instances |
+| Build it culled to a 1600x1000 viewport | 4.0ms for 459 instances |
+| Pan inside the built margin | 1000 calls in 0.86ms, so free |
+| Pan that leaves the margin | about 2ms per rebuild |
+
+Culling and caching pull against each other: the buffer is cached against `document.version` so
+panning costs nothing, but a culled buffer depends on where the camera is. `CULL_MARGIN` builds
+half a viewport past the edges and rebuilds only when the view leaves that region, which keeps the
+common case free.
+
+**The remaining 4ms is the walk over all 10,000 nodes, not the packing of the 459 visible ones**, so
+the next win is a spatial index, not more culling. Nothing needs it yet.
 
 Port 5173 is deliberate and `strictPort` is on. The other two repos in this folder both want 3000
 and silently land on each other's ports. This one stays out of that fight.
