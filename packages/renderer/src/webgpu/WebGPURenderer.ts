@@ -1,9 +1,15 @@
 import type { SceneDocument } from '@figma-canvas/document'
 import { clipMatrix, pixelsToClip, type Viewport } from '../camera.js'
 import type { Renderer, RendererInit, RendererStats, ViewState } from '../Renderer.js'
-import { createGPUSurface, onDeviceLost, type GPUSurface } from './device.js'
+import { createGPUSurface, onDeviceLost, releaseGPUSurface, type GPUSurface } from './device.js'
 import { MatrixUniform, createMatrixBindGroupLayout } from './MatrixUniform.js'
 import { ClipRegions, createClipBindGroupLayout } from './ClipRegions.js'
+import {
+  GlyphAtlas,
+  createAtlasBindGroupLayout,
+  loadGlyphAtlas,
+  type GlyphAtlasSource,
+} from './GlyphAtlas.js'
 import { ShapeInstances } from './ShapeInstances.js'
 import { OverlayInstances } from './OverlayInstances.js'
 import { createShapePipeline } from './pipelines/shape.js'
@@ -25,6 +31,7 @@ class WebGPURenderer implements Renderer {
   #pixelsToClip: MatrixUniform
 
   #clips: ClipRegions
+  #atlas: GlyphAtlas
   #shapes: ShapeInstances
   #overlay: OverlayInstances
   #shapePipeline: GPURenderPipeline
@@ -34,7 +41,12 @@ class WebGPURenderer implements Renderer {
   #viewport: Viewport = { width: 1, height: 1 }
   #destroyed = false
 
-  constructor(surface: GPUSurface, canvas: HTMLCanvasElement, document: SceneDocument) {
+  constructor(
+    surface: GPUSurface,
+    canvas: HTMLCanvasElement,
+    document: SceneDocument,
+    atlas: GlyphAtlasSource,
+  ) {
     this.#surface = surface
     this.#canvas = canvas
     this.#document = document
@@ -45,12 +57,22 @@ class WebGPURenderer implements Renderer {
 
     const clipLayout = createClipBindGroupLayout(surface.device)
     this.#clips = new ClipRegions(surface.device, clipLayout)
-    this.#shapes = new ShapeInstances(surface.device, this.#clips)
-    this.#overlay = new OverlayInstances(surface.device)
+
+    const atlasLayout = createAtlasBindGroupLayout(surface.device)
+    this.#atlas = new GlyphAtlas(surface.device, atlasLayout, atlas)
+
+    this.#shapes = new ShapeInstances(surface.device, this.#clips, this.#atlas.metrics)
+    this.#overlay = new OverlayInstances(surface.device, this.#atlas.metrics)
 
     // Built once at startup. Compiling a pipeline mid frame is the classic way to produce
     // a stutter that only shows up the first time a user draws something.
-    this.#shapePipeline = createShapePipeline(surface.device, surface.format, layout, clipLayout)
+    this.#shapePipeline = createShapePipeline(
+      surface.device,
+      surface.format,
+      layout,
+      clipLayout,
+      atlasLayout,
+    )
     this.#overlayPipeline = createOverlayPipeline(surface.device, surface.format, layout)
   }
 
@@ -85,6 +107,7 @@ class WebGPURenderer implements Renderer {
       view.camera,
       this.#viewport,
       view.marquee,
+      view.editing,
     )
 
     const encoder = device.createCommandEncoder()
@@ -108,8 +131,10 @@ class WebGPURenderer implements Renderer {
       pass.setPipeline(this.#shapePipeline)
       pass.setBindGroup(0, this.#worldToClip.bindGroup)
       pass.setBindGroup(1, clips)
+      pass.setBindGroup(2, this.#atlas.bindGroup)
       pass.setVertexBuffer(0, shapes)
-      // Four corners, one instance per shape. The entire document in a single call.
+      // Four corners, one instance per shape and one per glyph. The whole document, text
+      // included, in a single call.
       pass.draw(4, this.#shapes.count)
     }
 
@@ -139,9 +164,9 @@ class WebGPURenderer implements Renderer {
     this.#pixelsToClip.destroy()
     this.#shapes.destroy()
     this.#clips.destroy()
+    this.#atlas.destroy()
     this.#overlay.destroy()
-    this.#surface.context.unconfigure()
-    this.#surface.device.destroy()
+    releaseGPUSurface(this.#surface)
   }
 }
 
@@ -154,7 +179,13 @@ export async function createWebGPURenderer(
   init: RendererInit,
   options: CreateRendererOptions = {},
 ): Promise<Renderer> {
+  // Started before the device is asked for, because the atlas is a fetch and a decode and
+  // needs no device at all. Awaiting them in turn would add the whole download to the time
+  // before the first frame, for no reason beyond the order the lines happened to be written.
+  const pending = loadGlyphAtlas()
   const surface = await createGPUSurface(init.canvas)
   if (options.onLost) onDeviceLost(surface.device, options.onLost)
-  return new WebGPURenderer(surface, init.canvas, init.document)
+  // Still awaited before the renderer exists, so the first frame already has its glyphs. A
+  // placeholder texture swapped in later would flash the document in blank boxes.
+  return new WebGPURenderer(surface, init.canvas, init.document, await pending)
 }

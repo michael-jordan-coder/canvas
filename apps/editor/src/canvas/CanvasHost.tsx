@@ -13,6 +13,9 @@ import {
 import { scene } from '../state/scene'
 import { frameStats } from '../state/stats'
 import { useUI } from '../state/uiStore'
+import { fontMetrics, updateText } from '../state/font'
+import { TextEditor } from '../ui/TextEditor'
+import { beginEditing, endEditing } from '../state/textEditing'
 import { createPointerInput } from '../input/pointerInput'
 import { isEditingText } from '../input/isEditingText'
 import styles from './CanvasHost.module.css'
@@ -54,6 +57,7 @@ export function CanvasHost(): ReactElement {
           camera: cameraRef.current,
           selection: useUI.getState().selection,
           marquee: marqueeRef.current,
+          editing: useUI.getState().editing,
         })
         const finishedAt = performance.now()
 
@@ -144,7 +148,9 @@ export function CanvasHost(): ReactElement {
     const unsubscribe = scene.subscribe(draw)
     // Selection is drawn but is not in the document, so it needs its own redraw trigger.
     const unsubscribeSelection = useUI.subscribe((state, previous) => {
-      if (state.selection !== previous.selection) draw()
+      // The caret is drawn but is not in the document, so like selection it needs its own
+      // trigger. That covers the blink too, which is a change to nothing else.
+      if (state.selection !== previous.selection || state.editing !== previous.editing) draw()
     })
     canvas.addEventListener('wheel', onWheel, { passive: false })
     window.addEventListener('keydown', onKeyDown)
@@ -167,6 +173,12 @@ export function CanvasHost(): ReactElement {
         marqueeRef.current = rect
       },
       requestDraw: draw,
+      beginTextEdit: beginEditing,
+      setTextCaret: (caret, anchor) => useUI.getState().setTextCaret(caret, anchor),
+      endTextEdit: endEditing,
+      getEditing: () => useUI.getState().editing,
+      getMetrics: fontMetrics,
+      updateText,
     })
 
     // devicePixelRatio changes when the window moves to a different display, and no resize
@@ -218,6 +230,7 @@ export function CanvasHost(): ReactElement {
   return (
     <>
       <canvas ref={canvasRef} className={styles.canvas} />
+      <TextEditor />
       {error && <p className={styles.error}>{error}</p>}
     </>
   )

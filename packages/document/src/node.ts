@@ -24,7 +24,7 @@ export function reserveNodeIds(ids: Iterable<NodeId>): void {
   }
 }
 
-export type NodeType = 'page' | 'frame' | 'rectangle' | 'ellipse'
+export type NodeType = 'page' | 'frame' | 'rectangle' | 'ellipse' | 'text'
 
 export interface BaseNode {
   readonly id: NodeId
@@ -65,10 +65,32 @@ export interface EllipseNode extends BaseNode {
   strokes: Stroke[]
 }
 
-export type SceneNode = PageNode | FrameNode | RectangleNode | EllipseNode
+/**
+ * `size` is not set by hand the way it is on a shape: it is the measured bounds of the laid
+ * out text, recomputed whenever `characters` or `fontSize` changes. It lives on the node
+ * anyway because hit testing and the selection box need the bounds, and this package cannot
+ * measure a string, having no DOM. Treat it as a cache with one rule: whatever writes the
+ * text writes the size in the same transaction.
+ */
+export interface TextNode extends BaseNode {
+  readonly type: 'text'
+  characters: string
+  /** In the same units as `size`, so a text node inside a scaled frame scales with it. */
+  fontSize: number
+  /**
+   * True while the box sizes itself to its words, which is how a text node starts. Dragging a
+   * resize handle turns it off, and from then on `size.width` is the width lines wrap to and
+   * only the height is measured.
+   */
+  autoWidth: boolean
+  fills: Paint[]
+  strokes: Stroke[]
+}
+
+export type SceneNode = PageNode | FrameNode | RectangleNode | EllipseNode | TextNode
 
 /** Nodes that paint something. Excludes the page, which is only a container. */
-export type PaintedNode = FrameNode | RectangleNode | EllipseNode
+export type PaintedNode = FrameNode | RectangleNode | EllipseNode | TextNode
 
 export function isPainted(node: SceneNode): node is PaintedNode {
   return node.type !== 'page'
@@ -116,6 +138,22 @@ export function createRectangle(
     fills: [],
     strokes: [],
     cornerRadius: 0,
+    ...init,
+  }
+}
+
+/** The default is a readable UI size rather than a display one, since most text here labels something. */
+export const DEFAULT_FONT_SIZE = 16
+
+export function createText(init: Partial<Omit<TextNode, 'id' | 'type'>> = {}): TextNode {
+  return {
+    ...base('text', 'Text'),
+    type: 'text',
+    characters: '',
+    fontSize: DEFAULT_FONT_SIZE,
+    autoWidth: true,
+    fills: [],
+    strokes: [],
     ...init,
   }
 }
@@ -185,6 +223,17 @@ export function cloneNodeAs(node: SceneNode, id: NodeId): SceneNode {
         ...shared,
         id,
         type: 'ellipse',
+        fills: node.fills.map(clonePaint),
+        strokes: node.strokes.map(cloneStroke),
+      }
+    case 'text':
+      return {
+        ...shared,
+        id,
+        type: 'text',
+        characters: node.characters,
+        fontSize: node.fontSize,
+        autoWidth: node.autoWidth,
         fills: node.fills.map(clonePaint),
         strokes: node.strokes.map(cloneStroke),
       }

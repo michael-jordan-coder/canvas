@@ -13,6 +13,8 @@ export interface StubDevice {
   device: GPUDevice
   /** The most recent upload to the named buffer, as floats. */
   written(label?: string): Float32Array
+  /** Every texture created on this device, in order, as the descriptors it was asked for. */
+  textures(): readonly GPUTextureDescriptor[]
 }
 
 const SHAPES = 'shape instances'
@@ -29,12 +31,15 @@ export function createStubDevice(): StubDevice {
   const global = globalThis as unknown as {
     GPUBufferUsage?: Record<string, number>
     GPUShaderStage?: Record<string, number>
+    GPUTextureUsage?: Record<string, number>
   }
   global.GPUBufferUsage ??= { VERTEX: 0x20, COPY_DST: 0x08, UNIFORM: 0x40, STORAGE: 0x80 }
   global.GPUShaderStage ??= { VERTEX: 0x1, FRAGMENT: 0x2, COMPUTE: 0x4 }
+  global.GPUTextureUsage ??= { COPY_DST: 0x02, TEXTURE_BINDING: 0x04, RENDER_ATTACHMENT: 0x10 }
 
   const uploads = new Map<string, Float32Array>()
   const empty = new Float32Array(0)
+  const textures: GPUTextureDescriptor[] = []
 
   const device = {
     createBuffer: ({ label }: { label?: string }): StubBuffer => ({
@@ -43,16 +48,28 @@ export function createStubDevice(): StubDevice {
     }),
     createBindGroupLayout: () => ({}),
     createBindGroup: () => ({}),
+    // The atlas is the only texture in the app, and the two things about it that fail
+    // quietly are its format and its usage flags, so the descriptor is what gets kept.
+    createTexture: (descriptor: GPUTextureDescriptor) => {
+      textures.push(descriptor)
+      return { createView: () => ({}), destroy: () => {} }
+    },
+    createSampler: () => ({}),
     queue: {
       writeBuffer: (buffer: StubBuffer, _offset: number, data: ArrayBuffer) => {
         uploads.set(buffer.label, new Float32Array(data))
       },
+      copyExternalImageToTexture: () => {},
     },
     // The real thing has dozens of members this never touches, so it is cast rather than
     // implemented. Narrowing that cast would mean stubbing the whole WebGPU surface.
   } as unknown as GPUDevice
 
-  return { device, written: (label = SHAPES) => uploads.get(label) ?? empty }
+  return {
+    device,
+    written: (label = SHAPES) => uploads.get(label) ?? empty,
+    textures: () => textures,
+  }
 }
 
 /** Reads field `slot` of instance `index`, given a stride in floats. */

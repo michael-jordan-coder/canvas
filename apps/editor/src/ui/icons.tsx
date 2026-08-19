@@ -60,6 +60,14 @@ export function EllipseIcon(props: IconProps): ReactElement {
   )
 }
 
+export function TextIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <path {...stroke} d="M3 4V3h10v1M8 3v10M5.5 13h5" />
+    </Svg>
+  )
+}
+
 export function DownloadIcon(props: IconProps): ReactElement {
   return (
     <Svg {...props}>

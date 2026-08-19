@@ -1,0 +1,29 @@
+/*
+ * Invisible, but present and focused. Everything you see while typing is drawn by the
+ * renderer: the glyphs from the document, the caret and the highlight by the overlay. This
+ * field only collects keystrokes, so anything that would make it visible is a bug.
+ *
+ * Not display:none and not visibility:hidden. Both stop an element receiving composition
+ * events, which would take dead keys and every IME with them.
+ */
+.field {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  /* Pointer events belong to the canvas underneath, which does its own caret placement. */
+  pointer-events: none;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  /* Safari draws its own caret and selection on a focused field even at zero opacity. */
+  caret-color: transparent;
+}
+
+.field:focus {
+  outline: none;
+}

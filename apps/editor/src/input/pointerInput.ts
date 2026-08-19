@@ -5,20 +5,27 @@ import {
   createEllipse,
   createFrame,
   createRectangle,
+  createText,
+  caretAtPoint,
   fromHex,
   hitTest,
   invert,
+  layoutTextNode,
+  containsPoint,
   nodesIn,
   type Mat2D,
   type NodeId,
   type Rect,
   type SceneDocument,
+  type FontMetrics,
   type SceneNode,
   type Size,
+  type TextNode,
   type Vec2,
 } from '@figma-canvas/document'
 import {
   grabAt,
+  resizeHandlesFor,
   screenToWorld,
   selectionBox,
   selectionWorldBounds,
@@ -44,6 +51,7 @@ import {
   type ResizeTarget,
 } from './resize'
 import type { ToolId } from '../state/uiStore'
+import { isEditingText } from './isEditingText'
 
 export interface PointerInputOptions {
   canvas: HTMLCanvasElement
@@ -59,6 +67,21 @@ export interface PointerInputOptions {
   setMarquee: (rect: Rect | null) => void
   /** Ask for a redraw. Document edits redraw on their own, camera moves do not. */
   requestDraw: () => void
+  /** Open the inline editor on a text node, placing the caret at an offset. */
+  beginTextEdit: (id: NodeId, caret: number, anchor?: number) => void
+  /** Extend the current text selection to an offset, while dragging inside the text. */
+  setTextCaret: (caret: number, anchor: number) => void
+  /** Commit whatever is being typed, because the pointer went somewhere else. */
+  endTextEdit: () => void
+  /** The node being typed into, or null. */
+  getEditing: () => { id: NodeId; anchor: number } | null
+  /**
+   * The font, or null until it has loaded. Handed over whole rather than as a measure
+   * callback, because placing a caret needs the layout and not only its bounds.
+   */
+  getMetrics: () => FontMetrics | null
+  /** Changes a text node and rewrites its cached bounds with it, in one step. */
+  updateText: (node: TextNode, changes: Partial<TextNode>) => void
 }
 
 /** Drawn when a shape tool is clicked rather than dragged. */
@@ -116,7 +139,7 @@ interface LocalResize {
 
 interface Drag {
   pointerId: number
-  kind: 'move' | 'pan' | 'resize' | 'rotate' | 'create' | 'marquee'
+  kind: 'move' | 'pan' | 'resize' | 'rotate' | 'create' | 'marquee' | 'text'
   startScreen: Vec2
   startWorld: Vec2
   startCamera: Camera
@@ -194,6 +217,70 @@ export function createPointerInput(options: PointerInputOptions): () => void {
   const worldOf = (screen: Vec2): Vec2 =>
     screenToWorld(options.getCamera(), viewportOf(), screen)
 
+
+  /*
+   * Tracked by hand rather than read off the event. `PointerEvent.detail` is specified as 0
+   * for pointerdown, so the platform's click count is only ever on click and dblclick, and
+   * this layer listens to neither: it needs the count at pointer down, before a gesture can
+   * begin, not after one has finished.
+   */
+  const DOUBLE_CLICK_MS = 400
+  const DOUBLE_CLICK_SLOP = 4
+  let lastClickAt = 0
+  let lastClickScreen: Vec2 | null = null
+
+  const isDoubleClick = (screen: Vec2, now: number): boolean => {
+    if (!lastClickScreen || now - lastClickAt > DOUBLE_CLICK_MS) return false
+    return (
+      Math.abs(screen.x - lastClickScreen.x) <= DOUBLE_CLICK_SLOP &&
+      Math.abs(screen.y - lastClickScreen.y) <= DOUBLE_CLICK_SLOP
+    )
+  }
+
+  /** The offset in a text node nearest a world point, or null if the point misses it. */
+  const caretIn = (id: NodeId, world: Vec2, clamp = false): number | null => {
+    const node = document.getNode(id)
+    const metrics = options.getMetrics()
+    if (!node || node.type !== 'text' || !metrics) return null
+
+    const local = applyToPoint(invert(document.worldTransform(id)), world)
+    const layout = layoutTextNode(node, metrics)
+    // A sweep that leaves the box keeps selecting to the nearest offset, the way dragging
+    // out of a text field does. A fresh click outside it has to miss, so it can commit.
+    // The same test the click that selects a node uses, so "inside the node I am editing"
+    // cannot drift from "inside the node". On a fixed width box those are different numbers:
+    // the layout is as wide as the ink, the node is as wide as the text wraps to.
+    if (!clamp && !containsPoint(node, local)) return null
+    return caretAtPoint(layout, local)
+  }
+
+  /**
+   * Drops an empty text node at the point and opens it for typing.
+   *
+   * Empty, and with no size, so it is unclickable and invisible until a character is typed.
+   * That is what lets a click that types nothing be discarded on commit with no special
+   * case, exactly the way a zero sized shape never reaches the document at all.
+   */
+  const createTextAt = (world: Vec2): void => {
+    const parentId = containerAt(document, world).id
+    const toParent = invert(document.worldTransform(parentId))
+    const origin = applyToPoint(toParent, world)
+    const node = createText({ fills: [fromHex('#1a1a1a')] })
+
+    document.transact(() => {
+      document.insert(node, parentId)
+      document.update<TextNode>(node.id, {
+        transform: { ...IDENTITY_MATRIX, tx: origin.x, ty: origin.y },
+      })
+      options.setSelection([node.id])
+    })
+
+    // Back to move first. Switching tools ends any edit, so opening the editor afterwards is
+    // the only order that leaves it open.
+    options.setTool('move')
+    options.beginTextEdit(node.id, 0)
+  }
+
   const onPointerDown = (event: PointerEvent): void => {
     if (drag) return
     const screen = screenOf(event)
@@ -222,6 +309,49 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     if (event.button !== 0) return
 
     const tool = options.getTool()
+
+    /*
+     * A pointer down while typing either moves the caret, if it lands in the node being
+     * typed into, or commits and carries on as an ordinary click everywhere else. Clicking
+     * away to commit is the same gesture as clicking away to deselect, so it must not also
+     * swallow the click.
+     */
+    const editing = options.getEditing()
+    if (editing) {
+      const caret = caretIn(editing.id, world)
+      if (caret !== null) {
+        // Clicking a canvas moves focus to the body, which would blur the field collecting
+        // the keystrokes a moment after it was focused. Nothing here wants the default.
+        event.preventDefault()
+        const anchor = event.shiftKey ? editing.anchor : caret
+        options.setTextCaret(caret, anchor)
+        drag = {
+          pointerId: event.pointerId,
+          kind: 'text',
+          startScreen: screen,
+          startWorld: world,
+          startCamera: options.getCamera(),
+          nodes: [],
+          grouped: false,
+          duplicateOnMove: false,
+        }
+        canvas.setPointerCapture(event.pointerId)
+        return
+      }
+      options.endTextEdit()
+    }
+
+    if (tool === 'text') {
+      // See above: the click must not take focus off the field that is about to receive it.
+      event.preventDefault()
+      // A click and a drag mean the same thing while the box is auto width, so there is no
+      // create gesture to run and nothing to do on the way up.
+      createTextAt(world)
+      lastClickAt = event.timeStamp
+      lastClickScreen = screen
+      return
+    }
+
     if (SHAPE_TOOLS.has(tool)) {
       drag = {
         pointerId: event.pointerId,
@@ -240,6 +370,20 @@ export function createPointerInput(options: PointerInputOptions): () => void {
       }
       canvas.setPointerCapture(event.pointerId)
       return
+    }
+
+    const doubled = isDoubleClick(screen, event.timeStamp)
+    lastClickAt = event.timeStamp
+    lastClickScreen = screen
+
+    if (tool === 'move' && doubled) {
+      const hit = hitTest(document, world)
+      if (hit && hit.type === 'text') {
+        event.preventDefault()
+        const caret = caretIn(hit.id, world, true) ?? 0
+        options.beginTextEdit(hit.id, caret)
+        return
+      }
     }
 
     // Handles are tested before the shapes under them, because a handle sits on the very edge
@@ -360,7 +504,9 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     // The drawn box, rotation included, so a handle on a turned node is grabbed where it
     // actually sits rather than where an upright box would have put it.
     const box = selectionBox(document, selection, options.getCamera(), viewportOf())
-    return box ? grabAt(box, screen) : null
+    if (!box) return null
+    // The same set the overlay draws, so a handle that is not there cannot be grabbed.
+    return grabAt(box, screen, resizeHandlesFor(document, selection))
   }
 
   /**
@@ -459,6 +605,15 @@ export function createPointerInput(options: PointerInputOptions): () => void {
 
     if (drag.kind === 'create') {
       applyCreate(drag, screen, { fromCentre: event.altKey, constrain: event.shiftKey })
+      return
+    }
+
+    if (drag.kind === 'text') {
+      // The session holds the node and the anchor, and a sweep changes neither.
+      const editing = options.getEditing()
+      if (!editing) return
+      const caret = caretIn(editing.id, worldOf(screen), true)
+      if (caret !== null) options.setTextCaret(caret, editing.anchor)
       return
     }
 
@@ -568,6 +723,22 @@ export function createPointerInput(options: PointerInputOptions): () => void {
       }
 
       const { transform, size } = resizedInPlace(localResize, anchor, sx, sy)
+      const node = document.getNode(localResize.id)
+
+      if (node?.type === 'text') {
+        /*
+         * Dragging a text node's edge is what turns it into a fixed width box. The width is
+         * the handle's to set from here on, because it is the width the lines wrap to. The
+         * height is not: it is however many lines that produces. Only the side handles are
+         * offered, so the drag never asks for a height in the first place, and the box grows
+         * downward from an origin the drag has not moved.
+         */
+        // measureTextNode on a fixed width node keeps the width it is given and measures
+        // only the height, which is exactly the split this needs.
+        options.updateText(node, { transform, autoWidth: false, size })
+        return
+      }
+
       document.update(localResize.id, { transform, size })
       return
     }
@@ -719,6 +890,14 @@ export function createPointerInput(options: PointerInputOptions): () => void {
       return
     }
 
+    if (drag.kind === 'text') {
+      // The caret already followed the pointer on the way here, and a sweep through text
+      // edits nothing, so releasing has nothing to commit and nothing to record.
+      drag = null
+      updateIdleCursor(screenOf(event))
+      return
+    }
+
     if (drag.kind === 'marquee') {
       options.setMarquee(null)
       options.requestDraw()
@@ -828,6 +1007,11 @@ export function createPointerInput(options: PointerInputOptions): () => void {
       return
     }
 
+    // Every other keyboard consumer in the app checks this and this one never did, which
+    // only became visible with a text node to type into: a space would otherwise arm the
+    // pan gesture and flip the canvas to a grab cursor mid word.
+    if (isEditingText(event.target)) return
+
     if (event.code === 'Space') {
       spaceHeld = true
       if (!drag && lastPointerScreen) updateIdleCursor(lastPointerScreen)
@@ -835,6 +1019,7 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     reapplyModifiers(event)
   }
   const onKeyUp = (event: KeyboardEvent): void => {
+    if (isEditingText(event.target)) return
     if (event.code === 'Space') {
       spaceHeld = false
       if (!drag && lastPointerScreen) updateIdleCursor(lastPointerScreen)

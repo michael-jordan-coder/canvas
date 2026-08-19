@@ -123,8 +123,12 @@ keeps its ids and the next node created would otherwise collide with one of them
 The editor autosaves to `localStorage` 600ms after edits stop, and flushes on `pagehide` so a tab
 close does not drop the pending write. A save that will not parse is moved to
 `figma-canvas:document.unreadable` rather than overwritten, because silently starting from a blank
-document looks exactly like losing someone's work. **To get the seeded scene back, clear
-`figma-canvas:document` in local storage.**
+document looks exactly like losing someone's work. **To get the seeded scene back, put
+something unparseable in `figma-canvas:document` and reload, from a document with no edit
+pending.** Removing the key does not work: the `pagehide` flush writes the live document
+straight back on the way out, so the save is there again before the next load reads it. An
+unparseable value survives that, because the quarantine above is what handles it, but only if
+nothing is waiting to be written. Reload once to settle any pending save, then poison it.
 
 Copy, cut and paste use the real clipboard events rather than the async clipboard API, so the JSON
 rides on the system clipboard: paste works between two tabs of the editor, with no permission
@@ -274,6 +278,9 @@ would have returned had it been callable there.
   at 10% zoom and at 3000%, and a one pixel outline stays one pixel. Both pipelines share
   `MatrixUniform`; they differ only in which matrix they are bound to.
 
+- Text, as a node type, a pure layout, an MSDF atlas and an inline editor. It draws in the
+  same instanced call as everything else. See the text section below.
+
 - Rotation. The transform was always a full affine, so the renderer needed no change at all: a
   turned node draws correctly the moment its matrix says so. What rotation actually cost was
   everything built on the assumption that a selection is upright.
@@ -281,6 +288,109 @@ would have returned had it been callable there.
 `Renderer.render` takes a `ViewState` rather than a camera, because selection is drawn but is not
 in the document. It is passed in once per frame instead of read, so the dependency keeps pointing
 one way. `CanvasHost` subscribes to the UI store separately to redraw when selection changes.
+
+## Text
+
+Text is the first thing here that is not an analytic shape, and the whole design is about
+giving up as little as possible for it.
+
+**A glyph is an instance in the same buffer as every shape.** Not a second pipeline and not a
+second draw call. The 80 byte instance has six slots a letter has no use for, and a glyph
+needs five: `params.x` and `params.z` are the top left of its patch of the atlas, `params.w`
+the right edge, and two spare slots in `flags` carry the bottom edge and the distance range.
+Kind and clip index stay exactly where a shape keeps them, because the shader reads both
+before it knows what it is looking at. So text inherits culling, opacity, the clip chain and,
+most importantly, **paint order**: a rectangle drawn over a word covers it, which a separate
+text pass could not manage without splitting the shape draw around every text node.
+
+**The atlas is multi-channel and baked, not rasterised.** `packages/renderer/src/font/` holds
+Inter Regular, a 512x512 MSDF atlas and the metrics that go with it, with the exact bake
+command and the reason for every flag in its `README.md`. A single channel field rounds off
+anything sharper than its own radius, which is why one channel makes the corner of a letter
+read soft at high zoom; the median of three recovers it. 1 MB on the GPU, uploaded once.
+
+Three rules in the shader, all of which have a wrong version that still compiles or still
+renders:
+
+- **`textureSampleLevel`, never `textureSample`.** WGSL's uniformity analysis treats the kind
+  flag as non-uniform, because it is an interpolated varying, so the plain one fails to
+  compile inside the glyph branch however uniform that branch is in practice. An explicit LOD
+  is legal anywhere, and an MSDF wants no mipmaps regardless.
+- **Every derivative is taken at the top of the fragment stage, before anything branches.**
+  Same reason the clip walk takes its own from the caller, now applying to three of them.
+- **`outset` returns 0 for a glyph.** It reads the stroke slots, which on a glyph hold texture
+  coordinates, and padding a quad by them grows every letter by a fraction of its own size.
+  That reads as imprecision rather than as a bug, which is what makes it worth a guard.
+
+**Layout is pure, lives in `packages/document`, and takes its font as a parameter.** This
+package cannot measure text, having no DOM, but it does not need to: a baked atlas ships its
+advances and line metrics as data, and that is the whole of what layout reads. The editor and
+the renderer call the same `layoutText`, which is not a tidiness point. The editor writes the
+measured bounds onto the node and draws the caret from them, the renderer packs one instance
+per glyph, and two layouts that could disagree would put the caret beside the text.
+
+One convention runs through all of it: **y grows downward, the origin is the pen position on
+the baseline, and offsets are UTF-16 code units.** That is why `ascender` is negative, why the
+atlas is baked `-yorigin top`, and why a caret can be handed to and from a textarea with no
+conversion. Iteration is by code point, so an astral character is one glyph at two offsets and
+a caret cannot land inside it.
+
+**A text node's `size` is a cache, not a setting.** It is the measured bounds, and the rule is
+that whatever writes the text writes the size in the same transaction. Hit testing and the
+selection box need bounds and cannot compute them, which is why they live on the node at all.
+`apps/editor/src/state/font.ts` remeasures every text node once the font arrives, since a
+saved file loads synchronously from local storage while the atlas comes over the network, and
+that is also what keeps a document honest across a change of font.
+
+**A text node offers two resize handles, east and west, and no others.** Its width is a real
+setting, because it is the width lines wrap to. Its height is not: it is however many lines
+that produces, so a south handle would be offering to fight the layout. `resizeHandlesFor` is
+asked by both the overlay and the input layer, so what is drawn and what is grabbable cannot
+disagree, and `handlePoints` takes that set because the crowding minimum that hides an edge
+handle on a short box only exists to keep it off a corner one. With no corners in the set
+there is nothing to crowd, and without that exception a line of text, always shorter than the
+minimum, would offer no handles at all.
+
+Dragging either handle is what turns the box **fixed width**: `autoWidth` goes false and from
+then on `size.width` is the wrap width and only the height is measured. The panel's W becomes
+editable at the same moment, and an Auto width toggle turns it back, because nothing else in
+the editor returns a box to sizing itself to its words and a one way door is not a setting.
+
+Wrapping is greedy and breaks at spaces, with two rules that are only visible when they are
+wrong: a trailing space hangs past the edge rather than pushing a line over, since a line that
+broke on the space you just typed would look broken; and a single word longer than the box
+breaks mid-word, because letting it overflow would draw text outside the bounds that are hit
+tested. A non-breaking space is deliberately not a break opportunity, which is the whole
+reason it exists.
+
+### Inline editing: what is DOM and what is GPU
+
+An invisible `<textarea>`, focused, is the only DOM part. It is what makes dead keys,
+autocorrect and an IME candidate window work, none of which can be reimplemented on top of raw
+keydown events. It is emphatically not what you see: the glyphs come from the renderer and the
+caret and selection highlight from the overlay pipeline, passed in through `ViewState` exactly
+as the marquee already is. The text is therefore never on screen twice and nothing can jitter.
+
+Four things about that field are load bearing, and every one of them presents as a bug
+somewhere else:
+
+- **Opacity zero, not `display: none` or `visibility: hidden`.** Both of the latter stop an
+  element receiving composition events, which takes every IME with them.
+- **The pointer down that opens the editor calls `preventDefault`.** Clicking a canvas moves
+  focus to the body, which would blur the field a moment after it was focused.
+- **The caret comes from a `selectionchange` listener on the document, not React's
+  `onSelect`.** React polyfills that one from a narrow set of events and it never fires for a
+  caret moved by the keyboard, which is most of how a caret moves.
+- **The field is synced from the document in a layout effect.** It is uncontrolled, so it
+  starts empty, and anything reaching it before the sync would report an empty value and blank
+  the node. Controlled would close that window and fight the IME instead.
+
+`TextEditor` returns null rather than unmounting when nothing is being edited, so **the typing
+history group cannot live in the component**: a cleanup that never runs would leave the group
+open, and every later edit in the session would silently fold into a step that never commits.
+It lives at module scope and `endEditing` closes it. A burst is one undo step, opened on the
+first keystroke and closed after 600ms of quiet, on blur, on commit, or on window blur, which
+is the same shape and the same safety net the arrow key nudge uses.
 
 ## Rotation, and the one rule it added
 

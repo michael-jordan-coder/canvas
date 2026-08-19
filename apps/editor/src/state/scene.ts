@@ -4,6 +4,7 @@ import {
   createEllipse,
   createFrame,
   createRectangle,
+  createText,
   fromHex,
   translation,
   type NodeId,
@@ -88,6 +89,16 @@ function seed(): void {
         size: { width: 140, height: 90 },
         fills: [fromHex('#0a7cff')],
         cornerRadius: 4,
+      }),
+      frame.id,
+    )
+    scene.insert(
+      createText({
+        name: 'Text',
+        transform: translation(24, 150),
+        characters: 'Hamburgefonstiv',
+        fontSize: 18,
+        fills: [fromHex('#1a1a1a')],
       }),
       frame.id,
     )

@@ -1,8 +1,23 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { SceneDocument, createRectangle, translation } from '@figma-canvas/document'
+import {
+  SceneDocument,
+  createRectangle,
+  translation,
+  type FontMetrics,
+} from '@figma-canvas/document'
 import type { Camera, Viewport } from '../camera.js'
 import { OverlayInstances } from './OverlayInstances.js'
 import { createStubDevice, instanceAt } from './testing/stubDevice.js'
+
+/** The overlay only reads this for the text caret, which the cases below never open. */
+const METRICS: FontMetrics = {
+  lineHeight: 1.25,
+  ascender: -1,
+  descender: 0.25,
+  pxRange: 4,
+  fallback: 0x3f,
+  glyphs: new Map(),
+}
 
 const STRIDE = 16
 const FIELD = { x: 0, y: 1, width: 2, height: 3, fillAlpha: 7, strokeWidth: 12 } as const
@@ -29,7 +44,7 @@ let overlay: OverlayInstances
 beforeEach(() => {
   world = scene()
   stub = createStubDevice()
-  overlay = new OverlayInstances(stub.device)
+  overlay = new OverlayInstances(stub.device, METRICS)
 })
 
 const field = (index: number, slot: number): number =>

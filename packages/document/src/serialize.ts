@@ -13,8 +13,18 @@ import type { Paint, RGBA, Stroke, StrokeAlign } from './paint.js'
 /**
  * Bump when the on disk shape changes in a way older data cannot satisfy. Saved documents
  * carry it so a future version can migrate rather than guess.
+ *
+ * 2 added the text node. Nothing needs migrating in that direction, since a version 1 file
+ * cannot contain one and every field it does have is unchanged. The bump earns its keep in
+ * the other direction: a build from before text opens a version 2 file and says so, instead
+ * of failing halfway through on `nodes[7].type "text" is not a node type`.
+ *
+ * 3 added `autoWidth` to the text node, and is the first version that does need migrating:
+ * every text node in a version 2 file predates fixed width boxes, so it was auto width.
+ * That is why `parseNode` is told the version rather than defaulting the field whatever it
+ * reads. Filling a gap silently is how a file that is actually malformed gets through.
  */
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 3
 
 export interface SerializedDocument {
   kind: 'figma-canvas/document'
@@ -141,9 +151,9 @@ function parseStrokes(value: unknown, path: string): Stroke[] {
   return requireArray(value, path).map((stroke, index) => parseStroke(stroke, `${path}[${index}]`))
 }
 
-const NODE_TYPES: readonly string[] = ['page', 'frame', 'rectangle', 'ellipse']
+const NODE_TYPES: readonly string[] = ['page', 'frame', 'rectangle', 'ellipse', 'text']
 
-function parseNode(value: unknown, path: string): SceneNode {
+function parseNode(value: unknown, path: string, version: number): SceneNode {
   const n = requireRecord(value, path)
   const type = requireString(n['type'], `${path}.type`)
   if (!NODE_TYPES.includes(type)) {
@@ -192,6 +202,18 @@ function parseNode(value: unknown, path: string): SceneNode {
         fills: parsePaints(n['fills'], `${path}.fills`),
         strokes: parseStrokes(n['strokes'], `${path}.strokes`),
       }
+    case 'text':
+      return {
+        ...shared,
+        type: 'text',
+        characters: requireString(n['characters'], `${path}.characters`),
+        fontSize: requireNumber(n['fontSize'], `${path}.fontSize`),
+        // Before 3 there were only auto width boxes, so an absent field is not a gap.
+        autoWidth:
+          version < 3 ? true : requireBoolean(n['autoWidth'], `${path}.autoWidth`),
+        fills: parsePaints(n['fills'], `${path}.fills`),
+        strokes: parseStrokes(n['strokes'], `${path}.strokes`),
+      }
   }
 }
 
@@ -210,14 +232,15 @@ export function parseDocument(value: unknown): SerializedDocument {
   if (data['kind'] !== 'figma-canvas/document') {
     throw new InvalidDocumentError('Not a figma-canvas document')
   }
+  const version = parseVersion(data['version'])
   const nodes = requireArray(data['nodes'], 'nodes').map((node, index) =>
-    parseNode(node, `nodes[${index}]`),
+    parseNode(node, `nodes[${index}]`, version),
   )
   const root = requireNodeId(data['root'], 'root')
   if (!nodes.some((node) => node.id === root)) {
     throw new InvalidDocumentError('root does not name a node in the file')
   }
-  return { kind: 'figma-canvas/document', version: parseVersion(data['version']), root, nodes }
+  return { kind: 'figma-canvas/document', version, root, nodes }
 }
 
 export function parseSubtree(value: unknown): SerializedSubtree {
@@ -225,14 +248,15 @@ export function parseSubtree(value: unknown): SerializedSubtree {
   if (data['kind'] !== 'figma-canvas/subtree') {
     throw new InvalidDocumentError('Not a figma-canvas subtree')
   }
+  const version = parseVersion(data['version'])
   return {
     kind: 'figma-canvas/subtree',
-    version: parseVersion(data['version']),
+    version,
     roots: requireArray(data['roots'], 'roots').map((id, index) =>
       requireNodeId(id, `roots[${index}]`),
     ),
     nodes: requireArray(data['nodes'], 'nodes').map((node, index) =>
-      parseNode(node, `nodes[${index}]`),
+      parseNode(node, `nodes[${index}]`, version),
     ),
   }
 }

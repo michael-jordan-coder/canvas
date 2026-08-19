@@ -13,8 +13,10 @@ import {
   type SceneNode,
   type Stroke,
   type StrokeAlign,
+  type TextNode,
 } from '@figma-canvas/document'
 import { scene, useNode } from '../state/scene'
+import { updateText } from '../state/font'
 import { setNodesAngle } from '../state/rotate'
 import { useUI } from '../state/uiStore'
 import { MIN_NODE_SIZE } from '../input/resize'
@@ -63,17 +65,26 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
       <section className={styles.section}>
         <h3 className={styles.title}>Size</h3>
         <div className={styles.grid}>
+          {/*
+            * On text, W is editable only once the box is fixed width, where it is the width
+            * lines wrap to. H always reports: it is however many lines that produces, and a
+            * field that set it would be overwritten by the next keystroke.
+            */}
           <NumberField
             label="W"
+            readOnly={node.type === 'text' && node.autoWidth}
             value={node.size.width}
             onCommit={(width) =>
-              scene.update(node.id, {
-                size: { ...node.size, width: Math.max(MIN_NODE_SIZE, width) },
-              })
+              node.type === 'text'
+                ? setTextWidth(node, Math.max(MIN_NODE_SIZE, width))
+                : scene.update(node.id, {
+                    size: { ...node.size, width: Math.max(MIN_NODE_SIZE, width) },
+                  })
             }
           />
           <NumberField
             label="H"
+            readOnly={node.type === 'text'}
             value={node.size.height}
             onCommit={(height) =>
               scene.update(node.id, {
@@ -134,9 +145,50 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
         )}
       </section>
 
+      {node.type === 'text' && <TextSection node={node} />}
       {isPainted(node) && <FillSection node={node} />}
-      {isPainted(node) && <StrokeSection node={node} />}
+      {/*
+        * Text carries strokes because every painted node does, but nothing draws them, so
+        * offering the control would be offering a setting with no effect.
+        */}
+      {isPainted(node) && node.type !== 'text' && <StrokeSection node={node} />}
     </div>
+  )
+}
+
+/** Below 1 the text is a smudge, and the field's own floor keeps a typo from erasing it. */
+const MIN_FONT_SIZE = 1
+
+/** Setting a width is what makes a box fixed width, the same as dragging its edge. */
+function setTextWidth(node: TextNode, width: number): void {
+  updateText(node, { autoWidth: false, size: { ...node.size, width } })
+}
+
+function TextSection({ node }: { node: TextNode }): ReactElement {
+  return (
+    <section className={styles.section}>
+      <h3 className={styles.title}>Text</h3>
+      <NumberField
+        wide
+        label="Size"
+        value={node.fontSize}
+        onCommit={(value) => updateText(node, { fontSize: Math.max(MIN_FONT_SIZE, value) })}
+      />
+      {/*
+        * Dragging a side handle sets this, and this is how it comes back off. Without it the
+        * conversion would be one way: nothing else in the editor returns a box to sizing
+        * itself to its words.
+        */}
+      <label className={styles.toggle}>
+        <input
+          type="checkbox"
+          className={styles.checkbox}
+          checked={node.autoWidth}
+          onChange={(event) => updateText(node, { autoWidth: event.target.checked })}
+        />
+        Auto width
+      </label>
+    </section>
   )
 }
 

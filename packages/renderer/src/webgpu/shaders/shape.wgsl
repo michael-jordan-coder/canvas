@@ -28,8 +28,17 @@ struct Clip {
 
 @group(1) @binding(0) var<storage, read> clips: array<Clip>;
 
+// The baked glyph atlas. Text is not a separate pipeline: a glyph is one more instance in
+// the same buffer, so it lands in painter's order beside the shapes it is drawn among and a
+// rectangle on top of a word actually covers it.
+@group(2) @binding(0) var atlas: texture_2d<f32>;
+@group(2) @binding(1) var atlasSampler: sampler;
+
 // A malformed chain must not hang the GPU. Nothing real nests this deep.
 const MAX_CLIP_DEPTH = 8;
+
+// What an instance is, read from params.y: 0 rectangular, 1 elliptical, 2 a glyph. Tested by
+// midpoint below rather than by equality, so a future kind cannot alias onto an existing one.
 
 struct Instance {
   // The linear part of the node's world transform: a, b, c, d.
@@ -37,10 +46,14 @@ struct Instance {
   // Translation in xy, the node's size in zw.
   @location(1) originSize: vec4f,
   @location(2) color: vec4f,
-  // Corner radius, shape kind (0 rectangular, 1 elliptical), stroke weight, stroke offset.
-  // Weight 0 means this instance is a fill.
+  // Corner radius, shape kind, stroke weight, stroke offset. Weight 0 means a fill.
+  //
+  // A glyph reuses the three slots that mean nothing to it: params.x and params.z are the
+  // top left of its patch of the atlas and params.w is the right edge, with the bottom edge
+  // and the distance range over in flags. That is the whole reason text needs no second
+  // vertex format and no second draw call.
   @location(3) params: vec4f,
-  // Index into `clips`, or -1. The rest is spare.
+  // Index into `clips`, or -1. Then, for a glyph, the atlas bottom edge and distance range.
   @location(4) flags: vec4f,
 }
 
@@ -58,6 +71,10 @@ struct VertexOutput {
   // rebuilding the node's matrix per pixel.
   @location(4) world: vec2f,
   @location(5) @interpolate(flat) clip: f32,
+  // Where in the atlas this pixel falls. Meaningless on a shape instance, which never reads it.
+  @location(6) uv: vec2f,
+  // Width of the glyph's distance field, in atlas pixels. Also meaningless on a shape.
+  @location(7) @interpolate(flat) pxRange: f32,
 }
 
 const CORNERS = array(
@@ -70,6 +87,12 @@ const CORNERS = array(
 // How far the band reaches past the shape's edge: half a weight for a centred stroke, a
 // whole one for an outside stroke, nothing for an inside one or a fill.
 fn outset(params: vec4f) -> f32 {
+  // A glyph's quad is exactly its patch of the atlas, and the slots this reads hold texture
+  // coordinates rather than a stroke. Padding by them would grow every letter by a fraction
+  // of its own size, which looks like imprecision rather than like a bug.
+  if params.y > 1.5 {
+    return 0.0;
+  }
   return max(0.0, params.w + params.z * 0.5);
 }
 
@@ -98,6 +121,12 @@ fn vs(@builtin(vertex_index) index: u32, instance: Instance) -> VertexOutput {
   out.params = instance.params;
   out.world = world.xy;
   out.clip = instance.flags.x;
+  // Interpolated across the quad rather than unpacked per pixel, so the fragment stage never
+  // has to know which slots the atlas rect was folded into.
+  let uv0 = vec2f(instance.params.x, instance.params.z);
+  let uv1 = vec2f(instance.params.w, instance.flags.y);
+  out.uv = mix(uv0, uv1, CORNERS[index]);
+  out.pxRange = instance.flags.z;
   return out;
 }
 
@@ -154,17 +183,57 @@ fn clipCoverage(start: f32, world: vec2f, dx: vec2f, dy: vec2f) -> f32 {
   return coverage;
 }
 
+/** The true distance, from three channels that each carry the distance to a different edge. */
+fn median(v: vec3f) -> f32 {
+  return max(min(v.r, v.g), min(max(v.r, v.g), v.b));
+}
+
+/**
+ * Coverage for one pixel of a glyph.
+ *
+ * A single channel field rounds off anything sharper than its own radius, which is why the
+ * corner of a letter reads as soft at high zoom. Taking the median of three recovers the
+ * corner, and it is the whole reason the atlas is baked multi-channel.
+ *
+ * `footprint` is how far the texture coordinate moves between neighbouring pixels, taken by
+ * the caller for the same reason the clip walk takes its own: this runs inside a branch, and
+ * a derivative there is not defined. `textureSampleLevel` rather than `textureSample` for
+ * exactly the same reason, since the plain one would compute a derivative internally. It
+ * also wants no mipmaps, and level 0 says so.
+ */
+fn glyphCoverage(uv: vec2f, pxRange: f32, footprint: vec2f) -> f32 {
+  let distance = median(textureSampleLevel(atlas, atlasSampler, uv, 0.0).rgb);
+
+  // How many screen pixels the distance range covers here. This is the only place the zoom
+  // enters: the field itself is resolution independent, and this converts it to the scale
+  // the view happens to be at. Clamped at one, below which a glyph is smaller than the field
+  // is wide and would otherwise dissolve rather than just look small.
+  let unitRange = vec2f(pxRange) / vec2f(textureDimensions(atlas, 0));
+  let screenPerTexel = vec2f(1.0) / max(footprint, vec2f(1e-8));
+  let range = max(0.5 * dot(unitRange, screenPerTexel), 1.0);
+
+  return clamp((distance - 0.5) * range + 0.5, 0.0, 1.0);
+}
+
 @fragment
 fn fs(in: VertexOutput) -> @location(0) vec4f {
+  // Every derivative in this function is taken here, at the top, before anything branches.
+  // They are only defined in uniform control flow, and all three are needed from inside one:
+  // the clip walk is a loop, and the glyph path below is a branch on an interpolated value,
+  // which the compiler treats as non-uniform however uniform it is in practice.
+  let dWorldX = dpdx(in.world);
+  let dWorldY = dpdy(in.world);
+  let uvFootprint = abs(dpdx(in.uv)) + abs(dpdy(in.uv));
+
   let half = in.size * 0.5;
   let p = in.local - half;
 
-  var d: f32;
-  if in.params.y > 0.5 {
-    d = sdEllipse(p, half);
-  } else {
+  var d = 0.0;
+  if in.params.y < 0.5 {
     // A radius larger than the shortest side would turn the corners inside out.
     d = sdRoundedBox(p, half, min(in.params.x, min(half.x, half.y)));
+  } else if in.params.y < 1.5 {
+    d = sdEllipse(p, half);
   }
 
   // fwidth is how much d changes between neighbouring pixels, which is the width of one
@@ -178,18 +247,23 @@ fn fs(in: VertexOutput) -> @location(0) vec4f {
   // every thick stroke.
   let fw = max(fwidth(d), 1e-6);
 
-  let weight = in.params.z;
-  if weight > 0.0 {
-    // Keep the outer edge exactly where the quad was padded for and let a sub-pixel stroke
-    // grow inward instead. Widening both ways would push the band past the quad at low zoom
-    // and slice the outside of a hairline off.
-    let outer = in.params.w + weight * 0.5;
-    let thickness = max(weight, fw);
-    d = abs(d - (outer - thickness * 0.5)) - thickness * 0.5;
+  var coverage: f32;
+  if in.params.y > 1.5 {
+    coverage = glyphCoverage(in.uv, in.pxRange, uvFootprint);
+  } else {
+    let weight = in.params.z;
+    if weight > 0.0 {
+      // Keep the outer edge exactly where the quad was padded for and let a sub-pixel stroke
+      // grow inward instead. Widening both ways would push the band past the quad at low zoom
+      // and slice the outside of a hairline off.
+      let outer = in.params.w + weight * 0.5;
+      let thickness = max(weight, fw);
+      d = abs(d - (outer - thickness * 0.5)) - thickness * 0.5;
+    }
+    coverage = clamp(0.5 - d / fw, 0.0, 1.0);
   }
 
-  var coverage = clamp(0.5 - d / fw, 0.0, 1.0);
-  coverage *= clipCoverage(in.clip, in.world, dpdx(in.world), dpdy(in.world));
+  coverage *= clipCoverage(in.clip, in.world, dWorldX, dWorldY);
 
   return vec4f(in.color.rgb, in.color.a * coverage);
 }

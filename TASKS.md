@@ -51,6 +51,76 @@ Both React panels, visual refinement plus missing states, split across two paral
       pass. `apps/editor/src/ui/PropertiesPanel.tsx` and the field module.css files; shared
       5px text inset, unit suffixes on angle and opacity, clip toggle folded into Appearance.
 
+## Text
+
+A text node that draws on the GPU, with inline editing and fixed width boxes. All six phases
+have shipped.
+
+- [x] Inter 4.1 Regular vendored under OFL, baked to a 512x512 MSDF atlas with msdf-atlas-gen.
+      203 glyphs, Latin-1 plus typographic punctuation. `packages/renderer/src/font/`, with the
+      exact bake command and every flag's reason in its `README.md`.
+- [x] `parseAtlasMetrics` refuses a bad bake rather than trusting our own build output, since a
+      re-bake without `-yorigin top` renders happily upside down.
+      `packages/renderer/src/font/metrics.ts`
+- [x] `TextNode` with `characters` and `fontSize`; `size` is the measured bounds, cached.
+      `packages/document/src/node.ts:66`
+- [x] Layout, measurement and caret maths, all pure and font-injected.
+      `packages/document/src/text/layout.ts`
+- [x] Hit testing on the layout bounds. `packages/document/src/hit.ts:36`
+- [x] `SCHEMA_VERSION` 2. Version 1 files still load; the bump is so an older build refuses a
+      version 2 file by version rather than on an unknown node type. `packages/document/src/serialize.ts:17`
+- [x] Glyphs pack into the existing 80 byte shape instance as `kind = 2`, reusing the slots a
+      letter has no use for. Still one pipeline and one draw call, so text keeps its place in
+      paint order among the shapes. `packages/renderer/src/webgpu/ShapeInstances.ts`
+- [x] MSDF sampling in the shape shader, with every derivative hoisted above the branch.
+      `packages/renderer/src/webgpu/shaders/shape.wgsl`
+- [x] The atlas as the app's first texture and sampler, at `@group(2)`.
+      `packages/renderer/src/webgpu/GlyphAtlas.ts`
+- [x] Text tool, and the app's first tool shortcuts: V H F R O T.
+      `apps/editor/src/input/keyboardInput.ts`, `apps/editor/src/ui/Toolbar.tsx`
+- [x] Inline editing through an invisible textarea, with the caret and the selection highlight
+      drawn by the overlay. `apps/editor/src/ui/TextEditor.tsx`
+- [x] A typing burst is one undo step, with a blur safety net.
+- [x] Click and drag inside text to place and extend the caret; double click to re-enter.
+      `apps/editor/src/input/pointerInput.ts`
+- [x] Text nodes remeasure when the font arrives, so a loaded file is not stale.
+      `apps/editor/src/state/font.ts`
+- [x] No resize handles on a text node, since its bounds follow its text. Rotate stays.
+      `packages/renderer/src/selection.ts`
+
+- [x] A Text section in the properties panel with the font size, W and H reporting rather than
+      offering an edit, and the Stroke section gated off for text. New `readOnly` variant on
+      `NumberField`. `apps/editor/src/ui/PropertiesPanel.tsx`
+- [x] A layer row reads a text node's own first line until it is renamed, and renaming starts
+      from that. `apps/editor/src/ui/LayersPanel.tsx`
+- [x] The architecture written up in `CLAUDE.md`, including a correction: clearing
+      `figma-canvas:document` does not restore the seed, because the `pagehide` flush writes
+      the live document back first.
+
+- [x] Fixed width boxes. `autoWidth` on the node, greedy word wrapping in `layoutText`, and the
+      east and west handles turning a box fixed width when dragged. `SCHEMA_VERSION` 3, with the
+      first real migration: a version 2 text node predates the field and reads as auto width.
+      `packages/document/src/text/layout.ts`, `packages/renderer/src/selection.ts`
+- [x] An Auto width toggle in the properties panel, so the conversion is not one way, and W
+      becomes editable once a box is fixed width. `apps/editor/src/ui/PropertiesPanel.tsx`
+
+Deferred, and deliberately not in the MVP:
+
+- [ ] Weight and italic, which need more atlas pages
+- [ ] Alignment, letter spacing, line height control
+- [ ] Text stroke. The node carries `strokes` because every painted node does, but nothing
+      draws them, and `containsPoint` deliberately does not grow the hit area for them either
+- [ ] Kerning. Inter keeps its pairs in GPOS and the generator only reads the legacy `kern`
+      table, so the baked atlas has none. Real kerning needs proper shaping
+- [ ] Non-Latin text, a tofu glyph for uncovered code points (Inter has no U+FFFD, so the
+      fallback is a question mark), and a second atlas page added at runtime
+- [ ] RTL and complex shaping
+- [ ] Word and line selection on double and triple click inside text
+- [ ] Auto height, the third sizing mode: a fixed width and a fixed height, with the text
+      clipped or shrunk to fit rather than growing the box
+- [ ] Rich text: more than one style in a node
+- [ ] Plain text pasted onto the canvas becoming a text node
+
 ## Backlog
 
 Deferred from the panel polish pass:
@@ -61,7 +131,6 @@ Deferred from the panel polish pass:
 Deferred when rotation was picked as the day 7-9 direction:
 
 - [ ] Snapping: to guides, edges, and other shapes during drag/resize
-- [ ] Text: a new text node type, inline editing, paragraph rendering
 
 Known gaps noted in CLAUDE.md as deliberate, not yet built:
 

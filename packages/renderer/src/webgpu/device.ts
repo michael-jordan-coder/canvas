@@ -7,6 +7,18 @@ export interface GPUSurface {
 }
 
 /**
+ * Which device last configured a given canvas's context.
+ *
+ * A canvas has exactly one WebGPU context however many renderers get built on it, and in
+ * StrictMode two of them are: React mounts, tears down, and mounts again, so a renderer can
+ * still be starting up when its effect is already gone. Whichever finishes last owns the
+ * context, and the loser must not unconfigure on its way out. Doing so blanks the live
+ * renderer, and it presents as the GPU failing rather than as a lifecycle bug, because every
+ * later frame throws "context is not configured" from a perfectly healthy device.
+ */
+const configuredBy = new WeakMap<GPUCanvasContext, GPUDevice>()
+
+/**
  * Acquires a device and binds it to the canvas.
  *
  * Three separate things happen here and each can fail on its own, so they are checked
@@ -46,8 +58,23 @@ export async function createGPUSurface(canvas: HTMLCanvasElement): Promise<GPUSu
     // skip blending the page behind.
     alphaMode: 'opaque',
   })
+  configuredBy.set(context, device)
 
   return { device, context, format }
+}
+
+/**
+ * Releases a surface, leaving the canvas alone if something else has since taken it over.
+ *
+ * The device is always destroyed, because it is this renderer's own. The context is shared
+ * canvas state, so it is only unconfigured while this device is still the one holding it.
+ */
+export function releaseGPUSurface(surface: GPUSurface): void {
+  if (configuredBy.get(surface.context) === surface.device) {
+    configuredBy.delete(surface.context)
+    surface.context.unconfigure()
+  }
+  surface.device.destroy()
 }
 
 /**

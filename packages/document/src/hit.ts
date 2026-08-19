@@ -8,7 +8,13 @@ import {
   type Rect,
   type Vec2,
 } from './math.js'
-import { canHaveChildren, isPainted, type NodeId, type SceneNode } from './node.js'
+import {
+  canHaveChildren,
+  isPainted,
+  type NodeId,
+  type PaintedNode,
+  type SceneNode,
+} from './node.js'
 import { activeStroke, strokeOutset } from './paint.js'
 
 /**
@@ -35,8 +41,16 @@ function distanceToRoundedBox(p: Vec2, half: Vec2, radius: number): number {
  */
 export function containsPoint(node: SceneNode, point: Vec2): boolean {
   if (!isPainted(node)) return false
-  const stroke = activeStroke(node.strokes)
+  // A text node carries strokes because every painted node does, but nothing draws them yet.
+  // Growing its clickable area for a stroke that is not on screen would break the one rule
+  // this file exists to keep: you can click exactly what you can see.
+  const stroke = node.type === 'text' ? undefined : activeStroke(node.strokes)
   return withinShape(node, point, stroke ? strokeOutset(stroke) : 0)
+}
+
+/** Ellipses have no corner, and a text node's box is its layout bounds, square cornered. */
+function cornerRadiusOf(node: PaintedNode): number {
+  return node.type === 'frame' || node.type === 'rectangle' ? node.cornerRadius : 0
 }
 
 function withinShape(node: SceneNode, point: Vec2, outset: number): boolean {
@@ -57,7 +71,7 @@ function withinShape(node: SceneNode, point: Vec2, outset: number): boolean {
   // grows with an outward stroke too: the outer edge of a stroke around a rounded corner is
   // a wider arc, not the same arc pushed out squarely.
   const grown = { x: half.x + outset, y: half.y + outset }
-  return distanceToRoundedBox(p, grown, node.cornerRadius + outset) <= 0
+  return distanceToRoundedBox(p, grown, cornerRadiusOf(node) + outset) <= 0
 }
 
 /**

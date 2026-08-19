@@ -6,10 +6,11 @@ import {
   createEllipse,
   createFrame,
   createRectangle,
+  createText,
   type FrameNode,
   type SceneNode,
 } from './node.js'
-import { fromHex, type StrokeAlign } from './paint.js'
+import { fromHex, type Stroke, type StrokeAlign } from './paint.js'
 
 /**
  * Rectangle spans (-136,-96) to (4,-6) in world space, the ellipse is centred at (55,55)
@@ -278,5 +279,78 @@ describe('clipsContent', () => {
     const { document, child } = clipped(true)
     const caught = nodesIn(document, { x: 80, y: 40, width: 40, height: 20 })
     expect(caught.map((node) => node.id)).toContain(child.id)
+  })
+})
+
+describe('hitTest, on a text node', () => {
+  /** A text node whose measured bounds span (20,20) to (140,50) in world space. */
+  function withText(strokes: Stroke[] = []) {
+    const document = new SceneDocument()
+    const text = document.insert(
+      createText({
+        name: 'Text',
+        transform: translation(20, 20),
+        size: { width: 120, height: 30 },
+        characters: 'Hello',
+        strokes,
+      }),
+    )
+    return { document, text }
+  }
+
+  it('is clickable across its measured bounds', () => {
+    const { document, text } = withText()
+    expect(hitTest(document, { x: 80, y: 35 })?.id).toBe(text.id)
+  })
+
+  it('has square corners, so the very corner of the box still counts', () => {
+    const { document, text } = withText()
+    expect(hitTest(document, { x: 21, y: 21 })?.id).toBe(text.id)
+  })
+
+  it('is not clickable outside them', () => {
+    const { document } = withText()
+    expect(hitTest(document, { x: 150, y: 35 })).toBeNull()
+  })
+
+  /*
+   * A text node carries strokes because every painted node does, but nothing draws them yet.
+   * If the outset were applied anyway, the node would be clickable in a band around itself
+   * where there is visibly nothing, which is the exact disagreement this file exists to stop.
+   */
+  it('is not grown by a stroke, because its stroke is not drawn', () => {
+    const stroke: Stroke = { paint: fromHex('#000000'), weight: 20, align: 'outside' }
+    const { document } = withText([stroke])
+    expect(hitTest(document, { x: 150, y: 35 })).toBeNull()
+  })
+
+  it('has no clickable area before anything is typed into it', () => {
+    const document = new SceneDocument()
+    document.insert(createText({ transform: translation(20, 20) }))
+    expect(hitTest(document, { x: 20, y: 20 })).toBeNull()
+  })
+
+  it('is caught by a marquee that encloses it', () => {
+    const { document, text } = withText()
+    const caught = nodesIn(document, { x: 0, y: 0, width: 200, height: 100 })
+    expect(caught.map((node) => node.id)).toContain(text.id)
+  })
+
+  it('is hidden by a frame that clips it', () => {
+    const document = new SceneDocument()
+    const frame = document.insert(
+      createFrame({ size: { width: 100, height: 100 }, clipsContent: true }),
+    )
+    document.insert(
+      createText({
+        transform: translation(80, 40),
+        size: { width: 120, height: 30 },
+        characters: 'Hello',
+      }),
+      frame.id,
+    )
+    // Inside the frame the text answers; past its right edge the frame has cut it off.
+    expect(hitTest(document, { x: 90, y: 50 })?.type).toBe('text')
+    expect(hitTest(document, { x: 150, y: 50 })).toBeNull()
   })
 })

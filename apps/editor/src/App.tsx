@@ -4,6 +4,9 @@ import { CanvasHost } from './canvas/CanvasHost'
 import { createClipboardInput } from './input/clipboardInput'
 import { createKeyboardInput } from './input/keyboardInput'
 import { scene } from './state/scene'
+// Measures every text node once the font arrives. Imported for that effect.
+import './state/font'
+import { selectTool } from './state/textEditing'
 import { useUI } from './state/uiStore'
 import { showStatsFromLocation } from './state/stats'
 import { LayersPanel } from './ui/LayersPanel'
@@ -22,6 +25,7 @@ export function App(): ReactElement {
       document: scene,
       getSelection: () => useUI.getState().selection,
       setSelection: (ids: readonly NodeId[]) => useUI.getState().setSelection(ids),
+      setTool: selectTool,
     }
     const disposeKeyboard = createKeyboardInput(wiring)
     const disposeClipboard = createClipboardInput(wiring)

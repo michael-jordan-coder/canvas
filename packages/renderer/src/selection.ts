@@ -1,15 +1,21 @@
 import {
   angleOf,
   applyToPoint,
+  caretRect,
+  layoutTextNode,
   multiply,
   scaleOf,
+  selectionRects,
   transformRect,
+  type FontMetrics,
+  type Mat2D,
   type NodeId,
   type Rect,
   type SceneDocument,
   type Vec2,
 } from '@figma-canvas/document'
 import { viewMatrix, type Camera, type Viewport } from './camera.js'
+import type { TextEditing } from './Renderer.js'
 
 export type HandleId = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
 
@@ -22,6 +28,8 @@ export type HandleId = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
  * sideways when you meant to turn it.
  */
 export type GrabId = HandleId | 'rotate'
+
+const ALL_HANDLES: readonly HandleId[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
 
 /** Drawn size in CSS pixels. */
 export const HANDLE_SIZE = 8
@@ -118,6 +126,27 @@ export function fromBoxSpace(box: SelectionBox, point: Vec2): Vec2 {
 }
 
 /**
+ * A rect in a node's own space, placed where it is actually drawn, in CSS pixels.
+ *
+ * Built out from the rect's centre rather than by unrotating the matrix, because a box is
+ * turned about its centre and unrotating a matrix turns about the origin. Those are the same
+ * point only when the node happens to sit on it. The result is an upright rect, which the
+ * overlay pairs with the angle to draw a turned one.
+ *
+ * Shared by the selection box and the caret so the two cannot disagree under rotation or a
+ * non-uniform scale, which is exactly where they would drift apart.
+ */
+function placeLocalRect(screen: Mat2D, scale: Vec2, local: Rect): Rect {
+  const centre = applyToPoint(screen, {
+    x: local.x + local.width / 2,
+    y: local.y + local.height / 2,
+  })
+  const width = local.width * Math.abs(scale.x)
+  const height = local.height * Math.abs(scale.y)
+  return { x: centre.x - width / 2, y: centre.y - height / 2, width, height }
+}
+
+/**
  * The box to draw and to grab, in CSS pixels.
  *
  * A single node carries its own basis, so a rotated rectangle gets a box turned to match
@@ -139,21 +168,12 @@ export function selectionBox(
     const angle = angleOf(screen)
     const scale = scaleOf(screen)
 
-    // Built out from the node's own centre rather than by unrotating the matrix, because the
-    // box is turned about that centre and unrotating a matrix turns about the origin. Those
-    // are the same point only when the node happens to sit on it.
-    const centre = applyToPoint(screen, {
-      x: node.size.width / 2,
-      y: node.size.height / 2,
+    const rect = placeLocalRect(screen, scale, {
+      x: 0,
+      y: 0,
+      width: node.size.width,
+      height: node.size.height,
     })
-    const width = node.size.width * Math.abs(scale.x)
-    const height = node.size.height * Math.abs(scale.y)
-    const rect = {
-      x: centre.x - width / 2,
-      y: centre.y - height / 2,
-      width,
-      height,
-    }
     // Snapping a turned box shifts its centre and therefore everything hung off it, and it
     // cannot land on a pixel grid anyway, so it is left alone.
     return { rect: angle === 0 ? snap(rect) : rect, angle }
@@ -180,26 +200,39 @@ export interface HandlePoint {
   y: number
 }
 
-/** Handle centres for a box, in whatever space the box is in. */
-export function handlePoints(bounds: Rect): HandlePoint[] {
+/**
+ * Handle centres for a box, in whatever space the box is in.
+ *
+ * `allowed` narrows the set, which text uses to offer its two side handles and nothing else.
+ * It also decides whether the crowding minimums apply: they exist so an edge handle does not
+ * sit on top of a corner one on a small box, so with no corners in the set there is nothing
+ * to crowd and a short box keeps its side handles. Without that a line of text, which is
+ * always shorter than the minimum, would offer no handles at all.
+ */
+export function handlePoints(bounds: Rect, allowed: readonly HandleId[] = ALL_HANDLES): HandlePoint[] {
   const right = bounds.x + bounds.width
   const bottom = bounds.y + bounds.height
   const middleX = bounds.x + bounds.width / 2
   const middleY = bounds.y + bounds.height / 2
 
-  const points: HandlePoint[] = [
-    { id: 'nw', x: bounds.x, y: bounds.y },
-    { id: 'ne', x: right, y: bounds.y },
-    { id: 'sw', x: bounds.x, y: bottom },
-    { id: 'se', x: right, y: bottom },
-  ]
-  if (bounds.width >= EDGE_HANDLE_MINIMUM) {
-    points.push({ id: 'n', x: middleX, y: bounds.y }, { id: 's', x: middleX, y: bottom })
+  const corners = (
+    [
+      { id: 'nw', x: bounds.x, y: bounds.y },
+      { id: 'ne', x: right, y: bounds.y },
+      { id: 'sw', x: bounds.x, y: bottom },
+      { id: 'se', x: right, y: bottom },
+    ] satisfies HandlePoint[]
+  ).filter((handle) => allowed.includes(handle.id))
+
+  const crowded = corners.length > 0
+  const edges: HandlePoint[] = []
+  if (!crowded || bounds.width >= EDGE_HANDLE_MINIMUM) {
+    edges.push({ id: 'n', x: middleX, y: bounds.y }, { id: 's', x: middleX, y: bottom })
   }
-  if (bounds.height >= EDGE_HANDLE_MINIMUM) {
-    points.push({ id: 'w', x: bounds.x, y: middleY }, { id: 'e', x: right, y: middleY })
+  if (!crowded || bounds.height >= EDGE_HANDLE_MINIMUM) {
+    edges.push({ id: 'w', x: bounds.x, y: middleY }, { id: 'e', x: right, y: middleY })
   }
-  return points
+  return [...corners, ...edges.filter((handle) => allowed.includes(handle.id))]
 }
 
 /**
@@ -209,10 +242,14 @@ export function handlePoints(bounds: Rect): HandlePoint[] {
  * only one that ever has to exist. Corners are tested before edges, because their grab areas
  * overlap on a small box and the corner is almost always what was meant.
  */
-export function handleAt(box: SelectionBox, point: Vec2): HandleId | null {
+export function handleAt(
+  box: SelectionBox,
+  point: Vec2,
+  allowed: readonly HandleId[] = ALL_HANDLES,
+): HandleId | null {
   const local = toBoxSpace(box, point)
   const reach = HANDLE_GRAB / 2
-  const points = handlePoints(box.rect)
+  const points = handlePoints(box.rect, allowed)
   const corners = points.filter((handle) => handle.id.length === 2)
   const edges = points.filter((handle) => handle.id.length === 1)
 
@@ -241,14 +278,18 @@ export function rotateHandlePoint(bounds: Rect): Vec2 {
  * compete on a box short enough that the stem reaches back over the bottom edge, and there
  * the thing the pointer is actually on is the one it is nearest.
  */
-export function grabAt(box: SelectionBox, point: Vec2): GrabId | null {
+export function grabAt(
+  box: SelectionBox,
+  point: Vec2,
+  allowed: readonly HandleId[] = ALL_HANDLES,
+): GrabId | null {
   const local = toBoxSpace(box, point)
   const rotate = rotateHandlePoint(box.rect)
   const reach = ROTATE_HANDLE_GRAB / 2
   if (Math.abs(local.x - rotate.x) <= reach && Math.abs(local.y - rotate.y) <= reach) {
     return 'rotate'
   }
-  return handleAt(box, point)
+  return handleAt(box, point, allowed)
 }
 
 /** Where a point on the box lands on screen, rotation included. */
@@ -256,4 +297,73 @@ export function handleScreenPoint(box: SelectionBox, handle: HandleId): Vec2 {
   const found = handlePoints(box.rect).find((point) => point.id === handle)
   const fallback = boxCentre(box.rect)
   return fromBoxSpace(box, found ? { x: found.x, y: found.y } : fallback)
+}
+
+/**
+ * Text resizes sideways only. Its width is the width its lines wrap to, which is a real
+ * setting, but its height is however many lines that produces, which is not the handle's to
+ * set. Offering a south handle would be offering to fight the layout.
+ */
+const TEXT_HANDLES: readonly HandleId[] = ['e', 'w']
+
+/**
+ * Which resize handles a selection offers.
+ *
+ * Asked in one place so the overlay and the input layer cannot disagree about what can be
+ * grabbed. A handle that is drawn and not grabbable is worse than one that is missing.
+ */
+export function resizeHandlesFor(
+  document: SceneDocument,
+  selection: readonly NodeId[],
+): readonly HandleId[] {
+  const only = selection.length === 1 ? selection[0] : undefined
+  return only && document.getNode(only)?.type === 'text' ? TEXT_HANDLES : ALL_HANDLES
+}
+
+/** One CSS pixel wide at every zoom, the same rule the handles follow. */
+export const CARET_WIDTH = 1
+
+export interface TextEditingBoxes {
+  /** The caret, and one rect per line the selection covers. All in CSS pixels. */
+  caret: Rect
+  selection: Rect[]
+  /** Shared by all of them, since they all sit in the node's own frame. */
+  angle: number
+}
+
+/**
+ * Where to draw the caret and the selection highlight, in CSS pixels.
+ *
+ * Built from the same layout the glyphs are packed from, so the caret cannot drift away from
+ * the text it sits in. Everything comes out as an upright rect plus an angle, which is what
+ * the overlay draws and is why a caret in a rotated text node needs no special case.
+ */
+export function textEditingBoxes(
+  document: SceneDocument,
+  editing: TextEditing,
+  metrics: FontMetrics,
+  camera: Camera,
+  viewport: Viewport,
+): TextEditingBoxes | null {
+  const node = document.getNode(editing.id)
+  if (!node || node.type !== 'text') return null
+
+  const screen = multiply(document.worldTransform(node.id), viewMatrix(camera, viewport))
+  const angle = angleOf(screen)
+  const scale = scaleOf(screen)
+  const layout = layoutTextNode(node, metrics)
+
+  const place = (local: Rect): Rect => placeLocalRect(screen, scale, local)
+
+  // The caret has no width in the document, so it gets its pixel width here. A caret that
+  // scaled with the zoom would be invisible at 10% and a slab at 3000%.
+  const caret = place(caretRect(layout, editing.caret))
+  caret.x = caret.x - CARET_WIDTH / 2
+  caret.width = CARET_WIDTH
+
+  return {
+    caret,
+    selection: selectionRects(layout, editing.anchor, editing.caret).map(place),
+    angle,
+  }
 }

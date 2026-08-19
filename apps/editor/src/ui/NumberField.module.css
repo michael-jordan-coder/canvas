@@ -47,3 +47,18 @@
 .input:focus {
   outline: none;
 }
+
+/*
+ * A derived value. It reads as text rather than as a field: no hover or focus border, since
+ * both would offer an edit that will not happen, and the secondary text colour to say the
+ * number is reported rather than set.
+ */
+.readOnly:hover,
+.readOnly:focus-within {
+  border-color: transparent;
+}
+
+.readOnly .input {
+  color: var(--text-secondary);
+  cursor: default;
+}

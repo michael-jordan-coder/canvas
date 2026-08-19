@@ -1,10 +1,13 @@
-import type { NodeId, Rect, SceneDocument } from '@figma-canvas/document'
+import type { FontMetrics, NodeId, Rect, SceneDocument } from '@figma-canvas/document'
 import type { Camera, Viewport } from '../camera.js'
+import type { TextEditing } from '../Renderer.js'
 import {
   fromBoxSpace,
   handlePoints,
   rotateHandlePoint,
+  resizeHandlesFor,
   selectionBox,
+  textEditingBoxes,
   HANDLE_SIZE,
   OUTLINE_WIDTH,
   ROTATE_HANDLE_SIZE,
@@ -34,6 +37,13 @@ const HANDLE_FILL = { r: 1, g: 1, b: 1, a: 1 }
 const TRANSPARENT = { r: 0, g: 0, b: 0, a: 0 }
 /** Faint enough to read what is underneath, which is the whole point of a rubber band. */
 const MARQUEE_FILL = { r: 10 / 255, g: 124 / 255, b: 1, a: 0.1 }
+/**
+ * The text selection highlight sits under the glyphs it covers, so it has to stay light
+ * enough to read them through. Matching --accent-subtle in the editor's tokens.
+ */
+const TEXT_SELECTION_FILL = { r: 10 / 255, g: 124 / 255, b: 1, a: 0.25 }
+/** The caret is the one thing here that is not accent coloured: it stands in for the text. */
+const CARET_FILL = { r: 0.1, g: 0.1, b: 0.1, a: 1 }
 
 
 /**
@@ -50,8 +60,11 @@ export class OverlayInstances {
   #data = new Float32Array(0)
   #count = 0
 
-  constructor(device: GPUDevice) {
+  #metrics: FontMetrics
+
+  constructor(device: GPUDevice, metrics: FontMetrics) {
     this.#device = device
+    this.#metrics = metrics
   }
 
   get count(): number {
@@ -68,6 +81,7 @@ export class OverlayInstances {
     camera: Camera,
     viewport: Viewport,
     marquee?: Rect | null,
+    editing?: TextEditing | null,
   ): void {
     this.#count = 0
 
@@ -75,6 +89,26 @@ export class OverlayInstances {
       // Already in CSS pixels, so it needs no camera at all: the rubber band is drawn where
       // the pointer is, not where the world is. Never rotated, whatever is selected.
       this.#push(marquee, MARQUEE_FILL, ACCENT, OUTLINE_WIDTH, 0, 0)
+    }
+
+    /*
+     * Editing a text node replaces the handles with a caret. The eight resize handles would
+     * be a lie while the text is being typed, since the bounds follow the text rather than
+     * the other way round, and the caret has to be the thing the pointer is aiming at.
+     */
+    if (editing) {
+      const boxes = textEditingBoxes(document, editing, this.#metrics, camera, viewport)
+      if (boxes) {
+        // The highlight first, so the caret is never buried under it.
+        for (const rect of boxes.selection) {
+          this.#push(rect, TEXT_SELECTION_FILL, TRANSPARENT, 0, 0, boxes.angle)
+        }
+        if (editing.caretVisible) {
+          this.#push(boxes.caret, CARET_FILL, TRANSPARENT, 0, 0, boxes.angle)
+        }
+      }
+      this.#upload()
+      return
     }
 
     // The same box the input layer hit tests against, so what you can grab is what you see.
@@ -106,7 +140,7 @@ export class OverlayInstances {
     // handle costs nothing beyond the number in that slot.
     this.#push(knob, HANDLE_FILL, ACCENT, OUTLINE_WIDTH, ROTATE_HANDLE_SIZE / 2, box.angle)
 
-    for (const point of handlePoints(box.rect)) {
+    for (const point of handlePoints(box.rect, resizeHandlesFor(document, selection))) {
       // Handle centres come out in the box's own upright frame, so each one is placed where
       // it is actually drawn before the quad is built around it.
       const placed = fromBoxSpace(box, point)

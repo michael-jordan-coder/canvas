@@ -1,19 +1,26 @@
 import {
   IDENTITY,
   activeStroke,
+  applyToPoint,
   invert,
   isPainted,
+  layoutTextNode,
   multiply,
   strokeOffset,
   strokeOutset,
   transformRect,
+  type FontMetrics,
   type Mat2D,
+  type NodeId,
   type PaintedNode,
   type RGBA,
   type Rect,
   type SceneDocument,
   type SceneNode,
   type Stroke,
+  type TextLayout,
+  wrapWidthOf,
+  type TextNode,
 } from '@figma-canvas/document'
 import { viewMatrix, type Camera, type Viewport } from '../camera.js'
 import { NO_CLIP, type ClipRegions } from './ClipRegions.js'
@@ -24,6 +31,26 @@ const BYTES_PER_INSTANCE = FLOATS_PER_INSTANCE * 4
 
 const KIND_RECTANGULAR = 0
 const KIND_ELLIPTICAL = 1
+const KIND_GLYPH = 2
+
+/**
+ * The painted nodes that are a single box, which is every one of them except text.
+ *
+ * Text is the odd one out: it packs one instance per glyph, each with its own quad and its
+ * own patch of the atlas, so it never reaches `#submit`. Naming the difference in a type
+ * keeps the box path from having to answer questions a glyph would ask, such as what corner
+ * radius a letter has.
+ */
+type BoxNode = Exclude<PaintedNode, TextNode>
+
+/** A laid out text node, kept only so an unchanged one is not laid out again next frame. */
+interface CachedLayout {
+  characters: string
+  fontSize: number
+  /** Part of the key: a fixed width box re-wraps when it is dragged wider. */
+  wrapWidth: number | null
+  layout: TextLayout
+}
 
 /**
  * How far past the viewport the build reaches, as a fraction of it.
@@ -89,10 +116,21 @@ export class ShapeInstances {
   #version = -1
   /** The world region the current buffer was built for, viewport plus margin. */
   #coverage: Rect | null = null
+  #metrics: FontMetrics
+  /*
+   * Text laid out on the previous build. A rebuild happens for any document change at all,
+   * so without this, nudging one rectangle would re-lay out every paragraph on the page.
+   *
+   * Two maps rather than one, swapped each build: a node only reaches the new map by being
+   * visited, so anything deleted since falls out instead of accumulating forever.
+   */
+  #layouts = new Map<NodeId, CachedLayout>()
+  #previousLayouts = new Map<NodeId, CachedLayout>()
 
-  constructor(device: GPUDevice, clips: ClipRegions) {
+  constructor(device: GPUDevice, clips: ClipRegions, metrics: FontMetrics) {
     this.#device = device
     this.#clips = clips
+    this.#metrics = metrics
   }
 
   get count(): number {
@@ -120,6 +158,8 @@ export class ShapeInstances {
     this.#count = 0
     this.#culled = 0
     this.#clips.reset()
+    this.#previousLayouts = this.#layouts
+    this.#layouts = new Map()
 
     // Depth first from the root, accumulating the transform on the way down. Asking the
     // document for each node's world transform separately would walk back up to the root
@@ -146,7 +186,11 @@ export class ShapeInstances {
     const world = multiply(node.transform, parent)
     const alpha = opacity * node.opacity
 
-    const painted = isPainted(node) ? node : null
+    // Text is packed as one instance per glyph rather than as a box, at exactly the point in
+    // the walk a shape would have contributed its fill, so it keeps its place in the order.
+    if (node.type === 'text') this.#submitText(node, world, alpha, clip)
+
+    const painted = isPainted(node) && node.type !== 'text' ? node : null
     const fill = painted?.fills[0]
     // The frame's own paint answers to the clip it sits in, not to its own. A frame does not
     // clip itself, which is what lets an outward stroke on a clipping frame still show.
@@ -168,9 +212,122 @@ export class ShapeInstances {
     if (painted && stroke) this.#submit(painted, world, alpha, stroke.paint.color, clip, stroke)
   }
 
+  /** Laid out once per content change rather than once per build. */
+  #layoutOf(node: TextNode): TextLayout {
+    const wrapWidth = wrapWidthOf(node)
+    const cached = this.#previousLayouts.get(node.id)
+    if (
+      cached &&
+      cached.characters === node.characters &&
+      cached.fontSize === node.fontSize &&
+      cached.wrapWidth === wrapWidth
+    ) {
+      this.#layouts.set(node.id, cached)
+      return cached.layout
+    }
+
+    const layout = layoutTextNode(node, this.#metrics)
+    this.#layouts.set(node.id, {
+      characters: node.characters,
+      fontSize: node.fontSize,
+      wrapWidth,
+      layout,
+    })
+    return layout
+  }
+
+  /**
+   * One instance per drawn glyph.
+   *
+   * Every glyph of a node shares that node's world transform, so the linear part is written
+   * unchanged and only the origin moves: the glyph's own quad is positioned in the node's
+   * local space and then carried out to world. That is what makes a rotated or scaled text
+   * node work without the packing knowing either happened.
+   */
+  #submitText(node: TextNode, world: Mat2D, alpha: number, clip: number): void {
+    const fill = node.fills[0]
+    if (!fill) return
+
+    const layout = this.#layoutOf(node)
+
+    for (const line of layout.lines) {
+      for (const placed of line.glyphs) {
+        // Whitespace advances the pen and has nothing to draw.
+        const quad = this.#metrics.glyphs.get(placed.code)?.quad
+        if (!quad) continue
+
+        // The plane bounds are in em from the pen position on the baseline, and both they
+        // and the baseline are y-down, so this is a scale and an offset with no flip.
+        const box = {
+          x: placed.x + quad.plane.x * node.fontSize,
+          y: line.baseline + quad.plane.y * node.fontSize,
+          width: quad.plane.width * node.fontSize,
+          height: quad.plane.height * node.fontSize,
+        }
+
+        if (!this.#coverage || !intersects(this.#coverage, transformRect(world, box))) {
+          this.#culled += 1
+          continue
+        }
+
+        this.#pushGlyph(world, box, fill.color, alpha, quad.uv, clip)
+      }
+    }
+  }
+
+  /**
+   * The same 80 bytes a shape uses, with the slots a letter has no use for carrying its
+   * patch of the atlas instead. Kind and clip index stay where they are, because the shader
+   * reads those without knowing yet what it is looking at.
+   */
+  #pushGlyph(
+    world: Mat2D,
+    box: Rect,
+    color: RGBA,
+    alpha: number,
+    uv: Rect,
+    clip: number,
+  ): void {
+    this.#reserve(this.#count + 1)
+    const at = this.#count * FLOATS_PER_INSTANCE
+    // Where the glyph's own quad starts, carried out of the node's space into the world.
+    const origin = applyToPoint(world, { x: box.x, y: box.y })
+
+    this.#data[at + 0] = world.a
+    this.#data[at + 1] = world.b
+    this.#data[at + 2] = world.c
+    this.#data[at + 3] = world.d
+
+    this.#data[at + 4] = origin.x
+    this.#data[at + 5] = origin.y
+    this.#data[at + 6] = box.width
+    this.#data[at + 7] = box.height
+
+    this.#data[at + 8] = color.r
+    this.#data[at + 9] = color.g
+    this.#data[at + 10] = color.b
+    this.#data[at + 11] = color.a * alpha
+
+    // Where a shape keeps its corner radius, stroke weight and stroke offset: the left, top
+    // and right edges of this glyph in the atlas.
+    this.#data[at + 12] = uv.x
+    this.#data[at + 13] = KIND_GLYPH
+    this.#data[at + 14] = uv.y
+    this.#data[at + 15] = uv.x + uv.width
+
+    this.#data[at + 16] = clip
+    this.#data[at + 17] = uv.y + uv.height
+    // Carried per instance rather than in a uniform, so the field width can never disagree
+    // with the atlas the coordinates above point into.
+    this.#data[at + 18] = this.#metrics.pxRange
+    this.#data[at + 19] = 0
+
+    this.#count += 1
+  }
+
   /** Culls against the region the buffer was built for, then packs what survives. */
   #submit(
-    node: PaintedNode,
+    node: BoxNode,
     world: Mat2D,
     alpha: number,
     color: RGBA,
@@ -196,7 +353,7 @@ export class ShapeInstances {
   }
 
   #push(
-    node: PaintedNode,
+    node: BoxNode,
     world: Mat2D,
     alpha: number,
     color: RGBA,

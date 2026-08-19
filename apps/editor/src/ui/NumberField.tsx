@@ -13,6 +13,12 @@ interface NumberFieldProps {
   /** Arrow-key step, and the larger one Shift takes. Defaults to 1 and 10. */
   step?: number
   largeStep?: number
+  /**
+   * Shows the value without offering to change it, for one that is derived rather than set.
+   * Still selectable, so the number can be read off and copied, and still in the same row so
+   * the panel's columns do not break around it.
+   */
+  readOnly?: boolean
 }
 
 /**
@@ -26,6 +32,7 @@ export function NumberField({
   wide,
   step = 1,
   largeStep = 10,
+  readOnly,
 }: NumberFieldProps): ReactElement {
   const [draft, setDraft] = useState<string | null>(null)
   const rounded = Math.round(value * 100) / 100
@@ -37,18 +44,24 @@ export function NumberField({
     if (Number.isFinite(parsed) && parsed !== rounded) onCommit(parsed)
   }
 
+  const className = [styles.field, wide ? styles.wide : '', readOnly ? styles.readOnly : '']
+    .filter(Boolean)
+    .join(' ')
+
   return (
-    <label className={wide ? `${styles.field} ${styles.wide}` : styles.field}>
+    <label className={className}>
       <span className={styles.label}>{label}</span>
       <input
         className={styles.input}
         type="text"
         inputMode="decimal"
         spellCheck={false}
+        readOnly={readOnly}
         value={draft ?? String(rounded)}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={commit}
         onKeyDown={(event) => {
+          if (readOnly) return
           if (event.key === 'Enter') {
             commit()
             event.currentTarget.blur()

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react'
-import type { NodeId } from '@figma-canvas/document'
+import { useEffect, useRef, useState, type ComponentType, type ReactElement } from 'react'
+import type { NodeId, NodeType, SceneNode } from '@figma-canvas/document'
 import { scene, useChildren, useNode } from '../state/scene'
 import { useUI } from '../state/uiStore'
 import {
@@ -9,11 +9,40 @@ import {
   HiddenIcon,
   LockedIcon,
   RectangleIcon,
+  TextIcon,
   UnlockedIcon,
   VisibleIcon,
+  type IconProps,
 } from './icons'
 import { useLayerDrag, type LayerDrag } from './useLayerDrag'
 import styles from './LayersPanel.module.css'
+
+/*
+ * Keyed by every node type rather than a chain of ternaries falling back to the rectangle.
+ * The fallback is what made a new kind show up as a rectangle instead of failing to compile,
+ * and the row is the only place in the app that names a node's kind to the reader.
+ */
+const ICONS: Record<NodeType, ComponentType<IconProps>> = {
+  page: FrameIcon,
+  frame: FrameIcon,
+  rectangle: RectangleIcon,
+  ellipse: EllipseIcon,
+  text: TextIcon,
+}
+
+/**
+ * What the row reads, which is the node's name except on text that has not been renamed.
+ *
+ * A text node called "Text" tells you nothing, and every one of them is called that, so an
+ * untouched one shows its own first line instead. Derived rather than written into `name` on
+ * every keystroke: the name is the user's to set, and rewriting it would mean a rename could
+ * be undone by typing.
+ */
+function labelOf(node: SceneNode): string {
+  if (node.type !== 'text' || node.name !== 'Text') return node.name
+  const firstLine = node.characters.split('\n', 1)[0]?.trim() ?? ''
+  return firstLine === '' ? node.name : firstLine
+}
 
 export function LayersPanel(): ReactElement {
   const roots = useChildren(scene.rootId)
@@ -49,8 +78,7 @@ function LayerRow({ id, drag }: { id: NodeId; drag: LayerDrag }): ReactElement |
 
   const selected = selection.includes(id)
   const hasChildren = children.length > 0
-  const Icon =
-    node.type === 'frame' ? FrameIcon : node.type === 'ellipse' ? EllipseIcon : RectangleIcon
+  const Icon = ICONS[node.type]
   const drop = drag.target?.id === id ? drag.target.position : undefined
 
   return (
@@ -80,7 +108,8 @@ function LayerRow({ id, drag }: { id: NodeId; drag: LayerDrag }): ReactElement |
           <span className={styles.chevronBlank} aria-hidden="true" />
         )}
         {renaming ? (
-          <RenameField id={id} name={node.name} onDone={() => setRenaming(false)} />
+          /* Starts from what the row reads, so renaming a text layer edits its own words. */
+          <RenameField id={id} name={labelOf(node)} onDone={() => setRenaming(false)} />
         ) : (
           <button
             type="button"
@@ -110,7 +139,7 @@ function LayerRow({ id, drag }: { id: NodeId; drag: LayerDrag }): ReactElement |
             aria-pressed={selected}
           >
             <Icon size={12} />
-            <span className={styles.label}>{node.name}</span>
+            <span className={styles.label}>{labelOf(node)}</span>
           </button>
         )}
         <button

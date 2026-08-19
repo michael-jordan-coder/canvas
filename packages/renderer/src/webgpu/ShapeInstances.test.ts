@@ -4,8 +4,11 @@ import {
   createEllipse,
   createFrame,
   createRectangle,
+  createText,
   fromHex,
   translation,
+  type FontMetrics,
+  type GlyphMetrics,
   type StrokeAlign,
 } from '@figma-canvas/document'
 import type { Camera, Viewport } from '../camera.js'
@@ -13,10 +16,37 @@ import { ClipRegions, createClipBindGroupLayout } from './ClipRegions.js'
 import { ShapeInstances } from './ShapeInstances.js'
 import { createStubDevice, instanceAt, type StubDevice } from './testing/stubDevice.js'
 
+/*
+ * A made up font with round numbers, the same one the layout tests use. Every letter
+ * advances half an em and its ink covers the top left quarter of the atlas, so a glyph's
+ * quad and its texture coordinates can both be checked by hand.
+ */
+const GLYPH: GlyphMetrics = {
+  advance: 0.5,
+  quad: {
+    plane: { x: 0, y: -0.5, width: 0.5, height: 0.5 },
+    uv: { x: 0.25, y: 0.5, width: 0.125, height: 0.25 },
+  },
+}
+
+const METRICS: FontMetrics = {
+  lineHeight: 1.25,
+  ascender: -1,
+  descender: 0.25,
+  pxRange: 4,
+  fallback: 0x3f,
+  glyphs: new Map<number, GlyphMetrics>([
+    [0x20, { advance: 0.25, quad: null }],
+    [0x3f, GLYPH],
+    [0x61, GLYPH],
+    [0x62, GLYPH],
+  ]),
+}
+
 /** The builder needs somewhere to record clipping frames, whether or not the scene has any. */
 function build(stubbed: StubDevice): ShapeInstances {
   const clips = new ClipRegions(stubbed.device, createClipBindGroupLayout(stubbed.device))
-  return new ShapeInstances(stubbed.device, clips)
+  return new ShapeInstances(stubbed.device, clips, METRICS)
 }
 
 /** linear (4) + origin and size (4) + colour (4) + params (4) + flags (4). */
@@ -465,5 +495,206 @@ describe('clipsContent', () => {
     expect(instance(0, INSTANCE_CLIP)).toBe(-1)
     expect(instance(1, INSTANCE_CLIP)).toBe(0)
     expect(instance(2, INSTANCE_CLIP)).toBe(-1)
+  })
+})
+
+describe('text', () => {
+  /*
+   * A glyph reuses the slots a letter has no use for. Kind and the clip index stay where a
+   * shape keeps them, because the shader reads both before it knows what it is looking at.
+   */
+  const GLYPH_FIELD = {
+    u0: 12,
+    kind: 13,
+    v0: 14,
+    u1: 15,
+    clip: 16,
+    v1: 17,
+    pxRange: 18,
+  } as const
+
+  const KIND_GLYPH = 2
+
+  /**
+   * One text node at (100,50), 20px type. With the fixture font that makes a line 25 tall
+   * with its baseline 20 down, every letter 10 wide, and each glyph's ink a 10 by 10 box
+   * sitting 10 above the baseline.
+   */
+  function withText(characters = 'ab', fontSize = 20) {
+    const document = new SceneDocument()
+    const text = document.insert(
+      createText({
+        transform: translation(100, 50),
+        characters,
+        fontSize,
+        fills: [fromHex('#ff0000')],
+      }),
+    )
+    return { document, text }
+  }
+
+  function pack(document: SceneDocument) {
+    const stubbed = createStubDevice()
+    const builder = build(stubbed)
+    builder.sync(document, camera, viewport)
+    return {
+      builder,
+      at: (index: number, slot: number) => instanceAt(stubbed.written(), STRIDE, index, slot),
+    }
+  }
+
+  it('packs one instance per drawn glyph', () => {
+    const { builder } = pack(withText('ab').document)
+    expect(builder.count).toBe(2)
+  })
+
+  it('marks them as glyphs rather than as boxes', () => {
+    const { at } = pack(withText('ab').document)
+    expect(at(0, GLYPH_FIELD.kind)).toBe(KIND_GLYPH)
+    expect(at(1, GLYPH_FIELD.kind)).toBe(KIND_GLYPH)
+  })
+
+  it('places each glyph quad against the baseline, in world space', () => {
+    const { at } = pack(withText('ab').document)
+    // Baseline 20 below the top, ink starting 10 above it, so 10 down from the node origin.
+    expect(at(0, FIELD.originX)).toBe(100)
+    expect(at(0, FIELD.originY)).toBe(60)
+    expect(at(0, FIELD.width)).toBe(10)
+    expect(at(0, FIELD.height)).toBe(10)
+  })
+
+  it('advances the pen between glyphs', () => {
+    const { at } = pack(withText('ab').document)
+    expect(at(1, FIELD.originX)).toBe(110)
+    expect(at(1, FIELD.originY)).toBe(60)
+  })
+
+  it('starts a later line further down by one line height', () => {
+    const { at } = pack(withText('a\nb').document)
+    expect(at(0, FIELD.originY)).toBe(60)
+    expect(at(1, FIELD.originY)).toBe(85)
+  })
+
+  it('carries the glyph rectangle of the atlas in the spare slots', () => {
+    const { at } = pack(withText('a').document)
+    expect(at(0, GLYPH_FIELD.u0)).toBe(0.25)
+    expect(at(0, GLYPH_FIELD.v0)).toBe(0.5)
+    expect(at(0, GLYPH_FIELD.u1)).toBeCloseTo(0.375, 6)
+    expect(at(0, GLYPH_FIELD.v1)).toBe(0.75)
+  })
+
+  it('carries the distance range, so it cannot disagree with the atlas', () => {
+    const { at } = pack(withText('a').document)
+    expect(at(0, GLYPH_FIELD.pxRange)).toBe(4)
+  })
+
+  it('takes its colour from the first fill', () => {
+    const { at } = pack(withText('a').document)
+    expect(at(0, FIELD.red)).toBe(1)
+    expect(at(0, FIELD.green)).toBe(0)
+    expect(at(0, FIELD.alpha)).toBe(1)
+  })
+
+  it('advances for whitespace without packing anything for it', () => {
+    const { builder, at } = pack(withText('a b').document)
+    expect(builder.count).toBe(2)
+    // 10 for the letter and 5 for the space, so the second letter starts 15 along.
+    expect(at(1, FIELD.originX)).toBe(115)
+  })
+
+  it('packs nothing for an empty text node', () => {
+    const { builder } = pack(withText('').document)
+    expect(builder.count).toBe(0)
+  })
+
+  it('packs nothing for text with no fill', () => {
+    const document = new SceneDocument()
+    document.insert(createText({ characters: 'ab', fontSize: 20 }))
+    expect(pack(document).builder.count).toBe(0)
+  })
+
+  it('substitutes the fallback glyph, so an uncovered character still draws', () => {
+    const { builder, at } = pack(withText('中').document)
+    expect(builder.count).toBe(1)
+    expect(at(0, GLYPH_FIELD.kind)).toBe(KIND_GLYPH)
+  })
+
+  it('multiplies its alpha by the opacity it inherits', () => {
+    const document = new SceneDocument()
+    const frame = document.insert(
+      createFrame({ size: { width: 400, height: 400 }, opacity: 0.5, clipsContent: false }),
+    )
+    document.insert(
+      createText({ characters: 'a', fontSize: 20, fills: [fromHex('#ff0000')] }),
+      frame.id,
+    )
+    expect(pack(document).at(0, FIELD.alpha)).toBe(0.5)
+  })
+
+  it('answers to the clipping frame it sits inside', () => {
+    const document = new SceneDocument()
+    const frame = document.insert(
+      createFrame({
+        size: { width: 400, height: 400 },
+        clipsContent: true,
+        fills: [fromHex('#ffffff')],
+      }),
+    )
+    document.insert(
+      createText({ characters: 'a', fontSize: 20, fills: [fromHex('#ff0000')] }),
+      frame.id,
+    )
+    const { at } = pack(document)
+    // Instance 0 is the frame's own fill, which answers to no clip. The glyph follows.
+    expect(at(0, GLYPH_FIELD.clip)).toBe(-1)
+    expect(at(1, GLYPH_FIELD.clip)).toBe(0)
+  })
+
+  it('culls a glyph that is off screen', () => {
+    const document = new SceneDocument()
+    document.insert(
+      createText({
+        transform: translation(50_000, 50_000),
+        characters: 'ab',
+        fontSize: 20,
+        fills: [fromHex('#ff0000')],
+      }),
+    )
+    const { builder } = pack(document)
+    expect(builder.count).toBe(0)
+    expect(builder.culled).toBe(2)
+  })
+
+  /*
+   * The reason glyphs share the shape buffer rather than getting a draw call of their own.
+   * Painter's order is the instance order, so a rectangle inserted after a text node has to
+   * land after its glyphs and therefore cover them.
+   */
+  it('interleaves with shapes in paint order rather than drawing above them all', () => {
+    const document = new SceneDocument()
+    const box = () =>
+      createRectangle({ size: { width: 50, height: 50 }, fills: [fromHex('#0a7cff')] })
+    document.insert(box())
+    document.insert(createText({ characters: 'a', fontSize: 20, fills: [fromHex('#ff0000')] }))
+    document.insert(box())
+
+    const { builder, at } = pack(document)
+    expect(builder.count).toBe(3)
+    expect([at(0, FIELD.kind), at(1, FIELD.kind), at(2, FIELD.kind)]).toEqual([0, KIND_GLYPH, 0])
+  })
+
+  it('lays a node out again only when its text or size changes', () => {
+    const stubbed = createStubDevice()
+    const builder = build(stubbed)
+    const { document, text } = withText('ab')
+
+    builder.sync(document, camera, viewport)
+    document.update(text.id, { opacity: 0.5 })
+    builder.sync(document, camera, viewport)
+
+    // Nothing to assert about the cache directly, so assert what it must not break: the
+    // glyphs are still packed identically after a change that does not touch the text.
+    expect(builder.count).toBe(2)
+    expect(instanceAt(stubbed.written(), STRIDE, 1, FIELD.originX)).toBe(110)
   })
 })

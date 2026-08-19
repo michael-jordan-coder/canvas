@@ -1,10 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { SceneDocument } from './document.js'
 import { translation } from './math.js'
-import { createEllipse, createFrame, createRectangle, type SceneNode } from './node.js'
+import {
+  createEllipse,
+  createFrame,
+  createRectangle,
+  createText,
+  type SceneNode,
+  type TextNode,
+} from './node.js'
 import { fromHex } from './paint.js'
 import {
   InvalidDocumentError,
+  SCHEMA_VERSION,
   instantiateSubtree,
   parseDocument,
   parseSubtree,
@@ -207,5 +215,119 @@ describe('copy and paste', () => {
 
     document.undo()
     expect(document.size).toBe(4)
+  })
+})
+
+describe('the text node on disk', () => {
+  function withText() {
+    const document = new SceneDocument()
+    const text = document.insert(
+      createText({
+        name: 'Heading',
+        transform: translation(40, 60),
+        size: { width: 120, height: 30 },
+        characters: 'Hello\nthere',
+        fontSize: 24,
+        fills: [fromHex('#1a1a1a')],
+      }),
+    )
+    return { document, text }
+  }
+
+  it('survives a round trip through JSON with its text and size intact', () => {
+    const { document, text } = withText()
+    const parsed = parseDocument(JSON.parse(JSON.stringify(serializeDocument(document))))
+
+    const restored = new SceneDocument()
+    restored.load(parsed.root, parsed.nodes)
+    const back = restored.expectNode(text.id)
+
+    expect(back.type).toBe('text')
+    if (back.type !== 'text') throw new Error('expected a text node')
+    expect(back.characters).toBe('Hello\nthere')
+    expect(back.fontSize).toBe(24)
+    expect(back.size).toEqual({ width: 120, height: 30 })
+  })
+
+  it('is written at the current schema version', () => {
+    const { document } = withText()
+    expect(serializeDocument(document).version).toBe(SCHEMA_VERSION)
+    expect(SCHEMA_VERSION).toBe(3)
+  })
+
+  /*
+   * The bump is not a migration. Nothing in a version 1 file needs changing, because a text
+   * node could not appear in one and every other field is untouched. What it buys is the
+   * other direction, where a build from before text refuses the file by version instead of
+   * dying partway through on an unknown node type.
+   */
+  it('still loads a file written before text existed', () => {
+    const { document } = scene()
+    const older = { ...serializeDocument(document), version: 1 }
+    expect(() => parseDocument(JSON.parse(JSON.stringify(older)))).not.toThrow()
+  })
+
+  it('names the field that failed rather than saying invalid', () => {
+    const { document } = withText()
+    const file = JSON.parse(JSON.stringify(serializeDocument(document)))
+    const broken = file.nodes.find((node: { type: string }) => node.type === 'text')
+    broken.fontSize = 'large'
+    expect(() => parseDocument(file)).toThrow(/fontSize is not a finite number/)
+  })
+
+  it('refuses a text node with no characters field rather than assuming empty', () => {
+    const { document } = withText()
+    const file = JSON.parse(JSON.stringify(serializeDocument(document)))
+    delete file.nodes.find((node: { type: string }) => node.type === 'text').characters
+    expect(() => parseDocument(file)).toThrow(InvalidDocumentError)
+  })
+
+  /*
+   * The first real migration. A version 2 file has text nodes with no `autoWidth`, and every
+   * one of them predates fixed width boxes, so it was auto width. Defaulting the field
+   * whatever the version says would let a genuinely malformed version 3 file through.
+   */
+  it('reads a version 2 text node as auto width, since that is all there was', () => {
+    const { document } = withText()
+    const file = JSON.parse(JSON.stringify(serializeDocument(document)))
+    file.version = 2
+    for (const node of file.nodes) delete node.autoWidth
+
+    const parsed = parseDocument(file)
+    const text = parsed.nodes.find((node) => node.type === 'text')
+    expect(text?.type === 'text' && text.autoWidth).toBe(true)
+  })
+
+  it('still requires the field at the current version', () => {
+    const { document } = withText()
+    const file = JSON.parse(JSON.stringify(serializeDocument(document)))
+    delete file.nodes.find((node: { type: string }) => node.type === 'text').autoWidth
+    expect(() => parseDocument(file)).toThrow(/autoWidth/)
+  })
+
+  it('round trips a fixed width box', () => {
+    const { document, text } = withText()
+    document.update<TextNode>(text.id, { autoWidth: false, size: { width: 90, height: 60 } })
+
+    const parsed = parseDocument(JSON.parse(JSON.stringify(serializeDocument(document))))
+    const back = parsed.nodes.find((node) => node.id === text.id)
+    expect(back?.type === 'text' && back.autoWidth).toBe(false)
+    expect(back?.size).toEqual({ width: 90, height: 60 })
+  })
+
+  it('pastes as an independent copy, so editing one does not touch the other', () => {
+    const { document, text } = withText()
+    const [copy] = instantiateSubtree(
+      document,
+      serializeSubtree(document, [text.id]),
+      document.rootId,
+      { x: 10, y: 10 },
+    )
+    if (!copy) throw new Error('expected a copy')
+
+    document.update<TextNode>(copy.id, { characters: 'Changed' })
+    const original = document.expectNode(text.id)
+    if (original.type !== 'text') throw new Error('expected a text node')
+    expect(original.characters).toBe('Hello\nthere')
   })
 })

@@ -1,15 +1,34 @@
 import { applyToVector, IDENTITY, invert, type NodeId, type SceneDocument, type Vec2 } from '@figma-canvas/document'
 import { reorderSelection } from '../state/order'
+import type { ToolId } from '../state/uiStore'
 import { isEditingText } from './isEditingText'
 
 export interface KeyboardInputOptions {
   document: SceneDocument
   getSelection: () => readonly NodeId[]
   setSelection: (ids: readonly NodeId[]) => void
+  setTool: (tool: ToolId) => void
 }
 
 const NUDGE_STEP = 1
 const NUDGE_STEP_LARGE = 10
+
+/**
+ * The tool shortcuts, keyed by the unmodified letter.
+ *
+ * All six land together rather than only the new one. The editor had none at all before
+ * text, and an app with exactly one tool shortcut reads as an oversight rather than a
+ * decision. Guarded by isEditingText like everything else here, so typing a letter into a
+ * text node or a panel field does not switch tools underneath it.
+ */
+const TOOL_KEYS: Record<string, ToolId> = {
+  v: 'move',
+  h: 'hand',
+  f: 'frame',
+  r: 'rectangle',
+  o: 'ellipse',
+  t: 'text',
+}
 
 const ARROW_DELTAS: Record<string, Vec2> = {
   ArrowUp: { x: 0, y: -1 },
@@ -127,6 +146,16 @@ export function createKeyboardInput(options: KeyboardInputOptions): () => void {
       event.preventDefault()
       options.setSelection([])
       return
+    }
+
+    // After the accelerator chords above, so Cmd+A and Cmd+R keep meaning what they did.
+    if (!accel && !event.altKey) {
+      const tool = TOOL_KEYS[event.key.toLowerCase()]
+      if (tool) {
+        event.preventDefault()
+        options.setTool(tool)
+        return
+      }
     }
 
     const direction = ARROW_DELTAS[event.key]
