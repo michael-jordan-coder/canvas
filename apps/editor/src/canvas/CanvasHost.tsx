@@ -3,14 +3,18 @@ import type { Rect } from '@figma-canvas/document'
 import {
   DEFAULT_CAMERA,
   createWebGPURenderer,
+  fitTo,
+  selectionWorldBounds,
   zoomAt,
   type Camera,
   type Renderer,
+  type Viewport,
 } from '@figma-canvas/renderer'
 import { scene } from '../state/scene'
 import { frameStats } from '../state/stats'
 import { useUI } from '../state/uiStore'
 import { createPointerInput } from '../input/pointerInput'
+import { isEditingText } from '../input/isEditingText'
 import styles from './CanvasHost.module.css'
 
 /**
@@ -95,6 +99,47 @@ export function CanvasHost(): ReactElement {
       draw()
     }
 
+    /**
+     * Shift+1 fits the view to the selection, or to everything if nothing is selected, so it
+     * is never a no-op. Shift+0 (and Cmd/Ctrl+0, the more familiar reset-zoom chord) puts the
+     * zoom back to 100% around the current view centre rather than snapping to the origin.
+     * `.code` rather than `.key`, so this is not tied to what Shift+1 produces on a given
+     * keyboard layout.
+     */
+    // Measured per branch rather than up front: getBoundingClientRect forces a synchronous
+    // layout, and this listener sees every keystroke, including the thirty a second a held
+    // arrow key produces while the panels are re-rendering from the nudge.
+    const viewportOf = (): Viewport => {
+      const rect = canvas.getBoundingClientRect()
+      return { width: rect.width, height: rect.height }
+    }
+
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (isEditingText(event.target)) return
+
+      if (event.shiftKey && event.code === 'Digit1') {
+        event.preventDefault()
+        const selection = useUI.getState().selection
+        const ids =
+          selection.length > 0 ? selection : scene.getChildren(scene.rootId).map((node) => node.id)
+        const bounds = selectionWorldBounds(scene, ids)
+        if (bounds) {
+          cameraRef.current = fitTo(bounds, viewportOf())
+          draw()
+        }
+        return
+      }
+
+      if (event.code === 'Digit0' && (event.shiftKey || event.metaKey || event.ctrlKey)) {
+        event.preventDefault()
+        const camera = cameraRef.current
+        const viewport = viewportOf()
+        const centre = { x: viewport.width / 2, y: viewport.height / 2 }
+        cameraRef.current = zoomAt(camera, viewport, centre, 1 / camera.zoom)
+        draw()
+      }
+    }
+
     const observer = new ResizeObserver(resize)
     const unsubscribe = scene.subscribe(draw)
     // Selection is drawn but is not in the document, so it needs its own redraw trigger.
@@ -102,6 +147,7 @@ export function CanvasHost(): ReactElement {
       if (state.selection !== previous.selection) draw()
     })
     canvas.addEventListener('wheel', onWheel, { passive: false })
+    window.addEventListener('keydown', onKeyDown)
 
     // The stores are read through getState rather than subscribed to. Input runs per pointer
     // event and must see the current tool and selection without a render in between.
@@ -162,6 +208,7 @@ export function CanvasHost(): ReactElement {
       unsubscribeSelection()
       disposeInput()
       canvas.removeEventListener('wheel', onWheel)
+      window.removeEventListener('keydown', onKeyDown)
       media?.removeEventListener('change', onPixelRatioChange)
       renderer?.destroy()
       renderer = null

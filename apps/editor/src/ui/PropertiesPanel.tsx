@@ -17,6 +17,7 @@ import {
 import { scene, useNode } from '../state/scene'
 import { setNodesAngle } from '../state/rotate'
 import { useUI } from '../state/uiStore'
+import { MIN_NODE_SIZE } from '../input/resize'
 import { ColorField } from './ColorField'
 import { NumberField } from './NumberField'
 import { SegmentedField } from './SegmentedField'
@@ -24,12 +25,18 @@ import styles from './PropertiesPanel.module.css'
 
 export function PropertiesPanel(): ReactElement {
   const selection = useUI((state) => state.selection)
+  // Multiple selection deliberately subscribes to no node at all: the count comes from the
+  // selection, so the panel must not wake when one of the selected nodes changes.
   const node = useNode(selection.length === 1 ? selection[0] : undefined)
+
+  const title =
+    selection.length > 1 ? `${selection.length} selected` : node ? node.name : 'Properties'
 
   return (
     <aside className={styles.panel}>
-      <header className={styles.header}>{node ? node.name : 'Properties'}</header>
+      <header className={styles.header}>{title}</header>
       {node && <NodeProperties node={node} />}
+      {selection.length === 0 && <p className={styles.empty}>Nothing selected</p>}
     </aside>
   )
 }
@@ -37,55 +44,82 @@ export function PropertiesPanel(): ReactElement {
 function NodeProperties({ node }: { node: SceneNode }): ReactElement {
   return (
     <div className={styles.sections}>
-      <section className={styles.grid}>
-        <NumberField
-          label="X"
-          value={node.transform.tx}
-          onCommit={(tx) => scene.update(node.id, { transform: { ...node.transform, tx } })}
-        />
-        <NumberField
-          label="Y"
-          value={node.transform.ty}
-          onCommit={(ty) => scene.update(node.id, { transform: { ...node.transform, ty } })}
-        />
-        <NumberField
-          label="W"
-          value={node.size.width}
-          onCommit={(width) => scene.update(node.id, { size: { ...node.size, width } })}
-        />
-        <NumberField
-          label="H"
-          value={node.size.height}
-          onCommit={(height) => scene.update(node.id, { size: { ...node.size, height } })}
-        />
+      <section className={styles.section}>
+        <h3 className={styles.title}>Position</h3>
+        <div className={styles.grid}>
+          <NumberField
+            label="X"
+            value={node.transform.tx}
+            onCommit={(tx) => scene.update(node.id, { transform: { ...node.transform, tx } })}
+          />
+          <NumberField
+            label="Y"
+            value={node.transform.ty}
+            onCommit={(ty) => scene.update(node.id, { transform: { ...node.transform, ty } })}
+          />
+        </div>
       </section>
 
-      <section className={styles.grid}>
-        <NumberField
-          label="A"
-          value={normalizeDegrees(degrees(angleOf(scene.worldTransform(node.id))))}
-          onCommit={(value) => setNodesAngle(scene, [node.id], radians(value))}
-        />
-        <NumberField
-          label="%"
-          value={Math.round(node.opacity * 100)}
-          onCommit={(percent) =>
-            scene.update(node.id, { opacity: Math.min(1, Math.max(0, percent / 100)) })
-          }
-        />
-        {(node.type === 'rectangle' || node.type === 'frame') && (
+      <section className={styles.section}>
+        <h3 className={styles.title}>Size</h3>
+        <div className={styles.grid}>
           <NumberField
-            label="R"
-            value={node.cornerRadius}
-            onCommit={(cornerRadius) =>
-              scene.update<RectangleNode>(node.id, { cornerRadius: Math.max(0, cornerRadius) })
+            label="W"
+            value={node.size.width}
+            onCommit={(width) =>
+              scene.update(node.id, {
+                size: { ...node.size, width: Math.max(MIN_NODE_SIZE, width) },
+              })
             }
           />
-        )}
+          <NumberField
+            label="H"
+            value={node.size.height}
+            onCommit={(height) =>
+              scene.update(node.id, {
+                size: { ...node.size, height: Math.max(MIN_NODE_SIZE, height) },
+              })
+            }
+          />
+        </div>
       </section>
 
-      {node.type === 'frame' && (
-        <section className={styles.stack}>
+      <section className={styles.section}>
+        <h3 className={styles.title}>Appearance</h3>
+        <div className={styles.grid}>
+          <div className={styles.suffixed}>
+            <NumberField
+              label="A"
+              value={normalizeDegrees(degrees(angleOf(scene.worldTransform(node.id))))}
+              onCommit={(value) => setNodesAngle(scene, [node.id], radians(normalizeDegrees(value)))}
+            />
+            <span className={styles.suffix} aria-hidden="true">
+              &deg;
+            </span>
+          </div>
+          <div className={styles.suffixed}>
+            <NumberField
+              label="O"
+              value={Math.round(node.opacity * 100)}
+              onCommit={(percent) =>
+                scene.update(node.id, { opacity: Math.min(1, Math.max(0, percent / 100)) })
+              }
+            />
+            <span className={styles.suffix} aria-hidden="true">
+              %
+            </span>
+          </div>
+          {(node.type === 'rectangle' || node.type === 'frame') && (
+            <NumberField
+              label="R"
+              value={node.cornerRadius}
+              onCommit={(cornerRadius) =>
+                scene.update<RectangleNode>(node.id, { cornerRadius: Math.max(0, cornerRadius) })
+              }
+            />
+          )}
+        </div>
+        {node.type === 'frame' && (
           <label className={styles.toggle}>
             <input
               type="checkbox"
@@ -97,8 +131,8 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
             />
             Clip content
           </label>
-        </section>
-      )}
+        )}
+      </section>
 
       {isPainted(node) && <FillSection node={node} />}
       {isPainted(node) && <StrokeSection node={node} />}
@@ -111,7 +145,8 @@ function FillSection({ node }: { node: PaintedNode }): ReactElement | null {
   if (!fill) return null
 
   return (
-    <section className={styles.stack}>
+    <section className={styles.section}>
+      <h3 className={styles.title}>Fill</h3>
       <ColorField
         label="Fill"
         color={fill.color}
@@ -141,7 +176,8 @@ function StrokeSection({ node }: { node: PaintedNode }): ReactElement {
 
   if (!stroke) {
     return (
-      <section className={styles.stack}>
+      <section className={styles.section}>
+        <h3 className={styles.title}>Stroke</h3>
         <button
           type="button"
           className={styles.add}
@@ -154,7 +190,8 @@ function StrokeSection({ node }: { node: PaintedNode }): ReactElement {
   }
 
   return (
-    <section className={styles.stack}>
+    <section className={styles.section}>
+      <h3 className={styles.title}>Stroke</h3>
       <div className={styles.headed}>
         <ColorField
           label="Stroke"

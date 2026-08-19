@@ -318,20 +318,14 @@ rectangle. Figma selects the outermost frame and makes you double click to desce
 policy rather than a geometry question and it lives above `hitTest`, which is why the function
 returns the deepest hit and lets the caller decide.
 
-## Planned work lives in Notion, not here
+## Planned work lives in TASKS.md, not here
 
 **This file does not list future work.** It describes what exists and why it is built the way it
-is. Planned and in progress work lives on the Figma Canvas Tasks board:
-
-https://app.notion.com/p/3bac9dc0ddd981bcb20aef1149effb4e
+is. Planned and in progress work lives in `TASKS.md`, at the root of the repo.
 
 Two records that both claim to say what is left will drift within a week, so they are split by
-job: Notion owns status, this file owns architecture. When something ships, describe it above and
-mark it Done on the board.
-
-**Do not open the board from the main session.** The `notion-tracker` agent
-(`.claude/agents/notion-tracker.md`) owns every read and write to it, so page ids and property
-payloads never enter the conversation. Delegate to it and relay its one line back.
+job: `TASKS.md` owns status, this file owns architecture. When something ships, describe it above
+and check it off there.
 
 A few things are worth knowing because the code looks finished but is not:
 

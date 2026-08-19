@@ -104,6 +104,22 @@ describe('undo and redo', () => {
     expect(document.expectNode(rectangle.id).transform.tx).toBe(60)
   })
 
+  it('discards an aborted group, leaving no history step behind', () => {
+    const { document, rectangle } = fresh()
+
+    document.beginHistoryGroup()
+    document.transact(() => document.update(rectangle.id, { transform: translation(30, 0) }))
+    expect(document.expectNode(rectangle.id).transform.tx).toBe(30)
+
+    document.abortHistoryGroup()
+    expect(document.historyDepth).toBe(0)
+    // Restoring the live node is the caller's job (cancelling a drag restores it before
+    // aborting), so the value the transact left behind is still here: aborting only stops the
+    // group from becoming an undo step, it does not itself roll anything back.
+    expect(document.expectNode(rectangle.id).transform.tx).toBe(30)
+    expect(document.undo()).toBe(false)
+  })
+
   it('records nothing for a gesture that changed nothing', () => {
     const { document } = fresh()
     document.beginHistoryGroup()

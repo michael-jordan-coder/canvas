@@ -77,6 +77,14 @@ export function fromHex(hex: string, a = 1): SolidPaint {
   return solid(((int >> 16) & 255) / 255, ((int >> 8) & 255) / 255, (int & 255) / 255, a)
 }
 
+const HEX_COLOR = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i
+
+/** Parses a typed or pasted hex string, or null if it is not a valid 3 or 6 digit hex colour. */
+export function parseHex(value: string, a = 1): SolidPaint | null {
+  const trimmed = value.trim()
+  return HEX_COLOR.test(trimmed) ? fromHex(trimmed, a) : null
+}
+
 export function toHex(color: RGBA): string {
   const channel = (v: number): string =>
     Math.round(Math.min(1, Math.max(0, v)) * 255)

@@ -54,6 +54,9 @@ export interface ScaleOptions {
 
 const EPSILON = 1e-6
 
+/** Smallest a box may become along a resized axis, in world units, unless a caller overrides it. */
+export const MIN_NODE_SIZE = 1
+
 function ratio(moved: number, original: number): number {
   // A zero length side has no meaningful scale, and dividing by it would produce infinity.
   return Math.abs(original) < EPSILON ? 1 : moved / original
@@ -87,7 +90,7 @@ export function scaleFactors(
   // Clamped positive rather than allowed to go negative. Dragging a handle past its anchor
   // flips the shape in Figma, which needs a negative scale in the transform and a rethink of
   // what the SDF does with it. Until then the box stops instead of inverting.
-  const minimum = options.minimum ?? 1
+  const minimum = options.minimum ?? MIN_NODE_SIZE
   if (axes.x) sx = Math.max(sx, bounds.width > EPSILON ? minimum / bounds.width : 1)
   if (axes.y) sy = Math.max(sy, bounds.height > EPSILON ? minimum / bounds.height : 1)
 

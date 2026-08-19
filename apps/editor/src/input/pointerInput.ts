@@ -125,6 +125,18 @@ interface Drag {
   grouped: boolean
   /** Option was held at pointer down, so the first move drags a copy instead. */
   duplicateOnMove: boolean
+  /**
+   * Set once `duplicateOnMove` has fired, to the nodes the copies were made from. Tells a
+   * cancel that `nodes` are copies to delete rather than originals to restore, and gives it
+   * the selection to put back.
+   */
+  duplicatedFrom?: readonly NodeId[]
+  /**
+   * Create only: what was selected before the gesture. Creating selects the new node as it
+   * draws, so cancelling has to put the previous selection back rather than leave it pointing
+   * at a node it just removed.
+   */
+  startSelection?: readonly NodeId[]
   /** Resize only: which handle was grabbed, and the box as it was when it was grabbed. */
   handle?: HandleId
   startBounds?: Rect
@@ -165,6 +177,9 @@ export function createPointerInput(options: PointerInputOptions): () => void {
   const { canvas, document } = options
   let drag: Drag | null = null
   let spaceHeld = false
+  // Kept so a Space press or release can update the pan cursor immediately, without waiting
+  // for the pointer to move first.
+  let lastPointerScreen: Vec2 | null = null
 
   const viewportOf = (): Viewport => {
     const rect = canvas.getBoundingClientRect()
@@ -183,6 +198,7 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     if (drag) return
     const screen = screenOf(event)
     const world = worldOf(screen)
+    lastPointerScreen = screen
 
     // Middle button and held space both mean pan, whatever tool is active. Every canvas
     // application agrees on this and muscle memory is stronger than the toolbar.
@@ -199,6 +215,7 @@ export function createPointerInput(options: PointerInputOptions): () => void {
         duplicateOnMove: false,
       }
       canvas.setPointerCapture(event.pointerId)
+      canvas.dataset['pan'] = 'grabbing'
       return
     }
 
@@ -216,6 +233,7 @@ export function createPointerInput(options: PointerInputOptions): () => void {
         duplicateOnMove: false,
         nodes: [],
         createTool: tool,
+        startSelection: options.getSelection(),
         // Whatever frame the drag began inside becomes the parent, so the new shape moves
         // with that frame afterwards rather than merely sitting on top of it.
         createParent: containerAt(document, world).id,
@@ -399,15 +417,31 @@ export function createPointerInput(options: PointerInputOptions): () => void {
       ]
     })
 
+  /**
+   * Not dragging, so this is only about what the cursor should look like. The value goes on a
+   * data attribute rather than into style, so the cursors stay in the stylesheet. A pan cursor
+   * takes priority over a resize/rotate handle: holding space to pan means exactly that,
+   * whatever happens to be under the pointer.
+   */
+  const updateIdleCursor = (screen: Vec2): void => {
+    const wantsPan = options.getTool() === 'hand' || spaceHeld
+    if (wantsPan) {
+      canvas.dataset['pan'] = 'grab'
+      delete canvas.dataset['handle']
+      return
+    }
+    delete canvas.dataset['pan']
+    const hovered = options.getTool() === 'move' ? grabUnder(screen) : null
+    if (hovered) canvas.dataset['handle'] = hovered
+    else delete canvas.dataset['handle']
+  }
+
   const onPointerMove = (event: PointerEvent): void => {
     const screen = screenOf(event)
+    lastPointerScreen = screen
 
     if (!drag) {
-      // Not dragging, so this is only about what the cursor should look like. The value goes
-      // on a data attribute rather than into style, so the cursors stay in the stylesheet.
-      const hovered = options.getTool() === 'move' ? grabUnder(screen) : null
-      if (hovered) canvas.dataset['handle'] = hovered
-      else delete canvas.dataset['handle']
+      updateIdleCursor(screen)
       return
     }
 
@@ -480,15 +514,13 @@ export function createPointerInput(options: PointerInputOptions): () => void {
 
       if (current.duplicateOnMove) {
         current.duplicateOnMove = false
+        const originals = current.nodes.map((dragged) => dragged.id)
         // Zero offset: the copy starts exactly on the original and this gesture moves it.
-        const copies = duplicateNodes(
-          document,
-          current.nodes.map((dragged) => dragged.id),
-          { x: 0, y: 0 },
-        )
+        const copies = duplicateNodes(document, originals, { x: 0, y: 0 })
         if (copies.length > 0) {
           const copyIds = copies.map((copy) => copy.id)
           options.setSelection(copyIds)
+          current.duplicatedFrom = originals
           // Rebuilt rather than remapped, because a selection containing a frame and one of
           // its own children collapses to fewer roots than it had ids.
           current.nodes = draggedNodesFor(copyIds, current.startWorld)
@@ -683,6 +715,7 @@ export function createPointerInput(options: PointerInputOptions): () => void {
       // the very next click draws a second shape instead of selecting the first.
       options.setTool('move')
       drag = null
+      updateIdleCursor(screenOf(event))
       return
     }
 
@@ -690,6 +723,7 @@ export function createPointerInput(options: PointerInputOptions): () => void {
       options.setMarquee(null)
       options.requestDraw()
       drag = null
+      updateIdleCursor(screenOf(event))
       return
     }
 
@@ -709,6 +743,7 @@ export function createPointerInput(options: PointerInputOptions): () => void {
 
     if (drag.grouped) document.endHistoryGroup()
     drag = null
+    updateIdleCursor(screenOf(event))
   }
 
   /**
@@ -725,12 +760,85 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     if (drag.kind === 'rotate') applyRotate(drag, drag.lastScreen, modifiers)
   }
 
+  /**
+   * Restores live document state to what it was before the cancelled gesture, undoing only
+   * what that gesture itself did. `pan` is deliberately not handled: it is view state, never
+   * touches the document or history, and releasing the pointer already ends it cleanly.
+   *
+   * Wherever this removes nodes it also puts the selection back, the same way `deleteSelection`
+   * does: leaving it pointing at an id that no longer exists shows no handles and no properties
+   * while still reading as a selection, so delete and nudge silently do nothing afterwards.
+   */
+  const cancelDrag = (current: Drag): void => {
+    if (current.kind === 'move' && current.grouped) {
+      const duplicatedFrom = current.duplicatedFrom
+      document.transact(() => {
+        for (const dragged of current.nodes) {
+          // An option drag copy has no meaningful "before": it did not exist until this
+          // gesture created it, so cancelling removes it rather than trying to restore it.
+          if (duplicatedFrom) document.remove(dragged.id)
+          else document.update(dragged.id, { transform: dragged.startTransform })
+        }
+        // The originals never moved, so reselecting them leaves the gesture with no trace.
+        if (duplicatedFrom) options.setSelection(duplicatedFrom)
+      })
+    } else if (current.kind === 'resize' && current.grouped) {
+      if (current.localResize) {
+        const { id, startTransform, startSize } = current.localResize
+        document.update(id, { transform: startTransform, size: startSize })
+      } else if (current.resizing) {
+        document.transact(() => {
+          for (const target of current.resizing ?? []) {
+            document.update(target.id, { transform: target.startTransform, size: target.startSize })
+          }
+        })
+      }
+    } else if (current.kind === 'rotate' && current.grouped && current.rotating && current.pivot) {
+      // A zero delta recomputes each node's transform back through the same maths that moved
+      // it, landing exactly on where it started.
+      applyRotation(document, current.rotating, 0, current.pivot)
+    } else if (current.kind === 'create' && current.created) {
+      const created = current.created
+      document.transact(() => {
+        document.remove(created)
+        options.setSelection(current.startSelection ?? [])
+      })
+    } else if (current.kind === 'marquee') {
+      options.setSelection(current.marqueeBase ?? [])
+      options.setMarquee(null)
+    }
+
+    if (current.grouped) document.abortHistoryGroup()
+  }
+
   const onKeyDown = (event: KeyboardEvent): void => {
-    if (event.code === 'Space') spaceHeld = true
+    if (event.key === 'Escape' && drag) {
+      // Runs before keyboardInput.ts's own Escape handler (which clears the selection): this
+      // listener is registered inside CanvasHost, a descendant of App, and React commits
+      // child effects before parent ones. stopImmediatePropagation makes that ordering do the
+      // work of keeping the two Escapes from fighting, rather than clearing the selection too.
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      const current = drag
+      if (canvas.hasPointerCapture(current.pointerId)) canvas.releasePointerCapture(current.pointerId)
+      drag = null
+      cancelDrag(current)
+      if (current.kind === 'marquee') options.requestDraw()
+      if (lastPointerScreen) updateIdleCursor(lastPointerScreen)
+      return
+    }
+
+    if (event.code === 'Space') {
+      spaceHeld = true
+      if (!drag && lastPointerScreen) updateIdleCursor(lastPointerScreen)
+    }
     reapplyModifiers(event)
   }
   const onKeyUp = (event: KeyboardEvent): void => {
-    if (event.code === 'Space') spaceHeld = false
+    if (event.code === 'Space') {
+      spaceHeld = false
+      if (!drag && lastPointerScreen) updateIdleCursor(lastPointerScreen)
+    }
     reapplyModifiers(event)
   }
 

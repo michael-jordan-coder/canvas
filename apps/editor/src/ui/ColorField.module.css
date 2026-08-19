@@ -1,15 +1,25 @@
 .field {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-3);
   height: var(--row-height);
+  /* The panel's shared 5px inset, matching a bordered field's border plus padding. */
+  padding-left: calc(var(--space-2) + 1px);
 }
 
+/*
+ * The section title above the row already says Fill or Stroke, and the inputs carry their
+ * own aria-labels built from the same prop, so the visible label is hidden rather than
+ * repeated under the title.
+ */
 .label {
-  flex: none;
-  width: 40px;
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /*
@@ -25,6 +35,11 @@
   border-radius: var(--radius);
   background: none;
   cursor: pointer;
+  transition: border-color var(--duration) var(--ease);
+}
+
+.swatch:hover {
+  border-color: var(--text-secondary);
 }
 
 .swatch::-webkit-color-swatch-wrapper {
@@ -42,6 +57,23 @@
 }
 
 .hex {
+  width: calc(7ch + 2 * var(--space-1));
+  padding: 0 var(--space-1);
+  color: var(--text);
+  font: inherit;
   font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  transition: background var(--duration) var(--ease);
+}
+
+.hex:hover {
+  background: var(--hover);
+}
+
+.hex:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }

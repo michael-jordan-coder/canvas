@@ -3,6 +3,9 @@
   align-items: center;
   gap: var(--space-3);
   height: var(--row-height);
+  /* The panel's shared 5px inset, matching a bordered field's border plus padding. The
+     right edge stays flush so the control ends on the same line as the fields above. */
+  padding-left: calc(var(--space-2) + 1px);
 }
 
 .label {

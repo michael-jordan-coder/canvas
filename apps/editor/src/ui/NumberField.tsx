@@ -10,13 +10,23 @@ interface NumberFieldProps {
    * word like "Weight" lines up with the rows above it rather than sitting on its own grid.
    */
   wide?: boolean
+  /** Arrow-key step, and the larger one Shift takes. Defaults to 1 and 10. */
+  step?: number
+  largeStep?: number
 }
 
 /**
  * Commits on blur and on Enter, reverts on Escape. While typing, the draft string is held
  * locally so an intermediate value like "-" or "1." never reaches the document.
  */
-export function NumberField({ label, value, onCommit, wide }: NumberFieldProps): ReactElement {
+export function NumberField({
+  label,
+  value,
+  onCommit,
+  wide,
+  step = 1,
+  largeStep = 10,
+}: NumberFieldProps): ReactElement {
   const [draft, setDraft] = useState<string | null>(null)
   const rounded = Math.round(value * 100) / 100
 
@@ -46,6 +56,18 @@ export function NumberField({ label, value, onCommit, wide }: NumberFieldProps):
           if (event.key === 'Escape') {
             setDraft(null)
             event.currentTarget.blur()
+          }
+          if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+            event.preventDefault()
+            const parsedDraft = draft === null ? NaN : Number.parseFloat(draft)
+            const current = Number.isFinite(parsedDraft) ? parsedDraft : rounded
+            const delta = event.shiftKey ? largeStep : step
+            setDraft(null)
+            // Each arrow press commits its own step, unlike the canvas's arrow-key nudge,
+            // which groups a held burst into one undo step. This field is generic and reused
+            // across every numeric property with no access to the document's history group,
+            // and grouping here would mean giving it one just for this lower-stakes case.
+            onCommit(current + (event.key === 'ArrowUp' ? delta : -delta))
           }
         }}
       />

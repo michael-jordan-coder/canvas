@@ -39,7 +39,11 @@ export function FileActions(): ReactElement {
 
   return (
     <div className={styles.actions}>
-      {error && <span className={styles.error}>{error}</span>}
+      {error && (
+        <span className={styles.error} role="alert" aria-live="assertive">
+          {error}
+        </span>
+      )}
       <button type="button" className={styles.action} aria-label="Export" onClick={exportDocument}>
         <DownloadIcon />
       </button>

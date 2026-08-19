@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import type { NodeId } from '@figma-canvas/document'
 import { scene } from '../state/scene'
+import { useUI } from '../state/uiStore'
 
 /** Where a drop would land. `into` means inside a container, the others mean beside a node. */
 export type DropPosition = 'before' | 'after' | 'into'
@@ -91,6 +92,9 @@ export function useLayerDrag(): LayerDrag {
 function applyDrop(id: NodeId, drop: DropTarget): void {
   if (drop.position === 'into') {
     scene.reparent(id, drop.id)
+    // A collapsed frame still accepts a drop, but the moved row would vanish into the
+    // closed subtree. Opening the target keeps the result of the drop on screen.
+    useUI.getState().setCollapsed(drop.id, false)
     return
   }
 

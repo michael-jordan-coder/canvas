@@ -344,6 +344,20 @@ export class SceneDocument {
     }
   }
 
+  /**
+   * Discards a history group instead of committing it.
+   *
+   * Used when a gesture is cancelled rather than completed. Restoring the live nodes to their
+   * pre-gesture state and then calling `endHistoryGroup` would still push a step onto the
+   * stack, one whose before and after are identical: a no-op sitting on the undo history for
+   * no reason. Discarding the group instead leaves no trace at all.
+   */
+  abortHistoryGroup(): void {
+    if (this.#groupDepth === 0) return
+    this.#groupDepth -= 1
+    if (this.#groupDepth === 0) this.#group = null
+  }
+
   undo(): boolean {
     const entry = this.#history.takeUndo()
     if (!entry) return false

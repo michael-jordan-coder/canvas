@@ -18,22 +18,20 @@
 }
 
 .label {
+  /* The input's 100% width overflows the row, and without flex: none the label would be
+     the thing that shrinks, so no two rows would share a column. */
+  flex: none;
   width: 12px;
   color: var(--text-secondary);
 }
 
 /*
- * The wide variant shares the 40px label column the paint rows use. The negative margin
- * cancels this field's own 4px inset so the label text starts at the section edge, and the
- * label is 4px wider to put the input back on the same 48px line as the rows above it.
+ * The wide variant shares the panel's full width label column. This field's own 5px inset
+ * (1px border plus 4px padding) plus a 44px label plus the 4px gap puts the input on the
+ * same line as a row carrying the panel's 5px inset, a 40px label and an 8px gap.
  */
-.wide {
-  margin-left: calc(var(--space-2) * -1);
-}
-
 .wide .label {
   width: 44px;
-  font-size: var(--text-xs);
 }
 
 .input {

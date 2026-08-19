@@ -87,6 +87,36 @@ export function VisibleIcon(props: IconProps): ReactElement {
   )
 }
 
+export function ChevronIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <path {...stroke} d="M6 4.5 9.5 8 6 11.5" />
+    </Svg>
+  )
+}
+
+export function LockedIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <g>
+        <rect {...stroke} x="3.5" y="7" width="9" height="6.5" rx="1" />
+        <path {...stroke} d="M5.5 7V5.2a2.5 2.5 0 0 1 5 0V7" />
+      </g>
+    </Svg>
+  )
+}
+
+export function UnlockedIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <g>
+        <rect {...stroke} x="3.5" y="7" width="9" height="6.5" rx="1" />
+        <path {...stroke} d="M5.5 7V5.2a2.5 2.5 0 0 1 4.9-.7" />
+      </g>
+    </Svg>
+  )
+}
+
 export function HiddenIcon(props: IconProps): ReactElement {
   return (
     <Svg {...props}>

@@ -1,5 +1,5 @@
-import { useRef, type ReactElement } from 'react'
-import { fromHex, toHex, type RGBA } from '@figma-canvas/document'
+import { useRef, useState, type ReactElement } from 'react'
+import { fromHex, parseHex, toHex, type RGBA } from '@figma-canvas/document'
 import { scene } from '../state/scene'
 import styles from './ColorField.module.css'
 
@@ -18,6 +18,9 @@ interface ColorFieldProps {
  */
 export function ColorField({ label, color, onChange }: ColorFieldProps): ReactElement {
   const grouped = useRef(false)
+  const [hexDraft, setHexDraft] = useState<string | null>(null)
+  // Mirrors `hexDraft` so a commit can clear it synchronously. See `commitHex`.
+  const draftRef = useRef<string | null>(null)
 
   const pick = (hex: string): void => {
     if (!grouped.current) {
@@ -34,6 +37,29 @@ export function ColorField({ label, color, onChange }: ColorFieldProps): ReactEl
     scene.endHistoryGroup()
   }
 
+  const editHex = (value: string | null): void => {
+    draftRef.current = value
+    setHexDraft(value)
+  }
+
+  /**
+   * A single valid hex commit is one discrete change, unlike the swatch's continuous drag
+   * session above, so it needs no history group of its own.
+   *
+   * The draft is cleared through the ref before anything else, because committing on Enter
+   * calls `blur()`, and that dispatches focusout synchronously: `onBlur` would re-enter this
+   * with the state from the current render, where `hexDraft` is still set, and commit the same
+   * colour a second time. Two `scene.update` calls means two undo steps, the second a no-op,
+   * so one Enter would need two undos to walk back.
+   */
+  const commitHex = (): void => {
+    const draft = draftRef.current
+    if (draft === null) return
+    editHex(null)
+    const parsed = parseHex(draft)
+    if (parsed) onChange({ ...parsed.color, a: color.a })
+  }
+
   return (
     <div className={styles.field}>
       <span className={styles.label}>{label}</span>
@@ -45,7 +71,25 @@ export function ColorField({ label, color, onChange }: ColorFieldProps): ReactEl
         onChange={(event) => pick(event.target.value)}
         onBlur={end}
       />
-      <span className={styles.hex}>{toHex(color).slice(1).toUpperCase()}</span>
+      <input
+        className={styles.hex}
+        type="text"
+        aria-label={`${label} hex value`}
+        spellCheck={false}
+        value={hexDraft ?? toHex(color).slice(1).toUpperCase()}
+        onChange={(event) => editHex(event.target.value)}
+        onBlur={commitHex}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            commitHex()
+            event.currentTarget.blur()
+          }
+          if (event.key === 'Escape') {
+            editHex(null)
+            event.currentTarget.blur()
+          }
+        }}
+      />
     </div>
   )
 }

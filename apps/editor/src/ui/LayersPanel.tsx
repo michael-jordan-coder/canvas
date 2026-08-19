@@ -2,7 +2,16 @@ import { useEffect, useRef, useState, type ReactElement } from 'react'
 import type { NodeId } from '@figma-canvas/document'
 import { scene, useChildren, useNode } from '../state/scene'
 import { useUI } from '../state/uiStore'
-import { EllipseIcon, FrameIcon, HiddenIcon, RectangleIcon, VisibleIcon } from './icons'
+import {
+  ChevronIcon,
+  EllipseIcon,
+  FrameIcon,
+  HiddenIcon,
+  LockedIcon,
+  RectangleIcon,
+  UnlockedIcon,
+  VisibleIcon,
+} from './icons'
 import { useLayerDrag, type LayerDrag } from './useLayerDrag'
 import styles from './LayersPanel.module.css'
 
@@ -14,11 +23,13 @@ export function LayersPanel(): ReactElement {
     <aside className={styles.panel}>
       <header className={styles.header}>Layers</header>
       <div className={styles.tree}>
-        {/* Reversed, because index 0 is the back of the stack and the topmost thing on the
-            canvas belongs at the top of the list. */}
-        {[...roots].reverse().map((node) => (
-          <LayerRow key={node.id} id={node.id} drag={drag} />
-        ))}
+        {roots.length === 0 ? (
+          <div className={styles.empty}>No layers</div>
+        ) : (
+          /* Reversed, because index 0 is the back of the stack and the topmost thing on the
+             canvas belongs at the top of the list. */
+          [...roots].reverse().map((node) => <LayerRow key={node.id} id={node.id} drag={drag} />)
+        )}
       </div>
     </aside>
   )
@@ -29,11 +40,15 @@ function LayerRow({ id, drag }: { id: NodeId; drag: LayerDrag }): ReactElement |
   const children = useChildren(id)
   const selection = useUI((state) => state.selection)
   const setSelection = useUI((state) => state.setSelection)
+  const toggleInSelection = useUI((state) => state.toggleInSelection)
+  const collapsed = useUI((state) => state.collapsed.has(id))
+  const setCollapsed = useUI((state) => state.setCollapsed)
   const [renaming, setRenaming] = useState(false)
 
   if (!node) return null
 
   const selected = selection.includes(id)
+  const hasChildren = children.length > 0
   const Icon =
     node.type === 'frame' ? FrameIcon : node.type === 'ellipse' ? EllipseIcon : RectangleIcon
   const drop = drag.target?.id === id ? drag.target.position : undefined
@@ -45,24 +60,67 @@ function LayerRow({ id, drag }: { id: NodeId; drag: LayerDrag }): ReactElement |
         data-layer-id={id}
         data-selected={selected}
         data-dimmed={!node.visible}
+        data-locked={node.locked}
         data-dragging={drag.dragging === id}
         data-drop={drop}
       >
+        {hasChildren ? (
+          <button
+            type="button"
+            className={styles.chevron}
+            data-expanded={!collapsed}
+            aria-label={collapsed ? 'Expand' : 'Collapse'}
+            aria-expanded={!collapsed}
+            onClick={() => setCollapsed(id, !collapsed)}
+          >
+            <ChevronIcon size={12} />
+          </button>
+        ) : (
+          /* Childless rows keep the slot so icons and labels line up down the column. */
+          <span className={styles.chevronBlank} aria-hidden="true" />
+        )}
         {renaming ? (
           <RenameField id={id} name={node.name} onDone={() => setRenaming(false)} />
         ) : (
           <button
             type="button"
             className={styles.name}
-            onClick={() => setSelection([id])}
+            onClick={(event) => {
+              // Same toggle canvas shift-click already uses, so a selection built on the
+              // canvas can be extended from here and vice versa.
+              if (event.shiftKey || event.metaKey || event.ctrlKey) toggleInSelection(id)
+              else setSelection([id])
+            }}
             onDoubleClick={() => setRenaming(true)}
             onPointerDown={(event) => drag.start(id, event)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === 'F2') {
+                event.preventDefault()
+                setRenaming(true)
+              }
+              if (event.key === 'ArrowLeft' && hasChildren && !collapsed) {
+                event.preventDefault()
+                setCollapsed(id, true)
+              }
+              if (event.key === 'ArrowRight' && hasChildren && collapsed) {
+                event.preventDefault()
+                setCollapsed(id, false)
+              }
+            }}
             aria-pressed={selected}
           >
             <Icon size={12} />
             <span className={styles.label}>{node.name}</span>
           </button>
         )}
+        <button
+          type="button"
+          className={styles.lock}
+          aria-label={node.locked ? 'Unlock' : 'Lock'}
+          onClick={() => scene.update(id, { locked: !node.locked })}
+        >
+          {node.locked ? <LockedIcon size={12} /> : <UnlockedIcon size={12} />}
+        </button>
         <button
           type="button"
           className={styles.visibility}
@@ -72,7 +130,7 @@ function LayerRow({ id, drag }: { id: NodeId; drag: LayerDrag }): ReactElement |
           {node.visible ? <VisibleIcon size={12} /> : <HiddenIcon size={12} />}
         </button>
       </div>
-      {children.length > 0 && (
+      {hasChildren && !collapsed && (
         <div className={styles.children}>
           {[...children].reverse().map((child) => (
             <LayerRow key={child.id} id={child.id} drag={drag} />

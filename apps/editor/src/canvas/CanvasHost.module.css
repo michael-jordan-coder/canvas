@@ -35,6 +35,14 @@
   cursor: grab;
 }
 
+.canvas[data-pan='grab'] {
+  cursor: grab;
+}
+
+.canvas[data-pan='grabbing'] {
+  cursor: grabbing;
+}
+
 .error {
   position: absolute;
   inset: auto 0 0 0;

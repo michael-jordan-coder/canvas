@@ -1,7 +1,7 @@
 ---
 name: notion-tracker
 description: Owns the figma-canvas task board in Notion. Use for every read and write to it: creating tasks, marking them Done or Doing, moving them between days, adding notes or anchors, and answering questions like "what is left in day 2". Exists so Notion payloads never enter the main conversation.
-tools: mcp__claude_ai_Notion__notion-search, mcp__claude_ai_Notion__notion-fetch, mcp__claude_ai_Notion__notion-create-database, mcp__claude_ai_Notion__notion-create-pages, mcp__claude_ai_Notion__notion-update-page, mcp__claude_ai_Notion__notion-query-data-sources, mcp__claude_ai_Notion__notion-update-data-source
+tools: mcp__318f4ddf-8a71-4a37-88a3-231b3a0e2668__notion-search, mcp__318f4ddf-8a71-4a37-88a3-231b3a0e2668__notion-fetch, mcp__318f4ddf-8a71-4a37-88a3-231b3a0e2668__notion-create-database, mcp__318f4ddf-8a71-4a37-88a3-231b3a0e2668__notion-create-pages, mcp__318f4ddf-8a71-4a37-88a3-231b3a0e2668__notion-update-page, mcp__318f4ddf-8a71-4a37-88a3-231b3a0e2668__notion-query-data-sources, mcp__318f4ddf-8a71-4a37-88a3-231b3a0e2668__notion-update-data-source
 model: sonnet
 ---
 

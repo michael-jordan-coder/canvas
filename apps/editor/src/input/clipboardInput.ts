@@ -8,6 +8,7 @@ import {
   type SerializedSubtree,
 } from '@figma-canvas/document'
 import { duplicateNodes } from '../state/duplicate'
+import { isEditingText } from './isEditingText'
 
 export interface ClipboardInputOptions {
   document: SceneDocument
@@ -17,11 +18,6 @@ export interface ClipboardInputOptions {
 
 /** Far enough to see that something happened, near enough to stay obviously related. */
 const PASTE_OFFSET = { x: 10, y: 10 }
-
-function isEditingText(target: EventTarget | null): boolean {
-  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return true
-  return target instanceof HTMLElement && target.isContentEditable
-}
 
 /**
  * Copy, cut, paste and duplicate.

@@ -28,12 +28,20 @@
   padding-left: var(--space-4);
 }
 
+/* One quiet line, aligned with the header's padding. The interface explains itself
+   through design, so there is no helper text. */
+.empty {
+  padding: var(--space-3);
+  color: var(--text-secondary);
+}
+
 .row {
   position: relative;
   display: flex;
   align-items: center;
+  gap: var(--space-1);
   height: var(--row-height);
-  padding-right: var(--space-2);
+  padding: 0 var(--space-2) 0 var(--space-1);
   transition: background var(--duration) var(--ease);
 }
 
@@ -77,9 +85,45 @@
   background: var(--accent-subtle);
 }
 
-.row[data-dimmed='true'] .label,
-.row[data-dimmed='true'] .name {
+/* Hidden and locked dim the label the same way; each state also lifts its own control
+   below so the reason is visible at the row's edge. */
+.row[data-dimmed='true'] .name,
+.row[data-locked='true'] .name {
   color: var(--text-disabled);
+}
+
+/* Every row keeps the chevron slot, so icons and labels align whether or not there is
+   anything to fold. Only rows with children get the button itself. */
+.chevron,
+.chevronBlank {
+  flex: none;
+  width: 16px;
+}
+
+.chevron {
+  display: grid;
+  place-items: center;
+  height: 20px;
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  transition:
+    color var(--duration) var(--ease),
+    background var(--duration) var(--ease);
+}
+
+.chevron:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+/* Points right when collapsed, turns down when open. The turn is feedback for the toggle,
+   nothing more, and prefers-reduced-motion zeroes --duration. */
+.chevron svg {
+  transition: transform var(--duration) var(--ease);
+}
+
+.chevron[data-expanded='true'] svg {
+  transform: rotate(90deg);
 }
 
 .name {
@@ -89,7 +133,6 @@
   flex: 1;
   min-width: 0;
   height: 100%;
-  padding-left: var(--space-3);
   color: var(--text);
   text-align: left;
 }
@@ -104,7 +147,6 @@
   flex: 1;
   min-width: 0;
   height: 20px;
-  margin-left: var(--space-3);
   padding: 0 var(--space-2);
   background: var(--field);
   border: 1px solid var(--accent);
@@ -117,9 +159,11 @@
 
 /* Always present, never revealed on hover: an affordance that does not exist on touch
    does not exist. */
-.visibility {
+.visibility,
+.lock {
   display: grid;
   place-items: center;
+  flex: none;
   width: 20px;
   height: 20px;
   border-radius: var(--radius);
@@ -129,11 +173,16 @@
     background var(--duration) var(--ease);
 }
 
-.visibility:hover {
+.visibility:hover,
+.lock:hover {
   color: var(--text);
   background: var(--hover);
 }
 
 .row[data-dimmed='true'] .visibility {
+  color: var(--text-secondary);
+}
+
+.row[data-locked='true'] .lock {
   color: var(--text-secondary);
 }
