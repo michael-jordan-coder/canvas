@@ -13,7 +13,7 @@ import {
 import { scene } from '../state/scene'
 import { frameStats } from '../state/stats'
 import { useUI } from '../state/uiStore'
-import { fontMetrics, updateText } from '../state/font'
+import { fontMetrics, textLayouts, updateText } from '../state/font'
 import { TextEditor } from '../ui/TextEditor'
 import { beginEditing, endEditing } from '../state/textEditing'
 import { createPointerInput } from '../input/pointerInput'
@@ -178,6 +178,7 @@ export function CanvasHost(): ReactElement {
       endTextEdit: endEditing,
       getEditing: () => useUI.getState().editing,
       getMetrics: fontMetrics,
+      layouts: textLayouts,
       updateText,
     })
 
@@ -195,7 +196,10 @@ export function CanvasHost(): ReactElement {
     }
     watchPixelRatio()
 
-    void createWebGPURenderer({ canvas, document: scene }, { onLost: setError })
+    void createWebGPURenderer(
+      { canvas, document: scene, layouts: textLayouts },
+      { onLost: setError },
+    )
       .then((created) => {
         // The effect can be torn down before the device arrives, and in StrictMode it
         // reliably is. Without this the second mount leaks the first device.

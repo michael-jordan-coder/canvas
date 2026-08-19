@@ -1,4 +1,10 @@
-import type { FontMetrics, NodeId, Rect, SceneDocument } from '@figma-canvas/document'
+import type {
+  FontMetrics,
+  NodeId,
+  Rect,
+  SceneDocument,
+  TextLayoutCache,
+} from '@figma-canvas/document'
 import type { Camera, Viewport } from '../camera.js'
 import type { TextEditing } from '../Renderer.js'
 import {
@@ -61,10 +67,12 @@ export class OverlayInstances {
   #count = 0
 
   #metrics: FontMetrics
+  #layouts: TextLayoutCache
 
-  constructor(device: GPUDevice, metrics: FontMetrics) {
+  constructor(device: GPUDevice, metrics: FontMetrics, layouts: TextLayoutCache) {
     this.#device = device
     this.#metrics = metrics
+    this.#layouts = layouts
   }
 
   get count(): number {
@@ -97,7 +105,14 @@ export class OverlayInstances {
      * the other way round, and the caret has to be the thing the pointer is aiming at.
      */
     if (editing) {
-      const boxes = textEditingBoxes(document, editing, this.#metrics, camera, viewport)
+      const boxes = textEditingBoxes(
+        document,
+        editing,
+        this.#metrics,
+        this.#layouts,
+        camera,
+        viewport,
+      )
       if (boxes) {
         // The highlight first, so the caret is never buried under it.
         for (const rect of boxes.selection) {

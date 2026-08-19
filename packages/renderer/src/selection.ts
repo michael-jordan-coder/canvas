@@ -2,7 +2,6 @@ import {
   angleOf,
   applyToPoint,
   caretRect,
-  layoutTextNode,
   multiply,
   scaleOf,
   selectionRects,
@@ -12,6 +11,7 @@ import {
   type NodeId,
   type Rect,
   type SceneDocument,
+  type TextLayoutCache,
   type Vec2,
 } from '@figma-canvas/document'
 import { viewMatrix, type Camera, type Viewport } from './camera.js'
@@ -342,6 +342,7 @@ export function textEditingBoxes(
   document: SceneDocument,
   editing: TextEditing,
   metrics: FontMetrics,
+  layouts: TextLayoutCache,
   camera: Camera,
   viewport: Viewport,
 ): TextEditingBoxes | null {
@@ -351,7 +352,9 @@ export function textEditingBoxes(
   const screen = multiply(document.worldTransform(node.id), viewMatrix(camera, viewport))
   const angle = angleOf(screen)
   const scale = scaleOf(screen)
-  const layout = layoutTextNode(node, metrics)
+  // Through the cache, so the blinking caret costs nothing between keystrokes: the overlay
+  // rebuilds twice a second over text that has not changed since it was typed.
+  const layout = layouts.layoutFor(node, metrics)
 
   const place = (local: Rect): Rect => placeLocalRect(screen, scale, local)
 

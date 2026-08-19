@@ -10,7 +10,6 @@ import {
   fromHex,
   hitTest,
   invert,
-  layoutTextNode,
   containsPoint,
   nodesIn,
   type Mat2D,
@@ -20,6 +19,7 @@ import {
   type FontMetrics,
   type SceneNode,
   type Size,
+  type TextLayoutCache,
   type TextNode,
   type Vec2,
 } from '@figma-canvas/document'
@@ -80,6 +80,8 @@ export interface PointerInputOptions {
    * callback, because placing a caret needs the layout and not only its bounds.
    */
   getMetrics: () => FontMetrics | null
+  /** Where laid out text is kept. Shared, so a click lands in the layout that was drawn. */
+  layouts: TextLayoutCache
   /** Changes a text node and rewrites its cached bounds with it, in one step. */
   updateText: (node: TextNode, changes: Partial<TextNode>) => void
 }
@@ -244,7 +246,7 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     if (!node || node.type !== 'text' || !metrics) return null
 
     const local = applyToPoint(invert(document.worldTransform(id)), world)
-    const layout = layoutTextNode(node, metrics)
+    const layout = options.layouts.layoutFor(node, metrics)
     // A sweep that leaves the box keeps selecting to the nearest offset, the way dragging
     // out of a text field does. A fresh click outside it has to miss, so it can commit.
     // The same test the click that selects a node uses, so "inside the node I am editing"

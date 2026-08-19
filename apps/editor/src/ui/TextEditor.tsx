@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, type ReactElement } from 'react'
+import type { NodeId } from '@figma-canvas/document'
 import { updateText } from '../state/font'
 import { closeBurst, endEditing, openBurst } from '../state/textEditing'
 import { useNode } from '../state/scene'
@@ -25,6 +26,14 @@ export function TextEditor(): ReactElement | null {
   const editing = useUI((state) => state.editing)
   const node = useNode(editing?.id)
   const ref = useRef<HTMLTextAreaElement>(null)
+  /*
+   * The last caret this component put into the field, so it can tell a caret the store moved
+   * from one the field moved itself. Read by the sync below. See the comment there.
+   *
+   * Keyed by node, because the field is remounted when editing moves to another one and an
+   * offset that matched the node just left says nothing about the one just opened.
+   */
+  const applied = useRef<{ id: NodeId; caret: number; anchor: number } | null>(null)
 
   const editingId = editing?.id
   const caret = editing?.caret ?? 0
@@ -54,17 +63,34 @@ export function TextEditor(): ReactElement | null {
    * blank the node. Controlled would close that window too, but a controlled field fights an
    * IME over the half composed characters it is still holding, which is the whole reason
    * this component exists.
+   *
+   * The text and the caret are pushed back on different terms, and the difference is load
+   * bearing. A keystroke reaches this synchronously, because typing is a discrete event and
+   * React flushes it without waiting, while `selectionchange` is queued and arrives after. So
+   * at this point the store's caret is still where it was before the character was typed, and
+   * writing it back would drag the caret to the front of the field and leave it there: every
+   * further keystroke lands at offset zero, and "abc" is typed as "cba". The caret is
+   * therefore written only when it moved for a reason outside the field, which is an undo, a
+   * click that placed it, or the value having just been replaced under it.
    */
   useLayoutEffect(() => {
     const field = ref.current
-    if (!field || characters === null) return
-    if (field.value !== characters) field.value = characters
+    if (!field || characters === null || !editingId) return
+
+    const replaced = field.value !== characters
+    if (replaced) field.value = characters
+
+    const last = applied.current
+    const moved = last?.id !== editingId || last.caret !== caret || last.anchor !== anchor
+    if (!replaced && !moved) return
+
+    applied.current = { id: editingId, caret, anchor }
     const from = Math.min(anchor, caret)
     const to = Math.max(anchor, caret)
     if (field.selectionStart !== from || field.selectionEnd !== to) {
       field.setSelectionRange(from, to, anchor > caret ? 'backward' : 'forward')
     }
-  }, [characters, caret, anchor])
+  }, [editingId, characters, caret, anchor])
 
   /*
    * selectionchange on the document, not React's onSelect. React polyfills onSelect from a

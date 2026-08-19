@@ -4,22 +4,19 @@ import {
   applyToPoint,
   invert,
   isPainted,
-  layoutTextNode,
   multiply,
   strokeOffset,
   strokeOutset,
   transformRect,
   type FontMetrics,
   type Mat2D,
-  type NodeId,
   type PaintedNode,
   type RGBA,
   type Rect,
   type SceneDocument,
   type SceneNode,
   type Stroke,
-  type TextLayout,
-  wrapWidthOf,
+  type TextLayoutCache,
   type TextNode,
 } from '@figma-canvas/document'
 import { viewMatrix, type Camera, type Viewport } from '../camera.js'
@@ -42,15 +39,6 @@ const KIND_GLYPH = 2
  * radius a letter has.
  */
 type BoxNode = Exclude<PaintedNode, TextNode>
-
-/** A laid out text node, kept only so an unchanged one is not laid out again next frame. */
-interface CachedLayout {
-  characters: string
-  fontSize: number
-  /** Part of the key: a fixed width box re-wraps when it is dragged wider. */
-  wrapWidth: number | null
-  layout: TextLayout
-}
 
 /**
  * How far past the viewport the build reaches, as a fraction of it.
@@ -118,19 +106,22 @@ export class ShapeInstances {
   #coverage: Rect | null = null
   #metrics: FontMetrics
   /*
-   * Text laid out on the previous build. A rebuild happens for any document change at all,
-   * so without this, nudging one rectangle would re-lay out every paragraph on the page.
-   *
-   * Two maps rather than one, swapped each build: a node only reaches the new map by being
-   * visited, so anything deleted since falls out instead of accumulating forever.
+   * Shared with the overlay and the editor, so a caret is placed against the very layout its
+   * glyphs were packed from. A rebuild happens for any document change at all, so without a
+   * cache of some kind, nudging one rectangle would re-lay out every paragraph on the page.
    */
-  #layouts = new Map<NodeId, CachedLayout>()
-  #previousLayouts = new Map<NodeId, CachedLayout>()
+  #layouts: TextLayoutCache
 
-  constructor(device: GPUDevice, clips: ClipRegions, metrics: FontMetrics) {
+  constructor(
+    device: GPUDevice,
+    clips: ClipRegions,
+    metrics: FontMetrics,
+    layouts: TextLayoutCache,
+  ) {
     this.#device = device
     this.#clips = clips
     this.#metrics = metrics
+    this.#layouts = layouts
   }
 
   get count(): number {
@@ -158,8 +149,8 @@ export class ShapeInstances {
     this.#count = 0
     this.#culled = 0
     this.#clips.reset()
-    this.#previousLayouts = this.#layouts
-    this.#layouts = new Map()
+    // This walk is the only one that visits every node, so it is what ages the layout cache.
+    this.#layouts.sweep()
 
     // Depth first from the root, accumulating the transform on the way down. Asking the
     // document for each node's world transform separately would walk back up to the root
@@ -212,30 +203,6 @@ export class ShapeInstances {
     if (painted && stroke) this.#submit(painted, world, alpha, stroke.paint.color, clip, stroke)
   }
 
-  /** Laid out once per content change rather than once per build. */
-  #layoutOf(node: TextNode): TextLayout {
-    const wrapWidth = wrapWidthOf(node)
-    const cached = this.#previousLayouts.get(node.id)
-    if (
-      cached &&
-      cached.characters === node.characters &&
-      cached.fontSize === node.fontSize &&
-      cached.wrapWidth === wrapWidth
-    ) {
-      this.#layouts.set(node.id, cached)
-      return cached.layout
-    }
-
-    const layout = layoutTextNode(node, this.#metrics)
-    this.#layouts.set(node.id, {
-      characters: node.characters,
-      fontSize: node.fontSize,
-      wrapWidth,
-      layout,
-    })
-    return layout
-  }
-
   /**
    * One instance per drawn glyph.
    *
@@ -248,7 +215,7 @@ export class ShapeInstances {
     const fill = node.fills[0]
     if (!fill) return
 
-    const layout = this.#layoutOf(node)
+    const layout = this.#layouts.layoutFor(node, this.#metrics)
 
     for (const line of layout.lines) {
       for (const placed of line.glyphs) {

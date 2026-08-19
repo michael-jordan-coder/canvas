@@ -4,6 +4,7 @@ import {
   createRectangle,
   translation,
   type FontMetrics,
+  TextLayoutCache,
 } from '@figma-canvas/document'
 import type { Camera, Viewport } from '../camera.js'
 import { OverlayInstances } from './OverlayInstances.js'
@@ -44,7 +45,7 @@ let overlay: OverlayInstances
 beforeEach(() => {
   world = scene()
   stub = createStubDevice()
-  overlay = new OverlayInstances(stub.device, METRICS)
+  overlay = new OverlayInstances(stub.device, METRICS, new TextLayoutCache())
 })
 
 const field = (index: number, slot: number): number =>

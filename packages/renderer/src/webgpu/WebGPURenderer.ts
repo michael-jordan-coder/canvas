@@ -1,4 +1,4 @@
-import type { SceneDocument } from '@figma-canvas/document'
+import type { SceneDocument, TextLayoutCache } from '@figma-canvas/document'
 import { clipMatrix, pixelsToClip, type Viewport } from '../camera.js'
 import type { Renderer, RendererInit, RendererStats, ViewState } from '../Renderer.js'
 import { createGPUSurface, onDeviceLost, releaseGPUSurface, type GPUSurface } from './device.js'
@@ -46,6 +46,7 @@ class WebGPURenderer implements Renderer {
     canvas: HTMLCanvasElement,
     document: SceneDocument,
     atlas: GlyphAtlasSource,
+    layouts: TextLayoutCache,
   ) {
     this.#surface = surface
     this.#canvas = canvas
@@ -61,8 +62,8 @@ class WebGPURenderer implements Renderer {
     const atlasLayout = createAtlasBindGroupLayout(surface.device)
     this.#atlas = new GlyphAtlas(surface.device, atlasLayout, atlas)
 
-    this.#shapes = new ShapeInstances(surface.device, this.#clips, this.#atlas.metrics)
-    this.#overlay = new OverlayInstances(surface.device, this.#atlas.metrics)
+    this.#shapes = new ShapeInstances(surface.device, this.#clips, this.#atlas.metrics, layouts)
+    this.#overlay = new OverlayInstances(surface.device, this.#atlas.metrics, layouts)
 
     // Built once at startup. Compiling a pipeline mid frame is the classic way to produce
     // a stutter that only shows up the first time a user draws something.
@@ -187,5 +188,5 @@ export async function createWebGPURenderer(
   if (options.onLost) onDeviceLost(surface.device, options.onLost)
   // Still awaited before the renderer exists, so the first frame already has its glyphs. A
   // placeholder texture swapped in later would flash the document in blank boxes.
-  return new WebGPURenderer(surface, init.canvas, init.document, await pending)
+  return new WebGPURenderer(surface, init.canvas, init.document, await pending, init.layouts)
 }

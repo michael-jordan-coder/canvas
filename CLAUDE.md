@@ -329,6 +329,26 @@ the renderer call the same `layoutText`, which is not a tidiness point. The edit
 measured bounds onto the node and draws the caret from them, the renderer packs one instance
 per glyph, and two layouts that could disagree would put the caret beside the text.
 
+**There is one laid out copy of each text node, in `TextLayoutCache`.** Four places want the
+same answer for the same node in the same frame: the packer emits an instance per glyph, the
+overlay places the caret and the selection highlight, the input layer maps a click to an
+offset, and `updateText` measures the bounds it writes back. A keystroke used to pay for three
+of those, and an idle caret blink for one twice a second, over text nobody had touched since
+typing it. Measuring through the cache is what makes the frame after a keystroke free: the
+layout is keyed by the text the edit is about to write, so the packer and the caret read it
+back rather than building it twice more.
+
+The cache is created in `apps/editor/src/state/font.ts` and handed to the renderer through
+`RendererInit`, not owned by it. It has to outlive a renderer, since a strict mode remount or
+a lost device would otherwise throw away every layout in the document, and it has to be
+reachable from the input layer, which has no renderer at all.
+
+Eviction is two maps swapped by `sweep`, so an entry survives one sweep untouched and falls
+out on the next, and reading promotes. **The instance buffer's rebuild is the sweep**, because
+that walk is the only one that visits every node and so the only one that can tell a node
+still in the scene from one that was deleted. It is also the only thing that can invalidate a
+layout, since it runs on every document change.
+
 One convention runs through all of it: **y grows downward, the origin is the pen position on
 the baseline, and offsets are UTF-16 code units.** That is why `ascender` is negative, why the
 atlas is baked `-yorigin top`, and why a caret can be handed to and from a textarea with no
@@ -371,7 +391,7 @@ keydown events. It is emphatically not what you see: the glyphs come from the re
 caret and selection highlight from the overlay pipeline, passed in through `ViewState` exactly
 as the marquee already is. The text is therefore never on screen twice and nothing can jitter.
 
-Four things about that field are load bearing, and every one of them presents as a bug
+Five things about that field are load bearing, and every one of them presents as a bug
 somewhere else:
 
 - **Opacity zero, not `display: none` or `visibility: hidden`.** Both of the latter stop an
@@ -384,6 +404,14 @@ somewhere else:
 - **The field is synced from the document in a layout effect.** It is uncontrolled, so it
   starts empty, and anything reaching it before the sync would report an empty value and blank
   the node. Controlled would close that window and fight the IME instead.
+- **That sync writes the text and the caret on different terms.** The text always, the caret
+  only when it moved for a reason outside the field. Typing is a discrete event, so React
+  flushes the commit synchronously and the layout effect runs while `selectionchange`, which
+  is queued, has not arrived: the caret in the store is still the one from before the
+  keystroke. Writing it back drags the caret to the front of the field and pins it there, so
+  every further character lands at offset zero and `abc` is typed as `cba`. The effect keeps
+  the last caret it applied and compares against that, which distinguishes a caret the field
+  moved itself from one an undo, a click or a replaced value moved.
 
 `TextEditor` returns null rather than unmounting when nothing is being edited, so **the typing
 history group cannot live in the component**: a cleanup that never runs would leave the group

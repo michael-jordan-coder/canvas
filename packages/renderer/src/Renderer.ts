@@ -1,9 +1,18 @@
-import type { NodeId, Rect, SceneDocument } from '@figma-canvas/document'
+import type { NodeId, Rect, SceneDocument, TextLayoutCache } from '@figma-canvas/document'
 import type { Camera, Viewport } from './camera.js'
 
 export interface RendererInit {
   canvas: HTMLCanvasElement
   document: SceneDocument
+  /**
+   * Where laid out text is kept, shared with the app rather than owned here.
+   *
+   * The renderer packs the glyphs, but the editor measures the bounds it writes onto a node
+   * and the input layer maps a click to an offset, and all three want the same answer for the
+   * same node in the same frame. Passed in for the same reason `ViewState` is: the dependency
+   * has to keep pointing one way, and the app is what outlives a renderer being recreated.
+   */
+  layouts: TextLayoutCache
 }
 
 /**

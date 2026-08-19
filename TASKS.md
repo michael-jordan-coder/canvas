@@ -103,6 +103,15 @@ have shipped.
       `packages/document/src/text/layout.ts`, `packages/renderer/src/selection.ts`
 - [x] An Auto width toggle in the properties panel, so the conversion is not one way, and W
       becomes editable once a box is fixed width. `apps/editor/src/ui/PropertiesPanel.tsx`
+- [x] One shared `TextLayoutCache` instead of a private one in the packer, so a keystroke lays
+      the node out once rather than three times and an idle caret blink not at all. Owned by
+      the editor and passed to the renderer through `RendererInit`; the instance buffer's
+      rebuild is what ages it. `packages/document/src/text/layoutCache.ts`
+- [x] The character mangling is found and fixed. The layout effect in `TextEditor` pushed the
+      store's caret back into the textarea on every keystroke, but typing is a discrete event
+      and `selectionchange` is queued, so the caret it wrote was the one from before the
+      character. That pinned the caret at offset zero and typed `abc` as `cba`. The caret is
+      now written only when it moved from outside the field. `apps/editor/src/ui/TextEditor.tsx`
 
 Deferred, and deliberately not in the MVP:
 

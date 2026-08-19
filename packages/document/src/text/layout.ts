@@ -243,17 +243,24 @@ export function layoutTextNode(node: TextNode, metrics: FontMetrics): TextLayout
 }
 
 /**
- * The bounds a node should cache.
+ * The bounds a node should cache, given a layout already computed for it.
  *
  * An auto width box takes both from its words. A fixed width one keeps the width it was
  * dragged to, which is the width its lines wrapped against, and only grows downward.
+ *
+ * Split from `measureTextNode` so a caller holding a layout does not lay the node out a
+ * second time to ask its size. `TextLayoutCache` is the caller that does.
  */
-export function measureTextNode(node: TextNode, metrics: FontMetrics): Size {
-  const layout = layoutTextNode(node, metrics)
+export function textBounds(node: TextNode, layout: TextLayout): Size {
   return {
     width: node.autoWidth ? layout.width : node.size.width,
     height: layout.height,
   }
+}
+
+/** The bounds a node should cache. Lays it out to get them. */
+export function measureTextNode(node: TextNode, metrics: FontMetrics): Size {
+  return textBounds(node, layoutTextNode(node, metrics))
 }
 
 /** The line an offset falls on. Offsets at a line's end belong to that line, not the next. */

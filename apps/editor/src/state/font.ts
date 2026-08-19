@@ -1,8 +1,21 @@
-import { measureTextNode, type FontMetrics, type Size, type TextNode } from '@figma-canvas/document'
+import { TextLayoutCache, type FontMetrics, type Size, type TextNode } from '@figma-canvas/document'
 import { loadFontMetrics } from '@figma-canvas/renderer'
 import { scene } from './scene'
 
 let loaded: FontMetrics | null = null
+
+/**
+ * The one laid out copy of every text node, shared with the renderer.
+ *
+ * Owned here rather than inside the renderer because it outlives one: the app measures text
+ * whether or not a GPU device came up, and a renderer recreated by a strict mode remount or a
+ * lost device would otherwise throw away every layout in the document. Handed to
+ * `createWebGPURenderer` through `RendererInit`.
+ *
+ * Created eagerly, with no font, because the metrics arrive over the network while this
+ * module loads synchronously. Nothing lays anything out before they land.
+ */
+export const textLayouts = new TextLayoutCache()
 
 /**
  * The font the editor measures with, or null until it arrives.
@@ -33,7 +46,7 @@ function remeasureAll(metrics: FontMetrics): void {
   const stale: { node: TextNode; size: Size }[] = []
   for (const node of scene.walk()) {
     if (node.type !== 'text') continue
-    const size = measureTextNode(node, metrics)
+    const size = textLayouts.measure(node, metrics)
     if (size.width !== node.size.width || size.height !== node.size.height) stale.push({ node, size })
   }
   if (stale.length === 0) return
@@ -51,10 +64,14 @@ function remeasureAll(metrics: FontMetrics): void {
  *
  * Null rather than a zero size, which a caller would happily write to a node and leave it
  * invisible and unclickable.
+ *
+ * Measuring the change rather than the node is also what makes the next frame free: the
+ * layout this produces is keyed by the text the edit is about to write, so the packer and the
+ * caret both read it back instead of laying the same string out again.
  */
 function measure(node: TextNode, changes: Partial<TextNode> = {}): Size | null {
   const metrics = loaded
-  return metrics ? measureTextNode({ ...node, ...changes }, metrics) : null
+  return metrics ? textLayouts.measure({ ...node, ...changes }, metrics) : null
 }
 
 /**

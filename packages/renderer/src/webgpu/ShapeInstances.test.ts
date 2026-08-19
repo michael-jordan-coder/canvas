@@ -10,6 +10,7 @@ import {
   type FontMetrics,
   type GlyphMetrics,
   type StrokeAlign,
+  TextLayoutCache,
 } from '@figma-canvas/document'
 import type { Camera, Viewport } from '../camera.js'
 import { ClipRegions, createClipBindGroupLayout } from './ClipRegions.js'
@@ -46,7 +47,7 @@ const METRICS: FontMetrics = {
 /** The builder needs somewhere to record clipping frames, whether or not the scene has any. */
 function build(stubbed: StubDevice): ShapeInstances {
   const clips = new ClipRegions(stubbed.device, createClipBindGroupLayout(stubbed.device))
-  return new ShapeInstances(stubbed.device, clips, METRICS)
+  return new ShapeInstances(stubbed.device, clips, METRICS, new TextLayoutCache())
 }
 
 /** linear (4) + origin and size (4) + colour (4) + params (4) + flags (4). */
