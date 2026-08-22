@@ -25,6 +25,14 @@
   color: var(--text-secondary);
 }
 
+/* The label is a scrubber unless the value is derived, and a drag must not select its text. */
+.scrubbable {
+  cursor: ew-resize;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
 /*
  * The wide variant shares the panel's full width label column. This field's own 5px inset
  * (1px border plus 4px padding) plus a 44px label plus the 4px gap puts the input on the

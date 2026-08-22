@@ -40,3 +40,14 @@ input {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
+
+/*
+ * A label scrub holds the resize cursor however far the pointer strays from the label,
+ * the way the canvas holds its pan cursor. The attribute is set by NumberField for the
+ * life of the gesture; without this, every element the sweep crosses would flash its own
+ * cursor.
+ */
+html[data-scrubbing],
+html[data-scrubbing] * {
+  cursor: ew-resize !important;
+}
