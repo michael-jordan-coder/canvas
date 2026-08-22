@@ -11,6 +11,7 @@ import {
   type FrameNode,
   type LayoutAlign,
   type LayoutDirection,
+  type Paint,
   type PaintedNode,
   type RectangleNode,
   type RGBA,
@@ -399,20 +400,53 @@ function TextSection({ node }: { node: TextNode }): ReactElement {
   )
 }
 
-function FillSection({ node }: { node: PaintedNode }): ReactElement | null {
+/**
+ * What "Add fill" starts from: the same colours the tools draw with, so a frame gains the
+ * white a drawn frame would have had, and a shape the grey a drawn shape would.
+ */
+const defaultFillFor = (node: PaintedNode): Paint =>
+  fromHex(node.type === 'frame' ? '#ffffff' : '#c4c4c4')
+
+function FillSection({ node }: { node: PaintedNode }): ReactElement {
   const fill = node.fills[0]
-  if (!fill) return null
+
+  if (!fill) {
+    // A node without a fill still gets the section, offering one. The wrap frame Shift+A
+    // creates is deliberately transparent, and without this it could never stop being so.
+    return (
+      <section className={styles.section}>
+        <h3 className={styles.title}>Fill</h3>
+        <button
+          type="button"
+          className={styles.add}
+          onClick={() => scene.update<PaintedNode>(node.id, { fills: [defaultFillFor(node)] })}
+        >
+          Add fill
+        </button>
+      </section>
+    )
+  }
 
   return (
     <section className={styles.section}>
       <h3 className={styles.title}>Fill</h3>
-      <ColorField
-        label="Fill"
-        color={fill.color}
-        onChange={(color: RGBA) =>
-          scene.update<PaintedNode>(node.id, { fills: [{ type: 'solid', color }] })
-        }
-      />
+      <div className={styles.headed}>
+        <ColorField
+          label="Fill"
+          color={fill.color}
+          onChange={(color: RGBA) =>
+            scene.update<PaintedNode>(node.id, { fills: [{ type: 'solid', color }] })
+          }
+        />
+        <button
+          type="button"
+          className={styles.remove}
+          aria-label="Remove fill"
+          onClick={() => scene.update<PaintedNode>(node.id, { fills: [] })}
+        >
+          &minus;
+        </button>
+      </div>
     </section>
   )
 }

@@ -475,7 +475,11 @@ arrives the old height stands; `remeasureAll` relayouts everything when it lands
 clears history, since measuring is not an edit. Invisible children leave the flow entirely
 (locked ones stay), a hidden child's toggle relayouts, and enabling auto layout infers
 direction, gap, padding and flow order from where the children already sit, so Shift+A moves
-nothing.
+nothing. On anything that is not a single frame, Shift+A instead wraps the selection in a
+new frame drawn 10 around its bounds (`wrapInAutoLayout`): hug on both axes, no clip, no
+fill, and the wrapped nodes keep their world positions, so the padding infers to exactly
+that margin and the wrap is a regrouping rather than a rearrangement. One undo removes it
+entirely, old selection included.
 
 ## Rotation, and the one rule it added
 

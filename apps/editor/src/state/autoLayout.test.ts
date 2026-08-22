@@ -3,6 +3,7 @@ import {
   SceneDocument,
   createFrame,
   createRectangle,
+  createText,
   defaultFrameLayout,
   translation,
   type FrameLayout,
@@ -13,6 +14,7 @@ import {
   removeAutoLayout,
   updateFrameLayout,
   updateLayoutChild,
+  wrapInAutoLayout,
 } from './autoLayout'
 
 function layout(overrides: Partial<FrameLayout> = {}): FrameLayout {
@@ -137,6 +139,85 @@ describe('addAutoLayout', () => {
     expect(off.type === 'frame' && off.layout).toBeUndefined()
     expect(scene.expectNode(a.id).transform.tx).toBe(10)
     expect(scene.expectNode(b.id).transform.tx).toBe(70)
+  })
+})
+
+describe('wrapInAutoLayout', () => {
+  it('pads the frame 10 around the selection while nothing moves', () => {
+    const scene = new SceneDocument()
+    const a = scene.insert(
+      createRectangle({ size: { width: 50, height: 50 }, transform: translation(30, 40) }),
+    )
+    const b = scene.insert(
+      createRectangle({ size: { width: 60, height: 50 }, transform: translation(100, 40) }),
+    )
+
+    const frame = wrapInAutoLayout(scene, [a.id, b.id])
+    if (!frame) throw new Error('expected a frame')
+
+    const wrapped = scene.expectNode(frame.id)
+    expect(wrapped.transform.tx).toBe(20)
+    expect(wrapped.transform.ty).toBe(30)
+    expect(wrapped.size).toEqual({ width: 150, height: 70 })
+    if (wrapped.type !== 'frame' || !wrapped.layout) throw new Error('expected the layout')
+    expect(wrapped.layout.mainSizing).toBe('hug')
+    expect(wrapped.layout.padding).toEqual({ top: 10, right: 10, bottom: 10, left: 10 })
+    expect(wrapped.clipsContent).toBe(false)
+
+    // World positions are untouched: local origin plus the frame's offset lands where the
+    // node already was.
+    expect(scene.expectNode(a.id).parent).toBe(frame.id)
+    expect(scene.expectNode(a.id).transform.tx).toBe(10)
+    expect(scene.expectNode(b.id).transform.tx).toBe(80)
+  })
+
+  it('wraps a single node, which is how a lone text gets auto layout', () => {
+    const scene = new SceneDocument()
+    const text = scene.insert(
+      createText({
+        characters: 'hello',
+        size: { width: 80, height: 20 },
+        transform: translation(15, 25),
+      }),
+    )
+
+    const frame = wrapInAutoLayout(scene, [text.id])
+    if (!frame) throw new Error('expected a frame')
+
+    expect(scene.expectNode(frame.id).size).toEqual({ width: 100, height: 40 })
+    expect(scene.expectNode(text.id).parent).toBe(frame.id)
+    expect(scene.expectNode(text.id).transform.tx).toBe(10)
+  })
+
+  it('collapses a selection holding a frame and its own child to the frame', () => {
+    const scene = new SceneDocument()
+    const outer = scene.insert(
+      createFrame({ size: { width: 200, height: 100 }, transform: translation(10, 10) }),
+    )
+    const child = scene.insert(createRectangle({ size: { width: 50, height: 50 } }), outer.id)
+
+    const frame = wrapInAutoLayout(scene, [outer.id, child.id])
+    if (!frame) throw new Error('expected a frame')
+
+    expect(scene.expectNode(child.id).parent).toBe(outer.id)
+    expect(scene.expectNode(outer.id).parent).toBe(frame.id)
+  })
+
+  it('is one undo step that puts the originals back where they were', () => {
+    const scene = new SceneDocument()
+    const a = scene.insert(
+      createRectangle({ size: { width: 50, height: 50 }, transform: translation(30, 40) }),
+    )
+    scene.clearHistory()
+
+    const frame = wrapInAutoLayout(scene, [a.id])
+    if (!frame) throw new Error('expected a frame')
+
+    scene.undo()
+    expect(scene.getNode(frame.id)).toBeUndefined()
+    expect(scene.expectNode(a.id).parent).toBe(scene.rootId)
+    expect(scene.expectNode(a.id).transform.tx).toBe(30)
+    expect(scene.canUndo).toBe(false)
   })
 })
 

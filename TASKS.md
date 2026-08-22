@@ -153,6 +153,10 @@ from every mutation site.
       derived axes reporting readOnly. `apps/editor/src/ui/PropertiesPanel.tsx`
 - [x] Shift+A toggles auto layout on a single selected frame; enabling infers direction, gap
       and padding from where the children sit, so nothing moves.
+- [x] Shift+A on anything that is not a single frame (a text node, a shape, a multiple
+      selection) wraps it in a new auto layout frame drawn 10px around the selection, so
+      the padding starts at Figma's default 10; hug on both axes, no clip, no fill.
+      `wrapInAutoLayout` in `apps/editor/src/state/autoLayout.ts`.
 - [x] Canvas reorder drag: a single child of an auto frame floats with the pointer, siblings
       shift live around an excluded slot, leaving the frame un-parents live, release snaps
       in, Escape restores parent, index, transform and siblings exactly.

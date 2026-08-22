@@ -7,7 +7,7 @@ import {
   type SceneDocument,
   type Vec2,
 } from '@figma-canvas/document'
-import { relayout, toggleAutoLayout } from '../state/autoLayout'
+import { relayout, toggleAutoLayout, wrapInAutoLayout } from '../state/autoLayout'
 import { reorderSelection } from '../state/order'
 import type { ToolId } from '../state/uiStore'
 import { isEditingText } from './isEditingText'
@@ -176,15 +176,27 @@ export function createKeyboardInput(options: KeyboardInputOptions): () => void {
       return
     }
 
-    // Figma's shortcut for auto layout, on a single selected frame either way round.
+    // Figma's shortcut for auto layout. A single selected frame toggles its own layout;
+    // anything else (a text node, a shape, several of anything) is wrapped in a new auto
+    // layout frame drawn tight around it, which is the half of the gesture that makes the
+    // shortcut usable on a selection that has no frame yet.
     if (!accel && !event.altKey && event.shiftKey && event.key.toLowerCase() === 'a') {
       const selection = options.getSelection()
-      const first = selection.length === 1 ? selection[0] : undefined
-      const only = first ? scene.getNode(first) : undefined
-      if (only?.type === 'frame') {
+      if (selection.length > 0) {
         event.preventDefault()
         if (event.repeat) return
-        toggleAutoLayout(scene, only.id)
+        const first = selection.length === 1 ? selection[0] : undefined
+        const only = first ? scene.getNode(first) : undefined
+        if (only?.type === 'frame') {
+          toggleAutoLayout(scene, only.id)
+          return
+        }
+        // One transaction, so the wrap and the selection moving onto the new frame are a
+        // single undo step, and undoing restores both the tree and the old selection.
+        scene.transact(() => {
+          const frame = wrapInAutoLayout(scene, selection)
+          if (frame) options.setSelection([frame.id])
+        })
         return
       }
     }

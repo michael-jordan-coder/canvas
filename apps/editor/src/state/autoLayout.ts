@@ -1,9 +1,14 @@
 import {
   applyLayout,
   computeLayout,
+  createFrame,
   inferLayout,
+  invert,
   isAutoLayoutFrame,
   layoutRootsFor,
+  multiply,
+  transformRect,
+  translation,
   type FrameLayout,
   type FrameNode,
   type LayoutChild,
@@ -81,6 +86,74 @@ export function addAutoLayout(doc: SceneDocument, frameId: NodeId): void {
     inferred.childOrder.forEach((id, index) => doc.reorder(id, index))
     doc.update<FrameNode>(frameId, { layout: inferred.layout })
     relayout(doc, [frameId])
+  })
+}
+
+/** What a wrap leaves around the selection, Figma's own default for a new auto layout. */
+const WRAP_PADDING = 10
+
+/**
+ * Wraps a selection in a new auto layout frame, the way Shift+A treats anything that is
+ * not already a frame: a text node, a shape, or several of anything.
+ *
+ * The frame is drawn `WRAP_PADDING` around the selection's bounds in the target parent's
+ * space and hugs on both axes. The wrapped nodes keep their world positions, so against
+ * that box the padding infers to exactly the margin the frame was given, and enabling the
+ * layout moves nothing: the wrap is a regrouping, not a rearrangement. The frame does not
+ * clip and has no fill, since it exists to carry the layout rather than to paint. Returns
+ * the frame for the caller to select, or null when nothing wrappable was given. One
+ * transaction, so the caller's selection change can join the same undo step.
+ */
+export function wrapInAutoLayout(doc: SceneDocument, ids: readonly NodeId[]): FrameNode | null {
+  // Roots only: wrapping a frame together with one of its own children must not also pull
+  // the child out beside its parent, the same collapse copy and paste applies.
+  const selected = new Set(ids)
+  const hasSelectedAncestor = (id: NodeId): boolean => {
+    let current = doc.getNode(id)
+    while (current?.parent) {
+      if (selected.has(current.parent)) return true
+      current = doc.getNode(current.parent)
+    }
+    return false
+  }
+  const roots = ids.filter((id) => doc.getNode(id) && !hasSelectedAncestor(id))
+  const first = roots[0]
+  if (!first) return null
+
+  // The frame lands beside the first root, in its parent, where the eye expects the group
+  // to stay. Roots picked up from other parents are carried across by reparent.
+  const parentId = doc.expectNode(first).parent ?? doc.rootId
+  const insertIndex = Math.max(0, doc.indexOf(first))
+
+  const intoParent = invert(doc.worldTransform(parentId))
+  const boxes = roots.map((id) => {
+    const node = doc.expectNode(id)
+    const inParent = multiply(doc.worldTransform(id), intoParent)
+    return transformRect(inParent, { x: 0, y: 0, ...node.size })
+  })
+  const minX = Math.min(...boxes.map((box) => box.x))
+  const minY = Math.min(...boxes.map((box) => box.y))
+  const frame = createFrame({
+    transform: translation(minX - WRAP_PADDING, minY - WRAP_PADDING),
+    size: {
+      width: Math.max(...boxes.map((box) => box.x + box.width)) - minX + WRAP_PADDING * 2,
+      height: Math.max(...boxes.map((box) => box.y + box.height)) - minY + WRAP_PADDING * 2,
+    },
+    clipsContent: false,
+  })
+
+  return doc.transact(() => {
+    doc.insert(frame, parentId, insertIndex)
+    for (const id of roots) doc.reparent(id, frame.id)
+    const inferred = inferLayout(doc, frame.id)
+    inferred.childOrder.forEach((id, index) => doc.reorder(id, index))
+    doc.update<FrameNode>(frame.id, {
+      // Hug on both axes, because a frame that exists to hold a group should keep fitting
+      // it as the group changes. It already fits, so nothing moves now.
+      layout: { ...inferred.layout, mainSizing: 'hug', crossSizing: 'hug' },
+    })
+    relayout(doc, [frame.id])
+    return frame
   })
 }
 
