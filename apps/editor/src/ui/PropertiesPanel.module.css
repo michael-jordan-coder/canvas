@@ -111,6 +111,60 @@
   min-width: 0;
 }
 
+/*
+ * The opacity of one paint, beside its colour. Fixed rather than flexible, so the field sits
+ * in the same place on every row of the stack and it is the swatch that absorbs the width
+ * left over.
+ */
+.paintOpacity {
+  flex: none;
+  width: 52px;
+}
+
+/* Turns one paint of the stack off without removing it, the same eye the layer tree uses. */
+.eye {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--row-height);
+  height: var(--row-height);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-disabled);
+  cursor: pointer;
+  transition:
+    background var(--duration) var(--ease),
+    color var(--duration) var(--ease);
+}
+
+.eye:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.eye:active {
+  background: var(--pressed);
+}
+
+/*
+ * One stroke and the weight and alignment that belong to it alone. The gap between groups is
+ * wider than the gap inside one, so a weight reads as belonging to the paint above it rather
+ * than to the list.
+ */
+.paintGroups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.paintGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
 .add,
 .remove {
   display: flex;
@@ -150,4 +204,85 @@
 .add:active,
 .remove:active {
   background: var(--pressed);
+}
+
+/*
+ * Align, distribute, flip and the corner toggle: a plain square icon button, the same 24px
+ * the eye button uses. A row of them starts at --inset so the first icon lines up with the
+ * text above it, and wraps rather than overflowing if the panel is ever narrower.
+ */
+.iconRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding-left: var(--inset);
+}
+
+.iconButton {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--row-height);
+  height: var(--row-height);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background var(--duration) var(--ease),
+    color var(--duration) var(--ease);
+}
+
+.iconButton:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.iconButton:active {
+  background: var(--pressed);
+}
+
+/* The one state an icon button can be "on" in: the corner toggle, expanded. */
+.iconButton[aria-pressed='true'] {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+/* The selection colours list: a swatch, its hex and how many paints drew it. */
+.colors {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.color {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--row-height);
+  padding: 0 var(--inset);
+}
+
+.swatch {
+  flex: none;
+  border-radius: var(--radius);
+}
+
+/* The border is constant so only the fill, the presentation attribute React sets, is dynamic. */
+.swatch rect {
+  stroke: var(--line);
+}
+
+.colorHex {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.colorCount {
+  flex: none;
+  color: var(--text-secondary);
 }

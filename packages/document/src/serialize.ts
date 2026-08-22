@@ -15,6 +15,7 @@ import {
   type SceneNode,
 } from './node.js'
 import type { Paint, RGBA, Stroke, StrokeAlign } from './paint.js'
+import { uniformCornerRadii, type CornerRadii } from './sdf.js'
 
 /**
  * Bump when the on disk shape changes in a way older data cannot satisfy. Saved documents
@@ -35,8 +36,19 @@ import type { Paint, RGBA, Stroke, StrokeAlign } from './paint.js'
  * migration; an absent field and a version 3 file mean the same thing. The bump is for the
  * other direction again, so a build from before auto layout refuses a version 4 file instead
  * of silently dropping the layout and then overwriting the save without it.
+ *
+ * 5 replaced the scalar `cornerRadius` on frames and rectangles with the four `cornerRadii`.
+ * A version 4 file has one number that applied to every corner, which is exactly four equal
+ * radii, so the migration is total rather than a guess. Like `autoWidth` it is version gated
+ * rather than defaulted from whichever field happens to be present, since reading either
+ * shape at either version would let a genuinely malformed file through.
+ *
+ * Per-paint `opacity` and `visible` arrived after 5 and deliberately did not bump it. Both
+ * are optional in the model with absence meaning the default, so a paint written before
+ * they existed and one that simply has neither are the same paint, which is what makes the
+ * gate unnecessary in both directions.
  */
-export const SCHEMA_VERSION = 4
+export const SCHEMA_VERSION = 5
 
 export interface SerializedDocument {
   kind: 'figma-canvas/document'
@@ -133,11 +145,47 @@ function parseColor(value: unknown, path: string): RGBA {
   }
 }
 
+/**
+ * `opacity` and `visible` are absent-means-default in the model itself, so a version 5 file
+ * that predates them and a paint that simply carries neither read identically and no version
+ * gate is needed. Present but wrong is still an error, and still names its own path.
+ */
 function parsePaint(value: unknown, path: string): Paint {
   const p = requireRecord(value, path)
   const type = requireString(p['type'], `${path}.type`)
   if (type !== 'solid') throw new InvalidDocumentError(`${path}.type "${type}" is not supported`)
-  return { type: 'solid', color: parseColor(p['color'], `${path}.color`) }
+  return {
+    type: 'solid',
+    color: parseColor(p['color'], `${path}.color`),
+    ...(p['opacity'] !== undefined
+      ? { opacity: requireNumber(p['opacity'], `${path}.opacity`) }
+      : {}),
+    ...(p['visible'] !== undefined
+      ? { visible: requireBoolean(p['visible'], `${path}.visible`) }
+      : {}),
+  }
+}
+
+/**
+ * Before 5 a corner radius was one number for all four corners, so a version 4 file is read
+ * through its old field and widened. Nothing is lost either way, which is what makes this a
+ * migration rather than a default.
+ */
+function parseCornerRadii(
+  node: Record<string, unknown>,
+  path: string,
+  version: number,
+): CornerRadii {
+  if (version < 5) {
+    return uniformCornerRadii(requireNumber(node['cornerRadius'], `${path}.cornerRadius`))
+  }
+  const r = requireRecord(node['cornerRadii'], `${path}.cornerRadii`)
+  return {
+    topLeft: requireNumber(r['topLeft'], `${path}.cornerRadii.topLeft`),
+    topRight: requireNumber(r['topRight'], `${path}.cornerRadii.topRight`),
+    bottomRight: requireNumber(r['bottomRight'], `${path}.cornerRadii.bottomRight`),
+    bottomLeft: requireNumber(r['bottomLeft'], `${path}.cornerRadii.bottomLeft`),
+  }
 }
 
 function parsePaints(value: unknown, path: string): Paint[] {
@@ -259,7 +307,7 @@ function parseNode(value: unknown, path: string, version: number): SceneNode {
         ...shared,
         type: 'frame',
         clipsContent: requireBoolean(n['clipsContent'], `${path}.clipsContent`),
-        cornerRadius: requireNumber(n['cornerRadius'], `${path}.cornerRadius`),
+        cornerRadii: parseCornerRadii(n, path, version),
         fills: parsePaints(n['fills'], `${path}.fills`),
         strokes: parseStrokes(n['strokes'], `${path}.strokes`),
         ...(n['layout'] !== undefined
@@ -270,7 +318,7 @@ function parseNode(value: unknown, path: string, version: number): SceneNode {
       return {
         ...shared,
         type: 'rectangle',
-        cornerRadius: requireNumber(n['cornerRadius'], `${path}.cornerRadius`),
+        cornerRadii: parseCornerRadii(n, path, version),
         fills: parsePaints(n['fills'], `${path}.fills`),
         strokes: parseStrokes(n['strokes'], `${path}.strokes`),
       }

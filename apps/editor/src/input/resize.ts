@@ -88,8 +88,11 @@ export function scaleFactors(
   }
 
   // Clamped positive rather than allowed to go negative. Dragging a handle past its anchor
-  // flips the shape in Figma, which needs a negative scale in the transform and a rethink of
-  // what the SDF does with it. Until then the box stops instead of inverting.
+  // would flip the shape, and flip now exists as its own command in
+  // apps/editor/src/state/flip.ts, a negative scale in the transform. But that command mirrors
+  // about the selection's own centre, not the resize anchor, so doing it as a side effect of
+  // an in-progress drag would fight its pivot rule rather than reuse it. The box stops instead
+  // of inverting.
   const minimum = options.minimum ?? MIN_NODE_SIZE
   if (axes.x) sx = Math.max(sx, bounds.width > EPSILON ? minimum / bounds.width : 1)
   if (axes.y) sy = Math.max(sy, bounds.height > EPSILON ? minimum / bounds.height : 1)

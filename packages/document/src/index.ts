@@ -1,4 +1,5 @@
 export * from './math.js'
+export * from './sdf.js'
 export * from './paint.js'
 export * from './node.js'
 export * from './document.js'

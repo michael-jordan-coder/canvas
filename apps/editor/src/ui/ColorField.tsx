@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactElement } from 'react'
+import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { fromHex, parseHex, toHex, type RGBA } from '@figma-canvas/document'
 import { scene } from '../state/scene'
 import styles from './ColorField.module.css'
@@ -36,6 +36,16 @@ export function ColorField({ label, color, onChange }: ColorFieldProps): ReactEl
     grouped.current = false
     scene.endHistoryGroup()
   }
+
+  // A row removed from a paint stack while its picker is open never blurs, and a group left
+  // open silently swallows every later edit in the session. Same net `NumberField` keeps
+  // under a scrub whose node is deselected out from under it.
+  useEffect(
+    () => () => {
+      if (grouped.current) scene.endHistoryGroup()
+    },
+    [],
+  )
 
   const editHex = (value: string | null): void => {
     draftRef.current = value

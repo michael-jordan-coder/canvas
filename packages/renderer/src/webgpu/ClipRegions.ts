@@ -1,8 +1,19 @@
-import { invert, type Mat2D, type Size } from '@figma-canvas/document'
+import {
+  invert,
+  resolveCornerRadii,
+  type CornerRadii,
+  type Mat2D,
+  type Size,
+} from '@figma-canvas/document'
 
 /**
- * worldInverse as a mat3x3f (3 columns padded to 16 bytes each) then size, radius and the
- * index of the enclosing clip. 64 bytes, which is also the struct's natural alignment.
+ * Four `vec4f`, laid out to mirror a shape instance so one mental model covers both: the
+ * linear part of a transform, then origin and size, then the four corner radii, then the
+ * index of the enclosing clip.
+ *
+ * Nothing forces the transform to be a `mat3x3f`, whose 16 byte column stride would waste
+ * five of these floats on padding, and the shader already builds a matrix from vectors in
+ * the vertex stage. 64 bytes either way; this way none of it is padding.
  */
 const FLOATS_PER_CLIP = 16
 const BYTES_PER_CLIP = FLOATS_PER_CLIP * 4
@@ -67,32 +78,33 @@ export class ClipRegions {
   }
 
   /** Returns the index to hand to everything drawn inside this frame. */
-  push(world: Mat2D, size: Size, radius: number, parent: number): number {
+  push(world: Mat2D, size: Size, radii: CornerRadii, parent: number): number {
     this.#reserve(this.#count + 1)
     const at = this.#count * FLOATS_PER_CLIP
     const m = invert(world)
 
-    // Column major, each column padded to 16 bytes. Same rule as MatrixUniform, and the
-    // same silent shear if it is packed tight instead.
     this.#data[at + 0] = m.a
     this.#data[at + 1] = m.b
-    this.#data[at + 2] = 0
-    this.#data[at + 3] = 0
+    this.#data[at + 2] = m.c
+    this.#data[at + 3] = m.d
 
-    this.#data[at + 4] = m.c
-    this.#data[at + 5] = m.d
-    this.#data[at + 6] = 0
-    this.#data[at + 7] = 0
+    this.#data[at + 4] = m.tx
+    this.#data[at + 5] = m.ty
+    this.#data[at + 6] = size.width
+    this.#data[at + 7] = size.height
 
-    this.#data[at + 8] = m.tx
-    this.#data[at + 9] = m.ty
-    this.#data[at + 10] = 1
-    this.#data[at + 11] = 0
+    // Resolved on the same terms the packer resolves a shape's, so a frame clips to exactly
+    // the outline it draws.
+    const resolved = resolveCornerRadii(size, radii)
+    this.#data[at + 8] = resolved.topLeft
+    this.#data[at + 9] = resolved.topRight
+    this.#data[at + 10] = resolved.bottomRight
+    this.#data[at + 11] = resolved.bottomLeft
 
-    this.#data[at + 12] = size.width
-    this.#data[at + 13] = size.height
-    this.#data[at + 14] = radius
-    this.#data[at + 15] = parent
+    this.#data[at + 12] = parent
+    this.#data[at + 13] = 0
+    this.#data[at + 14] = 0
+    this.#data[at + 15] = 0
 
     this.#count += 1
     return this.#count - 1

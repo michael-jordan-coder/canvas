@@ -7,6 +7,7 @@ import {
   createText,
   fromHex,
   translation,
+  uniformCornerRadii,
   type NodeId,
   type SceneNode,
 } from '@figma-canvas/document'
@@ -89,7 +90,7 @@ function seed(): void {
         transform: translation(24, 24),
         size: { width: 140, height: 90 },
         fills: [fromHex('#0a7cff')],
-        cornerRadius: 4,
+        cornerRadii: uniformCornerRadii(4),
       }),
       frame.id,
     )

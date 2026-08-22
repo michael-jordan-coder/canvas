@@ -7,13 +7,19 @@ import {
   createText,
   fromHex,
   translation,
+  uniformCornerRadii,
+  type CornerRadii,
   type FontMetrics,
   type GlyphMetrics,
+  type Paint,
+  type RectangleNode,
+  type Size,
   type StrokeAlign,
   TextLayoutCache,
 } from '@figma-canvas/document'
 import type { Camera, Viewport } from '../camera.js'
 import { ClipRegions, createClipBindGroupLayout } from './ClipRegions.js'
+import { FLOATS_PER_INSTANCE } from './instanceLayout.js'
 import { ShapeInstances } from './ShapeInstances.js'
 import { createStubDevice, instanceAt, type StubDevice } from './testing/stubDevice.js'
 
@@ -50,8 +56,14 @@ function build(stubbed: StubDevice): ShapeInstances {
   return new ShapeInstances(stubbed.device, clips, METRICS, new TextLayoutCache())
 }
 
-/** linear (4) + origin and size (4) + colour (4) + params (4) + flags (4). */
-const STRIDE = 20
+/**
+ * linear (4) + origin and size (4) + colour (4) + params (4) + flags (4) + radii (4).
+ *
+ * Restated here rather than imported, and then pinned against the imported constant below.
+ * A test that reads its stride from the code it is testing cannot catch the code changing
+ * its stride.
+ */
+const STRIDE = 24
 
 /** Wide enough that the seeded scene is entirely inside it, so nothing is culled. */
 const viewport: Viewport = { width: 2000, height: 2000 }
@@ -66,11 +78,25 @@ const FIELD = {
   green: 9,
   blue: 10,
   alpha: 11,
-  cornerRadius: 12,
+  gradient: 12,
   kind: 13,
   strokeWeight: 14,
   strokeOffset: 15,
+  clip: 16,
+  bits: 19,
+  radiusTopLeft: 20,
+  radiusTopRight: 21,
+  radiusBottomRight: 22,
+  radiusBottomLeft: 23,
 } as const
+
+/** The four radii of one instance, in the order the GPU reads them. */
+const radiiOf = (read: (index: number, slot: number) => number, index: number): number[] => [
+  read(index, FIELD.radiusTopLeft),
+  read(index, FIELD.radiusTopRight),
+  read(index, FIELD.radiusBottomRight),
+  read(index, FIELD.radiusBottomLeft),
+]
 
 function scene() {
   const document = new SceneDocument()
@@ -87,7 +113,7 @@ function scene() {
       transform: translation(24, 24),
       size: { width: 140, height: 90 },
       fills: [fromHex('#0a7cff')],
-      cornerRadius: 4,
+      cornerRadii: uniformCornerRadii(4),
     }),
     frame.id,
   )
@@ -134,10 +160,22 @@ describe('ShapeInstances', () => {
     expect(field(2, FIELD.originY)).toBe(10)
   })
 
-  it('carries the corner radius and the shape kind', () => {
-    expect(field(1, FIELD.cornerRadius)).toBe(4)
+  it('carries the corner radii and the shape kind', () => {
+    expect(radiiOf(field, 1)).toEqual([4, 4, 4, 4])
     expect(field(1, FIELD.kind)).toBe(0)
     expect(field(2, FIELD.kind)).toBe(1)
+  })
+
+  it('agrees with the layout the pipeline reads the same buffer through', () => {
+    expect(FLOATS_PER_INSTANCE).toBe(STRIDE)
+  })
+
+  // The two slots the corner radii vacated and nothing has claimed. Pinned at zero so the
+  // first thing to write one of them has to say so here.
+  it('leaves the reserved slots clear, since no instance uses a feature yet', () => {
+    expect(field(0, FIELD.bits)).toBe(0)
+    expect(field(1, FIELD.bits)).toBe(0)
+    expect(field(1, FIELD.gradient)).toBe(0)
   })
 
   it('writes colour channels as 0 to 1, not 0 to 255', () => {
@@ -170,6 +208,50 @@ describe('ShapeInstances', () => {
   })
 })
 
+describe('corner radii', () => {
+  function packed(radii: CornerRadii, size: Size = { width: 100, height: 100 }) {
+    const document = new SceneDocument()
+    document.insert(createRectangle({ size, fills: [fromHex('#0a7cff')], cornerRadii: radii }))
+    const stubbed = createStubDevice()
+    build(stubbed).sync(document, camera, viewport)
+    return (index: number, slot: number) => instanceAt(stubbed.written(), STRIDE, index, slot)
+  }
+
+  // Four different numbers in four different slots. Anything symmetric would pass with the
+  // two bottom corners swapped, which is exactly the mistake this is here to catch.
+  it('writes each corner into its own slot, clockwise from the top left', () => {
+    const at = packed({ topLeft: 1, topRight: 2, bottomRight: 3, bottomLeft: 4 })
+    expect(radiiOf(at, 0)).toEqual([1, 2, 3, 4])
+  })
+
+  it('packs what is drawn rather than what was typed', () => {
+    // Both arcs want 90 of the 100 wide top edge, so they are scaled together until they
+    // meet exactly. Clamping each to 50 separately would have given the same numbers here
+    // and different ones the moment the two radii differed.
+    const at = packed({ topLeft: 90, topRight: 90, bottomRight: 0, bottomLeft: 0 })
+    expect(radiiOf(at, 0)).toEqual([50, 50, 0, 0])
+  })
+
+  it('scales one oversized corner down to the sides it has to fit between', () => {
+    const at = packed(
+      { topLeft: 100, topRight: 0, bottomRight: 0, bottomLeft: 0 },
+      { width: 40, height: 40 },
+    )
+    expect(radiiOf(at, 0)).toEqual([40, 0, 0, 0])
+  })
+
+  it('gives an ellipse four zeros, since its shape is entirely its kind', () => {
+    const document = new SceneDocument()
+    document.insert(
+      createEllipse({ size: { width: 90, height: 90 }, fills: [fromHex('#1a1a1a')] }),
+    )
+    const stubbed = createStubDevice()
+    build(stubbed).sync(document, camera, viewport)
+    const at = (index: number, slot: number) => instanceAt(stubbed.written(), STRIDE, index, slot)
+    expect(radiiOf(at, 0)).toEqual([0, 0, 0, 0])
+  })
+})
+
 describe('strokes', () => {
   function stroked(align: StrokeAlign, weight = 4) {
     const document = new SceneDocument()
@@ -196,7 +278,7 @@ describe('strokes', () => {
     expect(builder.count).toBe(2)
     expect(at(1, FIELD.width)).toBe(at(0, FIELD.width))
     expect(at(1, FIELD.originX)).toBe(at(0, FIELD.originX))
-    expect(at(1, FIELD.cornerRadius)).toBe(at(0, FIELD.cornerRadius))
+    expect(radiiOf(at, 1)).toEqual(radiiOf(at, 0))
   })
 
   it('gives the stroke its own colour rather than the fill colour', () => {
@@ -357,25 +439,28 @@ describe('culling', () => {
 })
 
 describe('clipsContent', () => {
-  /** worldInverse as 3 padded columns, then size, radius and the enclosing clip. */
+  /**
+   * Mirrors an instance: the linear part of the inverse world transform, then its
+   * translation and the frame's size, then the four radii, then the enclosing clip.
+   */
   const CLIP_STRIDE = 16
   const CLIP = {
     a: 0,
     b: 1,
-    pad0: 2,
-    c: 4,
-    d: 5,
-    pad1: 6,
-    tx: 8,
-    ty: 9,
-    one: 10,
-    width: 12,
-    height: 13,
-    radius: 14,
-    parent: 15,
+    c: 2,
+    d: 3,
+    tx: 4,
+    ty: 5,
+    width: 6,
+    height: 7,
+    radiusTopLeft: 8,
+    radiusTopRight: 9,
+    radiusBottomRight: 10,
+    radiusBottomLeft: 11,
+    parent: 12,
   } as const
 
-  const INSTANCE_CLIP = 16
+  const INSTANCE_CLIP = FIELD.clip
 
   function read(stubbed: StubDevice) {
     return {
@@ -392,7 +477,7 @@ describe('clipsContent', () => {
       createFrame({
         transform: translation(40, 25),
         size: { width: 100, height: 80 },
-        cornerRadius: 6,
+        cornerRadii: uniformCornerRadii(6),
         fills: [fromHex('#ffffff')],
         clipsContent,
       }),
@@ -428,20 +513,41 @@ describe('clipsContent', () => {
     expect(clip(0, CLIP.ty)).toBe(-25)
   })
 
-  it('pads each matrix column to 16 bytes', () => {
-    const { clip } = frameWith(true)
-    expect(clip(0, CLIP.pad0)).toBe(0)
-    expect(clip(0, CLIP.pad1)).toBe(0)
-    // The third column is a position, so its homogeneous coordinate is 1, not 0.
-    expect(clip(0, CLIP.one)).toBe(1)
-  })
-
-  it('carries the size and corner radius the clip is shaped by', () => {
+  it('carries the size and corner radii the clip is shaped by', () => {
     const { clip } = frameWith(true)
     expect(clip(0, CLIP.width)).toBe(100)
     expect(clip(0, CLIP.height)).toBe(80)
-    expect(clip(0, CLIP.radius)).toBe(6)
+    expect(clip(0, CLIP.radiusTopLeft)).toBe(6)
+    expect(clip(0, CLIP.radiusTopRight)).toBe(6)
+    expect(clip(0, CLIP.radiusBottomRight)).toBe(6)
+    expect(clip(0, CLIP.radiusBottomLeft)).toBe(6)
     expect(clip(0, CLIP.parent)).toBe(-1)
+  })
+
+  it('gives a clip its own four radii, in the same order an instance writes them', () => {
+    const document = new SceneDocument()
+    const frame = document.insert(
+      createFrame({
+        size: { width: 100, height: 100 },
+        cornerRadii: { topLeft: 1, topRight: 2, bottomRight: 3, bottomLeft: 4 },
+        fills: [fromHex('#ffffff')],
+        clipsContent: true,
+      }),
+    )
+    document.insert(
+      createRectangle({ size: { width: 20, height: 20 }, fills: [fromHex('#0a7cff')] }),
+      frame.id,
+    )
+    const stubbed = createStubDevice()
+    build(stubbed).sync(document, camera, viewport)
+    const { clip } = read(stubbed)
+
+    expect([
+      clip(0, CLIP.radiusTopLeft),
+      clip(0, CLIP.radiusTopRight),
+      clip(0, CLIP.radiusBottomRight),
+      clip(0, CLIP.radiusBottomLeft),
+    ]).toEqual([1, 2, 3, 4])
   })
 
   it('chains a nested clip to the one outside it', () => {
@@ -584,6 +690,11 @@ describe('text', () => {
     expect(at(0, GLYPH_FIELD.v1)).toBe(0.75)
   })
 
+  it('writes four zero radii, since a letter has no corners to round', () => {
+    const { at } = pack(withText('a').document)
+    expect(radiiOf(at, 0)).toEqual([0, 0, 0, 0])
+  })
+
   it('carries the distance range, so it cannot disagree with the atlas', () => {
     const { at } = pack(withText('a').document)
     expect(at(0, GLYPH_FIELD.pxRange)).toBe(4)
@@ -697,5 +808,176 @@ describe('text', () => {
     // glyphs are still packed identically after a change that does not touch the text.
     expect(builder.count).toBe(2)
     expect(instanceAt(stubbed.written(), STRIDE, 1, FIELD.originX)).toBe(110)
+  })
+})
+
+describe('a stack of paints', () => {
+  const RED = fromHex('#ff0000')
+  const GREEN = fromHex('#00ff00')
+  const BLUE = fromHex('#0000ff')
+
+  function packed(node: RectangleNode) {
+    const document = new SceneDocument()
+    document.insert(node)
+    const stubbed = createStubDevice()
+    const builder = build(stubbed)
+    builder.sync(document, camera, viewport)
+    return {
+      builder,
+      at: (index: number, slot: number) => instanceAt(stubbed.written(), STRIDE, index, slot),
+    }
+  }
+
+  const stacked = (fills: Paint[]): RectangleNode =>
+    createRectangle({
+      size: { width: 100, height: 60 },
+      cornerRadii: uniformCornerRadii(8),
+      fills,
+    })
+
+  it('packs one instance per fill, all sharing the geometry of the node', () => {
+    const { builder, at } = packed(stacked([RED, GREEN, BLUE]))
+    expect(builder.count).toBe(3)
+    for (const index of [1, 2]) {
+      expect(at(index, FIELD.originX)).toBe(at(0, FIELD.originX))
+      expect(at(index, FIELD.originY)).toBe(at(0, FIELD.originY))
+      expect(at(index, FIELD.width)).toBe(at(0, FIELD.width))
+      expect(at(index, FIELD.height)).toBe(at(0, FIELD.height))
+      expect(at(index, FIELD.kind)).toBe(at(0, FIELD.kind))
+      expect(radiiOf(at, index)).toEqual(radiiOf(at, 0))
+    }
+  })
+
+  /*
+   * The one assertion that can tell the two orders apart, which is why it names both ends.
+   * The panel lists the topmost paint first and the buffer paints back to front, so the
+   * first row has to be the last instance or the stack composites upside down.
+   */
+  it('emits the list reversed, so the first fill lands on top', () => {
+    const { at } = packed(stacked([RED, GREEN, BLUE]))
+    expect(at(0, FIELD.blue)).toBe(1)
+    expect(at(1, FIELD.green)).toBe(1)
+    expect(at(2, FIELD.red)).toBe(1)
+  })
+
+  it('drops a hidden fill and leaves the survivors in their relative order', () => {
+    const { builder, at } = packed(stacked([RED, { ...GREEN, visible: false }, BLUE]))
+    expect(builder.count).toBe(2)
+    expect(at(0, FIELD.blue)).toBe(1)
+    expect(at(1, FIELD.red)).toBe(1)
+  })
+
+  it('packs nothing when every fill in the stack is hidden', () => {
+    expect(packed(stacked([{ ...RED, visible: false }])).builder.count).toBe(0)
+  })
+
+  it('multiplies a paint opacity into the alpha alongside the colour own', () => {
+    const { at } = packed(stacked([{ ...fromHex('#ff0000', 0.5), opacity: 0.5 }]))
+    expect(at(0, FIELD.alpha)).toBeCloseTo(0.25, 6)
+  })
+
+  // Three separate things can make a paint faint and they compose rather than override.
+  it('multiplies a paint opacity by the opacity inherited from the tree', () => {
+    const document = new SceneDocument()
+    const frame = document.insert(
+      createFrame({ size: { width: 400, height: 400 }, opacity: 0.5, clipsContent: false }),
+    )
+    document.insert(
+      createRectangle({ size: { width: 50, height: 50 }, fills: [{ ...RED, opacity: 0.5 }] }),
+      frame.id,
+    )
+    const stubbed = createStubDevice()
+    build(stubbed).sync(document, camera, viewport)
+    expect(instanceAt(stubbed.written(), STRIDE, 0, FIELD.alpha)).toBeCloseTo(0.25, 6)
+  })
+
+  it('packs every stroke in the stack, reversed the same way the fills are', () => {
+    const { builder, at } = packed(
+      createRectangle({
+        size: { width: 100, height: 60 },
+        fills: [RED],
+        strokes: [
+          { paint: GREEN, weight: 2, align: 'inside' },
+          { paint: BLUE, weight: 6, align: 'outside' },
+        ],
+      }),
+    )
+    // Fill, then the second stroke, then the first, which therefore paints on top.
+    expect(builder.count).toBe(3)
+    expect(at(1, FIELD.strokeWeight)).toBe(6)
+    expect(at(1, FIELD.blue)).toBe(1)
+    expect(at(2, FIELD.strokeWeight)).toBe(2)
+    expect(at(2, FIELD.green)).toBe(1)
+  })
+
+  it('keeps every stroke after the children and on the outer clip', () => {
+    const document = new SceneDocument()
+    const frame = document.insert(
+      createFrame({
+        size: { width: 100, height: 100 },
+        clipsContent: true,
+        fills: [fromHex('#ffffff')],
+        strokes: [
+          { paint: GREEN, weight: 2, align: 'inside' },
+          { paint: BLUE, weight: 6, align: 'outside' },
+        ],
+      }),
+    )
+    document.insert(
+      createRectangle({ size: { width: 20, height: 20 }, fills: [RED] }),
+      frame.id,
+    )
+    const stubbed = createStubDevice()
+    const builder = build(stubbed)
+    builder.sync(document, camera, viewport)
+    const at = (index: number, slot: number) =>
+      instanceAt(stubbed.written(), STRIDE, index, slot)
+
+    // Frame fill, child fill, then both frame strokes.
+    expect(builder.count).toBe(4)
+    expect(at(1, FIELD.clip)).toBe(0)
+    expect(at(2, FIELD.strokeWeight)).toBe(6)
+    expect(at(3, FIELD.strokeWeight)).toBe(2)
+    // A frame does not clip its own outline, however many it has.
+    expect(at(2, FIELD.clip)).toBe(-1)
+    expect(at(3, FIELD.clip)).toBe(-1)
+  })
+
+  it('drops a stroke whose paint is hidden and keeps the rest', () => {
+    const { builder, at } = packed(
+      createRectangle({
+        size: { width: 100, height: 60 },
+        strokes: [
+          { paint: GREEN, weight: 2, align: 'inside' },
+          { paint: { ...BLUE, visible: false }, weight: 6, align: 'outside' },
+        ],
+      }),
+    )
+    expect(builder.count).toBe(1)
+    expect(at(0, FIELD.strokeWeight)).toBe(2)
+  })
+
+  /*
+   * A whole pass of glyphs per paint, not a paint per glyph: the second colour has to land
+   * over the entire word, or one letter's top paint would sit under the next letter's
+   * bottom one wherever two glyphs overlap.
+   */
+  it('draws text once per fill, a whole word at a time', () => {
+    const document = new SceneDocument()
+    document.insert(
+      createText({ characters: 'ab', fontSize: 20, fills: [RED, { ...BLUE, opacity: 0.5 }] }),
+    )
+    const stubbed = createStubDevice()
+    const builder = build(stubbed)
+    builder.sync(document, camera, viewport)
+    const at = (index: number, slot: number) =>
+      instanceAt(stubbed.written(), STRIDE, index, slot)
+
+    expect(builder.count).toBe(4)
+    // The bottom paint first, both its letters, then the top one over the whole word.
+    expect([at(0, FIELD.blue), at(1, FIELD.blue)]).toEqual([1, 1])
+    expect([at(2, FIELD.red), at(3, FIELD.red)]).toEqual([1, 1])
+    expect(at(0, FIELD.alpha)).toBeCloseTo(0.5, 6)
+    expect(at(2, FIELD.alpha)).toBe(1)
   })
 })

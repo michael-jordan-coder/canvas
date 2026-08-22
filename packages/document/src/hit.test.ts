@@ -11,6 +11,7 @@ import {
   type SceneNode,
 } from './node.js'
 import { fromHex, type Stroke, type StrokeAlign } from './paint.js'
+import { uniformCornerRadii, type CornerRadii } from './sdf.js'
 
 /**
  * Rectangle spans (-136,-96) to (4,-6) in world space, the ellipse is centred at (55,55)
@@ -31,7 +32,7 @@ function scene() {
       name: 'Rectangle',
       transform: translation(24, 24),
       size: { width: 140, height: 90 },
-      cornerRadius: 4,
+      cornerRadii: uniformCornerRadii(4),
     }),
     frame.id,
   )
@@ -133,6 +134,61 @@ describe('containment through transforms', () => {
   })
 })
 
+describe('per corner radius', () => {
+  function rounded(radii: CornerRadii) {
+    const document = new SceneDocument()
+    const node = document.insert(
+      createRectangle({ size: { width: 100, height: 100 }, cornerRadii: radii }),
+    )
+    return { document, node }
+  }
+
+  /*
+   * The whole point of four radii, and the case a single one could not express. The arc is
+   * centred 40 in from each of its own edges, so a point 8 diagonally in from the top left
+   * corner is 45.3 from that centre and outside the shape, while the same point mirrored
+   * into a square corner is comfortably inside it.
+   */
+  it('bites the corner it was given and leaves the other three square', () => {
+    const { document, node } = rounded({
+      topLeft: 40,
+      topRight: 0,
+      bottomRight: 0,
+      bottomLeft: 0,
+    })
+    expect(hitTest(document, { x: 8, y: 8 })).toBeNull()
+    expect(hitTest(document, { x: 92, y: 8 })?.id).toBe(node.id)
+    expect(hitTest(document, { x: 8, y: 92 })?.id).toBe(node.id)
+    expect(hitTest(document, { x: 92, y: 92 })?.id).toBe(node.id)
+  })
+
+  // The two bottom corners are the pair a packing or a select can swap without any other
+  // test noticing, since both are on the same edge of the box.
+  it('tells the bottom right corner from the bottom left', () => {
+    const { document, node } = rounded({
+      topLeft: 0,
+      topRight: 0,
+      bottomRight: 40,
+      bottomLeft: 0,
+    })
+    expect(hitTest(document, { x: 92, y: 92 })).toBeNull()
+    expect(hitTest(document, { x: 8, y: 92 })?.id).toBe(node.id)
+  })
+
+  // Two arcs that both want most of the top edge are scaled together rather than clamped
+  // apart, so the point where they meet is exactly the middle of that edge.
+  it('clicks the edge between two oversized radii, where the field would otherwise fold', () => {
+    const { document, node } = rounded({
+      topLeft: 90,
+      topRight: 90,
+      bottomRight: 0,
+      bottomLeft: 0,
+    })
+    expect(hitTest(document, { x: 50, y: 1 })?.id).toBe(node.id)
+    expect(hitTest(document, { x: 4, y: 4 })).toBeNull()
+  })
+})
+
 describe('strokes and what you can click', () => {
   function withStroke(align: StrokeAlign) {
     const document = new SceneDocument()
@@ -169,7 +225,7 @@ describe('strokes and what you can click', () => {
     const rounded = document.insert(
       createRectangle({
         size: { width: 100, height: 100 },
-        cornerRadius: 20,
+        cornerRadii: uniformCornerRadii(20),
         strokes: [{ paint: fromHex('#ff0000'), weight: 20, align: 'outside' }],
       }),
     )
@@ -198,6 +254,36 @@ describe('strokes and what you can click', () => {
       createRectangle({
         size: { width: 100, height: 60 },
         strokes: [{ paint: fromHex('#ff0000'), weight: 0, align: 'outside' }],
+      }),
+    )
+    expect(hitTest(document, { x: 104, y: 30 })).toBeNull()
+  })
+
+  // Both strokes are drawn at once, so the area has to cover the outermost of them. Taking
+  // the first would put half the visible outline outside what can be clicked.
+  it('grows by the widest stroke in the stack, not the first one', () => {
+    const document = new SceneDocument()
+    const rectangle = document.insert(
+      createRectangle({
+        size: { width: 100, height: 60 },
+        strokes: [
+          { paint: fromHex('#ff0000'), weight: 4, align: 'outside' },
+          { paint: fromHex('#00ff00'), weight: 20, align: 'outside' },
+        ],
+      }),
+    )
+    expect(hitTest(document, { x: 118, y: 30 })?.id).toBe(rectangle.id)
+    expect(hitTest(document, { x: 122, y: 30 })).toBeNull()
+  })
+
+  it('does not grow for a stroke whose paint is hidden, since it is not on screen', () => {
+    const document = new SceneDocument()
+    document.insert(
+      createRectangle({
+        size: { width: 100, height: 60 },
+        strokes: [
+          { paint: { ...fromHex('#ff0000'), visible: false }, weight: 20, align: 'outside' },
+        ],
       }),
     )
     expect(hitTest(document, { x: 104, y: 30 })).toBeNull()
@@ -243,7 +329,11 @@ describe('clipsContent', () => {
   it('honours the corner radius, so a clipped corner is really cut', () => {
     const document = new SceneDocument()
     const frame = document.insert(
-      createFrame({ size: { width: 100, height: 100 }, cornerRadius: 40, clipsContent: true }),
+      createFrame({
+        size: { width: 100, height: 100 },
+        cornerRadii: uniformCornerRadii(40),
+        clipsContent: true,
+      }),
     )
     const child = document.insert(
       createRectangle({ size: { width: 100, height: 100 } }),

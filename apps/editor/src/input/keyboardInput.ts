@@ -7,6 +7,7 @@ import {
   type SceneDocument,
   type Vec2,
 } from '@figma-canvas/document'
+import { alignSelection, type AlignCommand } from '../state/align'
 import { relayout, toggleAutoLayout, wrapInAutoLayout } from '../state/autoLayout'
 import { reorderSelection } from '../state/order'
 import type { ToolId } from '../state/uiStore'
@@ -37,6 +38,16 @@ const TOOL_KEYS: Record<string, ToolId> = {
   r: 'rectangle',
   o: 'ellipse',
   t: 'text',
+}
+
+/** Figma's align shortcuts. Distribute and flip have none there either, so neither gets one here. */
+const ALIGN_KEYS: Record<string, AlignCommand> = {
+  a: 'left',
+  d: 'right',
+  w: 'top',
+  s: 'bottom',
+  h: 'centerX',
+  v: 'centerY',
 }
 
 const ARROW_DELTAS: Record<string, Vec2> = {
@@ -197,6 +208,18 @@ export function createKeyboardInput(options: KeyboardInputOptions): () => void {
           const frame = wrapInAutoLayout(scene, selection)
           if (frame) options.setSelection([frame.id])
         })
+        return
+      }
+    }
+
+    // Alt-prefixed, so these sit beside v/h/w/s/a/d without colliding with the bare tool
+    // letters below, which are guarded to fire only when alt is not held.
+    if (!accel && event.altKey) {
+      const command = ALIGN_KEYS[event.key.toLowerCase()]
+      if (command) {
+        event.preventDefault()
+        if (event.repeat) return
+        alignSelection(scene, options.getSelection(), command)
         return
       }
     }

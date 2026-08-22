@@ -359,7 +359,10 @@ class Solver {
 
     const entries: Entry[] = children.map((node) => {
       const t = node.transform
-      const plain = near(t.a, 1) && near(t.b, 0) && near(t.c, 0) && near(t.d, 1)
+      // Absolute value on a and d, not just b and c pinned at zero: a flip is a negative a or
+      // d with no rotation or skew of its own, and a flipped child should still be eligible to
+      // fill its parent rather than silently losing fill sizing because of the sign.
+      const plain = near(Math.abs(t.a), 1) && near(t.b, 0) && near(t.c, 0) && near(Math.abs(t.d), 1)
       const mode = node.layoutChild
       // Text height is measured from the text, so it is never anyone's to fill.
       const fillWidth = plain && mode?.widthMode === 'fill'

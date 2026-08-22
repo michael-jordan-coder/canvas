@@ -6,10 +6,29 @@ import {
   createFrame,
   createRectangle,
   createText,
+  type RectangleNode,
   type SceneNode,
   type TextNode,
 } from './node.js'
-import { fromHex } from './paint.js'
+import { fromHex, type Paint } from './paint.js'
+import { uniformCornerRadii } from './sdf.js'
+
+/**
+ * A serialized file rewound to the shape it had before version 5: one `cornerRadius` scalar
+ * where there are now four radii. Relabelling the version alone would leave a file no build
+ * ever wrote, and the migration would then be tested against a fixture rather than against
+ * what an older save actually looks like.
+ */
+function withScalarRadius(file: { nodes: readonly unknown[]; version: number }): unknown {
+  const copy = JSON.parse(JSON.stringify(file)) as { nodes: Record<string, unknown>[] }
+  for (const node of copy.nodes) {
+    const radii = node['cornerRadii']
+    if (radii === undefined) continue
+    node['cornerRadius'] = (radii as { topLeft: number }).topLeft
+    delete node['cornerRadii']
+  }
+  return copy
+}
 import {
   InvalidDocumentError,
   SCHEMA_VERSION,
@@ -36,7 +55,7 @@ function scene() {
       transform: translation(24, 24),
       size: { width: 140, height: 90 },
       fills: [fromHex('#0a7cff')],
-      cornerRadius: 4,
+      cornerRadii: uniformCornerRadii(4),
     }),
     frame.id,
   )
@@ -252,7 +271,7 @@ describe('the text node on disk', () => {
   it('is written at the current schema version', () => {
     const { document } = withText()
     expect(serializeDocument(document).version).toBe(SCHEMA_VERSION)
-    expect(SCHEMA_VERSION).toBe(4)
+    expect(SCHEMA_VERSION).toBe(5)
   })
 
   /*
@@ -264,7 +283,7 @@ describe('the text node on disk', () => {
   it('still loads a file written before text existed', () => {
     const { document } = scene()
     const older = { ...serializeDocument(document), version: 1 }
-    expect(() => parseDocument(JSON.parse(JSON.stringify(older)))).not.toThrow()
+    expect(() => parseDocument(withScalarRadius(older))).not.toThrow()
   })
 
   it('names the field that failed rather than saying invalid', () => {
@@ -303,6 +322,48 @@ describe('the text node on disk', () => {
     const file = JSON.parse(JSON.stringify(serializeDocument(document)))
     delete file.nodes.find((node: { type: string }) => node.type === 'text').autoWidth
     expect(() => parseDocument(file)).toThrow(/autoWidth/)
+  })
+
+  /*
+   * The second real migration, and the same shape as the first. A version 4 file has one
+   * radius per shape and it applied to every corner, so four equal radii is what it meant
+   * rather than a guess at what it might have meant.
+   */
+  it('reads a version 4 corner radius as four equal radii', () => {
+    const { document, rectangle } = scene()
+    const file = withScalarRadius({ ...serializeDocument(document), version: 4 })
+
+    const parsed = parseDocument(file)
+    const back = parsed.nodes.find((node) => node.id === rectangle.id)
+    expect(back?.type === 'rectangle' && back.cornerRadii).toEqual({
+      topLeft: 4,
+      topRight: 4,
+      bottomRight: 4,
+      bottomLeft: 4,
+    })
+  })
+
+  it('still requires the four radii at the current version', () => {
+    const { document } = scene()
+    const file = JSON.parse(JSON.stringify(serializeDocument(document)))
+    delete file.nodes.find((node: { type: string }) => node.type === 'rectangle').cornerRadii
+    expect(() => parseDocument(file)).toThrow(/cornerRadii/)
+  })
+
+  it('round trips four different radii', () => {
+    const { document, rectangle } = scene()
+    document.update<RectangleNode>(rectangle.id, {
+      cornerRadii: { topLeft: 1, topRight: 2, bottomRight: 3, bottomLeft: 4 },
+    })
+
+    const parsed = parseDocument(JSON.parse(JSON.stringify(serializeDocument(document))))
+    const back = parsed.nodes.find((node) => node.id === rectangle.id)
+    expect(back?.type === 'rectangle' && back.cornerRadii).toEqual({
+      topLeft: 1,
+      topRight: 2,
+      bottomRight: 3,
+      bottomLeft: 4,
+    })
   })
 
   it('round trips a fixed width box', () => {
@@ -383,7 +444,7 @@ describe('auto layout on disk', () => {
   it('loads a version 3 file, where absence simply means no layout', () => {
     const { document } = scene()
     const older = { ...serializeDocument(document), version: 3 }
-    const parsed = parseDocument(JSON.parse(JSON.stringify(older)))
+    const parsed = parseDocument(withScalarRadius(older))
     for (const node of parsed.nodes) {
       expect(node.layoutChild).toBeUndefined()
       if (node.type === 'frame') expect(node.layout).toBeUndefined()
@@ -415,5 +476,98 @@ describe('auto layout on disk', () => {
     if (live.type !== 'frame' || !live.layout) throw new Error('expected the layout')
     live.layout.padding.left = 999
     expect(stored.layout.padding.left).toBe(8)
+  })
+})
+
+describe('paint opacity and visibility on disk', () => {
+  const FILLS: Paint[] = [
+    { ...fromHex('#ff0000'), opacity: 0.25 },
+    { ...fromHex('#00ff00'), visible: false },
+    fromHex('#0000ff'),
+  ]
+
+  function stacked() {
+    const document = new SceneDocument()
+    const rectangle = document.insert(
+      createRectangle({ size: { width: 100, height: 100 }, fills: FILLS }),
+    )
+    return { document, rectangle }
+  }
+
+  it('round trips a whole stack of fills with their own fields', () => {
+    const { document, rectangle } = stacked()
+    const loaded = roundTrip(document)
+    const back = loaded.expectNode(rectangle.id)
+    expect('fills' in back && back.fills).toEqual(FILLS)
+  })
+
+  // Absence is the default in the model, so a file written before the fields existed and a
+  // paint that simply carries neither have to read the same. That is what buys no bump.
+  it('leaves an absent field absent rather than writing in its default', () => {
+    const { document, rectangle } = stacked()
+    const file = JSON.parse(JSON.stringify(serializeDocument(document)))
+    const written = file.nodes.find((node: { id: string }) => node.id === rectangle.id)
+    expect(written.fills[2]).not.toHaveProperty('opacity')
+    expect(written.fills[2]).not.toHaveProperty('visible')
+
+    const parsed = parseDocument(file)
+    const back = parsed.nodes.find((node) => node.id === rectangle.id)
+    expect(back?.type === 'rectangle' && back.fills[2]).not.toHaveProperty('opacity')
+  })
+
+  it('reads a file at the current version that predates the fields', () => {
+    const { document, rectangle } = stacked()
+    const file = JSON.parse(JSON.stringify(serializeDocument(document)))
+    for (const node of file.nodes) {
+      for (const fill of node.fills ?? []) {
+        delete fill.opacity
+        delete fill.visible
+      }
+    }
+    expect(file.version).toBe(SCHEMA_VERSION)
+
+    const parsed = parseDocument(file)
+    const back = parsed.nodes.find((node) => node.id === rectangle.id)
+    const plain =
+      back?.type === 'rectangle' && back.fills.every((fill) => fill.opacity === undefined)
+    expect(plain).toBe(true)
+  })
+
+  it('names the paint field that failed by its own path', () => {
+    const { document } = stacked()
+    const file = JSON.parse(JSON.stringify(serializeDocument(document)))
+    file.nodes.find((node: { type: string }) => node.type === 'rectangle').fills[0].opacity =
+      'half'
+    expect(() => parseDocument(file)).toThrow(/fills\[0\]\.opacity is not a finite number/)
+  })
+
+  it('rejects a visible flag that is not a boolean', () => {
+    const { document } = stacked()
+    const file = JSON.parse(JSON.stringify(serializeDocument(document)))
+    file.nodes.find((node: { type: string }) => node.type === 'rectangle').fills[0].visible = 1
+    expect(() => parseDocument(file)).toThrow(/fills\[0\]\.visible is not a boolean/)
+  })
+
+  it('carries the fields on a stroke paint too', () => {
+    const document = new SceneDocument()
+    const rectangle = document.insert(
+      createRectangle({
+        size: { width: 100, height: 100 },
+        strokes: [
+          {
+            paint: { ...fromHex('#1a1a1a'), opacity: 0.5, visible: false },
+            weight: 3,
+            align: 'outside',
+          },
+        ],
+      }),
+    )
+    const back = roundTrip(document).expectNode(rectangle.id)
+    expect('strokes' in back && back.strokes[0]?.paint).toEqual({
+      type: 'solid',
+      color: fromHex('#1a1a1a').color,
+      opacity: 0.5,
+      visible: false,
+    })
   })
 })

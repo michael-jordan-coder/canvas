@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { SceneDocument } from '../document.js'
-import { rotation, translation } from '../math.js'
+import { reflectAbout, rotation, translation } from '../math.js'
 import {
   createFrame,
   createRectangle,
@@ -507,5 +507,61 @@ describe('inferLayout', () => {
     expect(inferred.layout.gap).toBe(10)
     expect(inferred.layout.padding).toEqual({ top: 10, right: 10, bottom: 10, left: 10 })
     expect(inferred.childOrder).toEqual([])
+  })
+})
+
+/*
+ * `plain` gates fill sizing, and it used to read `near(t.a, 1) && near(t.d, 1)`, which a flip
+ * fails outright since `reflectAbout` leaves one of them at exactly -1. That silently
+ * downgraded a flipped fill child to fixed, the fate a rotated child gets deliberately. A flip
+ * is neither a rotation nor a skew: the node's axes are still the frame's axes, only pointing
+ * the other way, so there is no reason it should forfeit fill.
+ */
+describe('a flipped auto layout child', () => {
+  it('still fills its parent, unlike a rotated one', () => {
+    const document = new SceneDocument()
+    const frame = document.insert(
+      createFrame({ size: { width: 300, height: 100 }, layout: layout() }),
+    )
+    const flipped = document.insert(
+      createRectangle({
+        size: { width: 40, height: 50 },
+        transform: reflectAbout({ x: 20, y: 25 }, 'horizontal'),
+        layoutChild: { widthMode: 'fill', heightMode: 'fixed' },
+      }),
+      frame.id,
+    )
+
+    // Frame minus padding is 280, all of it going to the one fill child.
+    expect(computeLayout(document, frame.id, unmeasured).find((p) => p.id === flipped.id)?.size)
+      .toEqual({ width: 280, height: 50 })
+
+    settle(document, frame.id, unmeasured)
+  })
+
+  it('keeps mirroring the child in place: only tx and ty change, never a or d', () => {
+    const document = new SceneDocument()
+    const frame = document.insert(
+      createFrame({ size: { width: 300, height: 100 }, layout: layout() }),
+    )
+    const mirror = reflectAbout({ x: 20, y: 25 }, 'horizontal')
+    const flipped = document.insert(
+      createRectangle({
+        size: { width: 40, height: 50 },
+        transform: mirror,
+        layoutChild: { widthMode: 'fill', heightMode: 'fixed' },
+      }),
+      frame.id,
+    )
+
+    settle(document, frame.id, unmeasured)
+
+    const after = document.expectNode(flipped.id).transform
+    expect({ a: after.a, b: after.b, c: after.c, d: after.d }).toEqual({
+      a: mirror.a,
+      b: mirror.b,
+      c: mirror.c,
+      d: mirror.d,
+    })
   })
 })

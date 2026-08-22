@@ -161,6 +161,19 @@ export function withAngle(m: Mat2D, radians: number): Mat2D {
   }
 }
 
+/**
+ * Mirrors across a line through `centre`, parallel to one axis. The same sandwich as
+ * `rotateAbout`: shift the centre to the origin, apply the reflection, then shift back.
+ *
+ * 'horizontal' mirrors left to right, negating x, which is a flip about a vertical line.
+ * 'vertical' mirrors top to bottom, negating y. The names match the gesture rather than the
+ * axis that gets negated, since that is what a "flip horizontal" command means to a user.
+ */
+export function reflectAbout(centre: Vec2, axis: 'horizontal' | 'vertical'): Mat2D {
+  const mirror = axis === 'horizontal' ? scaling(-1, 1) : scaling(1, -1)
+  return multiply(multiply(translation(-centre.x, -centre.y), mirror), translation(centre.x, centre.y))
+}
+
 export function degrees(radians: number): number {
   return (radians * 180) / Math.PI
 }

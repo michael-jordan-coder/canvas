@@ -1,13 +1,18 @@
 import {
   IDENTITY,
-  activeStroke,
   applyToPoint,
+  drawnPaints,
+  drawnStrokes,
   invert,
   isPainted,
   multiply,
+  paintOpacity,
+  resolveCornerRadii,
   strokeOffset,
   strokeOutset,
   transformRect,
+  uniformCornerRadii,
+  type CornerRadii,
   type FontMetrics,
   type Mat2D,
   type PaintedNode,
@@ -21,10 +26,7 @@ import {
 } from '@figma-canvas/document'
 import { viewMatrix, type Camera, type Viewport } from '../camera.js'
 import { NO_CLIP, type ClipRegions } from './ClipRegions.js'
-
-/** linear (4) + origin and size (4) + colour (4) + params (4) + flags (4). */
-const FLOATS_PER_INSTANCE = 20
-const BYTES_PER_INSTANCE = FLOATS_PER_INSTANCE * 4
+import { BYTES_PER_INSTANCE, FLOATS_PER_INSTANCE } from './instanceLayout.js'
 
 const KIND_RECTANGULAR = 0
 const KIND_ELLIPTICAL = 1
@@ -39,6 +41,13 @@ const KIND_GLYPH = 2
  * radius a letter has.
  */
 type BoxNode = Exclude<PaintedNode, TextNode>
+
+const SQUARE_CORNERS = uniformCornerRadii()
+
+/** An ellipse has no corners to round: its shape comes entirely from its kind. */
+function cornerRadiiOf(node: BoxNode): CornerRadii {
+  return node.type === 'ellipse' ? SQUARE_CORNERS : node.cornerRadii
+}
 
 /**
  * How far past the viewport the build reaches, as a fraction of it.
@@ -182,14 +191,19 @@ export class ShapeInstances {
     if (node.type === 'text') this.#submitText(node, world, alpha, clip)
 
     const painted = isPainted(node) && node.type !== 'text' ? node : null
-    const fill = painted?.fills[0]
-    // The frame's own paint answers to the clip it sits in, not to its own. A frame does not
-    // clip itself, which is what lets an outward stroke on a clipping frame still show.
-    if (painted && fill) this.#submit(painted, world, alpha, fill.color, clip)
+    // One instance per fill, back to front, so painter's order composites the stack with no
+    // second pass and no blending to arrange. The frame's own paint answers to the clip it
+    // sits in, not to its own: a frame does not clip itself, which is what lets an outward
+    // stroke on a clipping frame still show.
+    if (painted) {
+      for (const fill of drawnPaints(painted.fills)) {
+        this.#submit(painted, world, alpha * paintOpacity(fill), fill.color, clip)
+      }
+    }
 
     const inner =
       node.type === 'frame' && node.clipsContent
-        ? this.#clips.push(world, node.size, node.cornerRadius, clip)
+        ? this.#clips.push(world, node.size, node.cornerRadii, clip)
         : clip
 
     for (const child of document.getChildren(node.id)) {
@@ -199,8 +213,12 @@ export class ShapeInstances {
     // After the children, so a frame's stroke sits above its contents rather than being
     // painted over by them. A leaf has no children, so for a rectangle or an ellipse this is
     // the same position it would have had before the loop.
-    const stroke = painted ? activeStroke(painted.strokes) : undefined
-    if (painted && stroke) this.#submit(painted, world, alpha, stroke.paint.color, clip, stroke)
+    if (painted) {
+      for (const stroke of drawnStrokes(painted.strokes)) {
+        const paint = stroke.paint
+        this.#submit(painted, world, alpha * paintOpacity(paint), paint.color, clip, stroke)
+      }
+    }
   }
 
   /**
@@ -210,40 +228,48 @@ export class ShapeInstances {
    * unchanged and only the origin moves: the glyph's own quad is positioned in the node's
    * local space and then carried out to world. That is what makes a rotated or scaled text
    * node work without the packing knowing either happened.
+   *
+   * A stack of fills is a whole pass of glyphs per paint rather than a paint per glyph, so
+   * the second colour lands over the entire word. Interleaving them would put one letter's
+   * top paint under the next letter's bottom one, which only shows where glyphs overlap and
+   * is therefore exactly the kind of thing that would be found by accident in a script face.
    */
   #submitText(node: TextNode, world: Mat2D, alpha: number, clip: number): void {
-    const fill = node.fills[0]
-    if (!fill) return
+    const fills = drawnPaints(node.fills)
+    if (fills.length === 0) return
 
     const layout = this.#layouts.layoutFor(node, this.#metrics)
 
-    for (const line of layout.lines) {
-      for (const placed of line.glyphs) {
-        // Whitespace advances the pen and has nothing to draw.
-        const quad = this.#metrics.glyphs.get(placed.code)?.quad
-        if (!quad) continue
+    for (const fill of fills) {
+      const paintAlpha = alpha * paintOpacity(fill)
+      for (const line of layout.lines) {
+        for (const placed of line.glyphs) {
+          // Whitespace advances the pen and has nothing to draw.
+          const quad = this.#metrics.glyphs.get(placed.code)?.quad
+          if (!quad) continue
 
-        // The plane bounds are in em from the pen position on the baseline, and both they
-        // and the baseline are y-down, so this is a scale and an offset with no flip.
-        const box = {
-          x: placed.x + quad.plane.x * node.fontSize,
-          y: line.baseline + quad.plane.y * node.fontSize,
-          width: quad.plane.width * node.fontSize,
-          height: quad.plane.height * node.fontSize,
+          // The plane bounds are in em from the pen position on the baseline, and both they
+          // and the baseline are y-down, so this is a scale and an offset with no flip.
+          const box = {
+            x: placed.x + quad.plane.x * node.fontSize,
+            y: line.baseline + quad.plane.y * node.fontSize,
+            width: quad.plane.width * node.fontSize,
+            height: quad.plane.height * node.fontSize,
+          }
+
+          if (!this.#coverage || !intersects(this.#coverage, transformRect(world, box))) {
+            this.#culled += 1
+            continue
+          }
+
+          this.#pushGlyph(world, box, fill.color, paintAlpha, quad.uv, clip)
         }
-
-        if (!this.#coverage || !intersects(this.#coverage, transformRect(world, box))) {
-          this.#culled += 1
-          continue
-        }
-
-        this.#pushGlyph(world, box, fill.color, alpha, quad.uv, clip)
       }
     }
   }
 
   /**
-   * The same 80 bytes a shape uses, with the slots a letter has no use for carrying its
+   * The same 96 bytes a shape uses, with the slots a letter has no use for carrying its
    * patch of the atlas instead. Kind and clip index stay where they are, because the shader
    * reads those without knowing yet what it is looking at.
    */
@@ -287,7 +313,17 @@ export class ShapeInstances {
     // Carried per instance rather than in a uniform, so the field width can never disagree
     // with the atlas the coordinates above point into.
     this.#data[at + 18] = this.#metrics.pxRange
+    // The feature bitfield, read as a u32 by the shader. Bit 0 will mean the paint is a
+    // gradient and bit 1 that the instance is a drop shadow; a glyph is neither.
     this.#data[at + 19] = 0
+
+    // A letter has no corners to round. Written rather than skipped because the backing
+    // array outlives a build, so an unwritten slot would carry whatever the shape that last
+    // occupied this index left in it.
+    this.#data[at + 20] = 0
+    this.#data[at + 21] = 0
+    this.#data[at + 22] = 0
+    this.#data[at + 23] = 0
 
     this.#count += 1
   }
@@ -345,7 +381,9 @@ export class ShapeInstances {
     this.#data[at + 10] = color.b
     this.#data[at + 11] = color.a * alpha
 
-    this.#data[at + 12] = node.type === 'ellipse' ? 0 : node.cornerRadius
+    // Free since the corner radius left for an attribute of its own. Reserved for the index
+    // of this instance's gradient, which will write -1 here when the paint is a solid.
+    this.#data[at + 12] = 0
     this.#data[at + 13] = node.type === 'ellipse' ? KIND_ELLIPTICAL : KIND_RECTANGULAR
     // Weight 0 marks a fill. Anything above it is a band around the shape's edge, and the
     // offset says where that band sits relative to the edge.
@@ -355,9 +393,22 @@ export class ShapeInstances {
     // Which clipping frame this instance answers to, or NO_CLIP. The other three floats are
     // padding the vertex format needs anyway, so the next per instance flag is free.
     this.#data[at + 16] = clip
+    // Reserved for a drop shadow's blur and spread.
     this.#data[at + 17] = 0
     this.#data[at + 18] = 0
+    // The feature bitfield, read as a u32 by the shader. Bit 0 will mean the paint is a
+    // gradient and bit 1 that the instance is a drop shadow. Neither exists yet, and "no
+    // features" is the zero that is already being written.
     this.#data[at + 19] = 0
+
+    // Resolved here rather than in the shader: resolution needs all four radii and both
+    // sides at once, gives the same answer for every pixel, and is what makes the packer,
+    // the clip table and hit testing agree instead of clamping three separate ways.
+    const radii = resolveCornerRadii(node.size, cornerRadiiOf(node))
+    this.#data[at + 20] = radii.topLeft
+    this.#data[at + 21] = radii.topRight
+    this.#data[at + 22] = radii.bottomRight
+    this.#data[at + 23] = radii.bottomLeft
 
     this.#count += 1
   }

@@ -10,12 +10,40 @@ export interface RGBA {
   a: number
 }
 
-export interface SolidPaint {
+/**
+ * What every paint carries whatever it draws.
+ *
+ * Both fields are optional and absence is the default, which is what makes them cost no
+ * schema version: a file written before they existed and a paint that simply has neither
+ * read identically, so `parsePaint` needs no version gate. It is the same shape `layout`
+ * and `layoutChild` already use.
+ *
+ * `opacity` multiplies with the colour's own alpha and with the node's rather than
+ * replacing either. Three separate things can make a paint faint and they compose.
+ */
+export interface PaintBase {
+  /** 0 to 1. Absent means 1. */
+  opacity?: number
+  /** Absent means shown. False keeps the paint in the stack without drawing it. */
+  visible?: boolean
+}
+
+export interface SolidPaint extends PaintBase {
   type: 'solid'
   color: RGBA
 }
 
 export type Paint = SolidPaint
+
+/** A paint's own opacity, which multiplies with its colour's alpha and with the node's. */
+export function paintOpacity(paint: Paint): number {
+  return paint.opacity ?? 1
+}
+
+/** Whether the paint draws at all. A hidden paint keeps its place in the stack. */
+export function isPaintVisible(paint: Paint): boolean {
+  return paint.visible !== false
+}
 
 export type StrokeAlign = 'inside' | 'outside' | 'center'
 
@@ -54,10 +82,49 @@ export function strokeOutset(stroke: Stroke): number {
   return Math.max(0, strokeOffset(stroke) + stroke.weight / 2)
 }
 
-/** The stroke a node actually paints, if any. One stroke for now, like one fill. */
-export function activeStroke(strokes: readonly Stroke[]): Stroke | undefined {
-  const stroke = strokes[0]
-  return stroke && stroke.weight > 0 ? stroke : undefined
+/**
+ * The paints a node actually draws, back to front, hidden ones dropped.
+ *
+ * Reversed, because the two ends disagree on purpose. The panel lists paints the way Figma
+ * does, with the first row nearest the top of the stack, while the instance buffer paints
+ * in the order it is packed. So `paints[0]` is emitted last and lands on top of the rest,
+ * and painter's order composites the stack for free.
+ */
+export function drawnPaints(paints: readonly Paint[]): Paint[] {
+  const drawn: Paint[] = []
+  for (let index = paints.length - 1; index >= 0; index -= 1) {
+    const paint = paints[index]
+    if (paint && isPaintVisible(paint)) drawn.push(paint)
+  }
+  return drawn
+}
+
+/**
+ * The strokes a node actually draws, back to front, in the same order and for the same
+ * reason as the fills above. A weightless stroke has no band to draw, so it is dropped here
+ * rather than packed as an empty one.
+ */
+export function drawnStrokes(strokes: readonly Stroke[]): Stroke[] {
+  const drawn: Stroke[] = []
+  for (let index = strokes.length - 1; index >= 0; index -= 1) {
+    const stroke = strokes[index]
+    if (stroke && stroke.weight > 0 && isPaintVisible(stroke.paint)) drawn.push(stroke)
+  }
+  return drawn
+}
+
+/**
+ * How far the furthest reaching drawn stroke goes past the node's own edge.
+ *
+ * The largest of them rather than the first: every stroke in the list is on screen at once,
+ * so the clickable area has to cover the outermost one or a click on a stroke you can
+ * plainly see would miss. That is the rule the single stroke case always followed, asked of
+ * a stack instead of one.
+ */
+export function strokesOutset(strokes: readonly Stroke[]): number {
+  let outset = 0
+  for (const stroke of drawnStrokes(strokes)) outset = Math.max(outset, strokeOutset(stroke))
+  return outset
 }
 
 export function solid(r: number, g: number, b: number, a = 1): SolidPaint {

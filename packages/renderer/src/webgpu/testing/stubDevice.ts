@@ -15,6 +15,17 @@ export interface StubDevice {
   written(label?: string): Float32Array
   /** Every texture created on this device, in order, as the descriptors it was asked for. */
   textures(): readonly GPUTextureDescriptor[]
+  /**
+   * Every render pipeline created on this device, as the descriptors it was asked for.
+   *
+   * A pipeline is pure declaration: the vertex layout that says where each packed slot
+   * starts and the blend state that says how a fragment reaches the surface. Both fail
+   * silently on a real GPU, as a shape reading the wrong bytes or an edge composited
+   * slightly wrong, so the descriptor is the thing worth pinning.
+   */
+  pipelines(): readonly GPURenderPipelineDescriptor[]
+  /** Every shader module created, as its source. */
+  shaders(): readonly string[]
 }
 
 const SHAPES = 'shape instances'
@@ -40,6 +51,8 @@ export function createStubDevice(): StubDevice {
   const uploads = new Map<string, Float32Array>()
   const empty = new Float32Array(0)
   const textures: GPUTextureDescriptor[] = []
+  const pipelines: GPURenderPipelineDescriptor[] = []
+  const shaders: string[] = []
 
   const device = {
     createBuffer: ({ label }: { label?: string }): StubBuffer => ({
@@ -55,6 +68,15 @@ export function createStubDevice(): StubDevice {
       return { createView: () => ({}), destroy: () => {} }
     },
     createSampler: () => ({}),
+    createShaderModule: ({ code }: GPUShaderModuleDescriptor) => {
+      shaders.push(code)
+      return {}
+    },
+    createPipelineLayout: () => ({}),
+    createRenderPipeline: (descriptor: GPURenderPipelineDescriptor) => {
+      pipelines.push(descriptor)
+      return {}
+    },
     queue: {
       writeBuffer: (buffer: StubBuffer, _offset: number, data: ArrayBuffer) => {
         uploads.set(buffer.label, new Float32Array(data))
@@ -69,6 +91,8 @@ export function createStubDevice(): StubDevice {
     device,
     written: (label = SHAPES) => uploads.get(label) ?? empty,
     textures: () => textures,
+    pipelines: () => pipelines,
+    shaders: () => shaders,
   }
 }
 

@@ -1,5 +1,6 @@
 import { IDENTITY, type Mat2D, type Size } from './math.js'
 import type { Paint, Stroke } from './paint.js'
+import { uniformCornerRadii, type CornerRadii } from './sdf.js'
 
 /** Branded so a plain string cannot be passed where a node id is expected. */
 export type NodeId = string & { readonly __nodeId: unique symbol }
@@ -97,7 +98,8 @@ export interface FrameNode extends BaseNode {
   clipsContent: boolean
   fills: Paint[]
   strokes: Stroke[]
-  cornerRadius: number
+  /** As typed, not as drawn. What is drawn is `resolveCornerRadii` against the size. */
+  cornerRadii: CornerRadii
   layout?: FrameLayout
 }
 
@@ -105,7 +107,8 @@ export interface RectangleNode extends BaseNode {
   readonly type: 'rectangle'
   fills: Paint[]
   strokes: Stroke[]
-  cornerRadius: number
+  /** As typed, not as drawn. What is drawn is `resolveCornerRadii` against the size. */
+  cornerRadii: CornerRadii
 }
 
 export interface EllipseNode extends BaseNode {
@@ -173,7 +176,7 @@ export function createFrame(init: Partial<Omit<FrameNode, 'id' | 'type'>> = {}):
     clipsContent: true,
     fills: [],
     strokes: [],
-    cornerRadius: 0,
+    cornerRadii: uniformCornerRadii(),
     ...init,
   }
 }
@@ -186,7 +189,7 @@ export function createRectangle(
     type: 'rectangle',
     fills: [],
     strokes: [],
-    cornerRadius: 0,
+    cornerRadii: uniformCornerRadii(),
     ...init,
   }
 }
@@ -220,8 +223,21 @@ export function defaultFrameLayout(direction: LayoutDirection = 'horizontal'): F
   }
 }
 
+/**
+ * Every field of whatever it is handed, not a solid rebuilt from a colour.
+ *
+ * This sits on the history path and, through `serializeDocument`, on the autosave path, so
+ * anything it drops vanishes 600ms after the last edit with nothing the user did to explain
+ * it. Switched on the kind rather than spread generically for the same reason `cloneNodeAs`
+ * is: a paint kind added later stops compiling here instead of being quietly flattened into
+ * a solid. Inside a case the spread is safe, since the type is narrowed to exactly the
+ * fields being copied, and it is what keeps an absent optional absent.
+ */
 function clonePaint(paint: Paint): Paint {
-  return { type: 'solid', color: { ...paint.color } }
+  switch (paint.type) {
+    case 'solid':
+      return { ...paint, color: { ...paint.color } }
+  }
 }
 
 function cloneStroke(stroke: Stroke): Stroke {
@@ -270,7 +286,7 @@ export function cloneNodeAs(node: SceneNode, id: NodeId): SceneNode {
         id,
         type: 'frame',
         clipsContent: node.clipsContent,
-        cornerRadius: node.cornerRadius,
+        cornerRadii: { ...node.cornerRadii },
         fills: node.fills.map(clonePaint),
         strokes: node.strokes.map(cloneStroke),
         ...(node.layout
@@ -282,7 +298,7 @@ export function cloneNodeAs(node: SceneNode, id: NodeId): SceneNode {
         ...shared,
         id,
         type: 'rectangle',
-        cornerRadius: node.cornerRadius,
+        cornerRadii: { ...node.cornerRadii },
         fills: node.fills.map(clonePaint),
         strokes: node.strokes.map(cloneStroke),
       }

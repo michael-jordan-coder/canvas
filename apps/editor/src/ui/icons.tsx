@@ -135,3 +135,142 @@ export function HiddenIcon(props: IconProps): ReactElement {
     </Svg>
   )
 }
+
+/*
+ * Align, distribute and flip. Each pair of rectangles sits against the guide line the way
+ * the command leaves them, so the icon shows the result rather than a symbol for it.
+ */
+
+export function AlignLeftIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <g>
+        <path {...stroke} d="M3 2v12" />
+        <rect {...stroke} x="3" y="4" width="7" height="3" />
+        <rect {...stroke} x="3" y="9" width="4" height="3" />
+      </g>
+    </Svg>
+  )
+}
+
+export function AlignCenterXIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <g>
+        <path {...stroke} d="M8 2v12" />
+        <rect {...stroke} x="5" y="4" width="6" height="3" />
+        <rect {...stroke} x="6.5" y="9" width="3" height="3" />
+      </g>
+    </Svg>
+  )
+}
+
+export function AlignRightIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <g>
+        <path {...stroke} d="M13 2v12" />
+        <rect {...stroke} x="6" y="4" width="7" height="3" />
+        <rect {...stroke} x="9" y="9" width="4" height="3" />
+      </g>
+    </Svg>
+  )
+}
+
+export function AlignTopIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <g>
+        <path {...stroke} d="M2 3h12" />
+        <rect {...stroke} x="4" y="3" width="3" height="7" />
+        <rect {...stroke} x="9" y="3" width="3" height="4" />
+      </g>
+    </Svg>
+  )
+}
+
+export function AlignCenterYIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <g>
+        <path {...stroke} d="M2 8h12" />
+        <rect {...stroke} x="4" y="5" width="3" height="6" />
+        <rect {...stroke} x="9" y="6.5" width="3" height="3" />
+      </g>
+    </Svg>
+  )
+}
+
+export function AlignBottomIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <g>
+        <path {...stroke} d="M2 13h12" />
+        <rect {...stroke} x="4" y="6" width="3" height="7" />
+        <rect {...stroke} x="9" y="9" width="3" height="4" />
+      </g>
+    </Svg>
+  )
+}
+
+export function DistributeHorizontalIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <g>
+        <rect {...stroke} x="2" y="4" width="2.5" height="8" />
+        <rect {...stroke} x="6.75" y="4" width="2.5" height="8" />
+        <rect {...stroke} x="11.5" y="4" width="2.5" height="8" />
+      </g>
+    </Svg>
+  )
+}
+
+export function DistributeVerticalIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <g>
+        <rect {...stroke} x="4" y="2" width="8" height="2.5" />
+        <rect {...stroke} x="4" y="6.75" width="8" height="2.5" />
+        <rect {...stroke} x="4" y="11.5" width="8" height="2.5" />
+      </g>
+    </Svg>
+  )
+}
+
+export function FlipHorizontalIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <g>
+        <path {...stroke} d="M8 2v12" strokeDasharray="1.4 1.4" />
+        <path {...stroke} d="M2.5 5v6l4-3z" />
+        <path {...stroke} d="M13.5 5v6l-4-3z" />
+      </g>
+    </Svg>
+  )
+}
+
+export function FlipVerticalIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <g>
+        <path {...stroke} d="M2 8h12" strokeDasharray="1.4 1.4" />
+        <path {...stroke} d="M5 2.5h6l-3 4z" />
+        <path {...stroke} d="M5 13.5h6l-3-4z" />
+      </g>
+    </Svg>
+  )
+}
+
+/** Toggles the corner radius field between one value and four, one bracket per corner. */
+export function CornersIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <g>
+        <path {...stroke} d="M3 6V3h3" />
+        <path {...stroke} d="M13 6V3h-3" />
+        <path {...stroke} d="M3 10v3h3" />
+        <path {...stroke} d="M13 10v3h-3" />
+      </g>
+    </Svg>
+  )
+}

@@ -169,6 +169,11 @@ from every mutation site.
 Deferred, deliberately:
 
 - [ ] Wrap, min/max sizes, absolutely positioned children, negative gap
+- [ ] Grid flow mode. Deferred alongside Wrap and for the same reason: the main/cross closures
+      at `autoLayout.ts:323-344` derive both axes from one boolean, so grid is a second `#solve`
+      body rather than a third `LayoutDirection` threaded through. It also needs a 2D
+      `insertionIndex` (`:128` is hard-wired to one axis) and a decision about whether
+      `inferLayout` can ever infer a grid.
 - [ ] Per-side padding editor (the model already stores four sides)
 - [ ] Insertion indicator line while reorder-dragging (the siblings shifting is the current
       affordance)
@@ -182,49 +187,126 @@ size, opacity, single fill/stroke, and auto layout's row/column with gap/padding
 already have a working equivalent and are not listed again here.
 
 Position
-- [ ] Align/distribute: align selection to left/center/right and top/middle/bottom, relative to
-      the parent frame or to the selection's own bounds. No command for this exists yet, only
-      z-order (`apps/editor/src/state/order.ts`).
-- [ ] Flip horizontal / flip vertical. Rotation exists (`setNodesAngle`,
-      `apps/editor/src/state/rotate.ts`) but a flip is a different operation, not just a 180
-      degree turn, and nothing implements it.
-- [ ] Move the angle field out of Appearance into its own Rotation subsection under Position,
-      next to the new flip icons. `apps/editor/src/ui/PropertiesPanel.tsx:206`
+
+The commands exist and are tested; what is left in this block is the panel and keyboard wiring
+that reaches them.
+
+- [x] `alignSelection` for left/centerX/right/top/centerY/bottom plus distribute on both axes,
+      mirroring `order.ts`'s shape and reusing `selectionWorldBounds` from the renderer package.
+      A single node aligns to its parent's box, two or more to their own union. Locked nodes and
+      auto layout children are skipped from moving but still anchor the reference box.
+      `apps/editor/src/state/align.ts`
+- [x] `flipNodes`, as a negative scale in the transform rather than a boolean pair on the node,
+      since `scaleOf` already carries a flip in the sign of y. New `reflectAbout` in `math.ts`.
+      No `centre` argument, unlike `rotateNodes`: flip has one gesture, so the pivot is always
+      the selection's bounds centre. `apps/editor/src/state/flip.ts`
+- [x] The auto layout engine's `plain` check compares absolute values on `a` and `d`, so a
+      flipped child keeps its fill sizing instead of silently falling back to fixed.
+      `packages/document/src/layout/autoLayout.ts`
+- [x] Panel: an icon row in the Position section for the six aligns, the two distributes and the
+      two flips. New icons in `icons.tsx`. Distribute hidden below three selected. Multiple
+      selection now gets its own Position section, since align/distribute/flip need more than
+      one node to be worth reaching for. `apps/editor/src/ui/PropertiesPanel.tsx`
+- [x] Keyboard: Figma's Alt+A/D/W/S/H/V. `apps/editor/src/input/keyboardInput.ts`
+- [x] Move the angle field out of Appearance into its own Rotation row under Position, next to
+      the new flip icons. `apps/editor/src/ui/PropertiesPanel.tsx`
 
 Auto layout
-- [ ] Grid flow mode, alongside the existing row/column. Wrap is already tracked separately in
-      the Auto layout backlog below; grid is a distinct third mode.
-- [ ] Baseline alignment option in the cross-axis align control.
+- [ ] Baseline alignment option in the cross-axis align control. Needs `LayoutAlign`
+      (`node.ts:31`) split into separate main and cross unions first, since `mainAlign:
+      'baseline'` is meaningless, and `TextMeasurer` (`autoLayout.ts:28`) widened to carry the
+      ascent it currently computes and throws away (`text/layout.ts:56`).
       `apps/editor/src/ui/PropertiesPanel.tsx:357`
-- [ ] Collapse the Hug width/height checkboxes (`PropertiesPanel.tsx:139`) and the Fill
-      width/height checkboxes (`:169`) into one Hug/Fixed/Fill dropdown per axis, docked in the
-      Auto layout section itself rather than split across Size.
+- [x] Collapse the Hug width/height checkboxes and the Fill width/height checkboxes into one
+      `SegmentedField` per axis, docked in the Auto layout section rather than split across
+      Size. Also now rendered for a plain node whose parent is an auto layout frame, which
+      previously had nowhere to set Fill at all. `apps/editor/src/ui/PropertiesPanel.tsx`
 
 Appearance
-- [ ] Independent per-corner radius, with a toggle to switch a single `R` field into four.
-      Model only stores one `cornerRadius` scalar today (`packages/document/src/node.ts`), so
-      this needs a model change, not just a panel change.
-- [ ] Blend mode control (the opacity row's droplet icon in Figma). No blend mode field exists
-      on any node.
+- [x] Independent per-corner radius in the model and the renderer. `cornerRadii` replaces the
+      scalar, `SCHEMA_VERSION` 5 with a version-gated migration. New `packages/document/src/sdf.ts`
+      owns `resolveCornerRadii` (the CSS single-scale-factor rule, not a per-corner clamp) and
+      `distanceToRoundedBox`, and the packer, `ClipRegions` and `hit.ts` all consume it, which is
+      what makes them agree rather than being three reimplementations. Both SDFs now pick a
+      radius by quadrant before the `abs` that folds all four onto one.
+- [x] Panel: a toggle switching the single `R` field into four, one per corner in `CORNER_ORDER`.
+      Collapsing folds the four back to one value. `apps/editor/src/ui/PropertiesPanel.tsx`
+- [x] Premultiplied alpha in the shape shader. Landed as the prerequisite for blend modes, and
+      correct on its own: straight alpha makes `screen` over-dark at partial coverage. It changes
+      no pixels, since `device.ts` configures `alphaMode: 'opaque'` and the pass clears opaque,
+      so destination alpha is 1 throughout and the two forms of `normal` coincide.
 
 Fill / Stroke
-- [ ] Multiple paints per node, not just `fills[0]` / `strokes[0]`. Already a known gap in
-      `CLAUDE.md`; listing here because it is also the reason there is no per-paint list UI.
-- [ ] Gradient and image paint types. `Paint` is solid-color only today
-      (`packages/document/src/paint.ts`).
-- [ ] Per-paint opacity, blend mode, and visibility toggle on each fill/stroke row.
+- [x] Multiple paints per node, not just `fills[0]` / `strokes[0]`. N paints is N instances,
+      which the stroke path already demonstrated. `activeStroke` is gone, replaced by
+      `drawnPaints` / `drawnStrokes` / `strokesOutset` in `paint.ts`, all of which return the
+      list reversed so the panel's first row is the last instance packed and therefore the one
+      on top. The panel's Fill and Stroke sections are lists with a per row remove.
+- [x] Per-paint opacity and visibility toggle on each fill/stroke row. Both optional on
+      `Paint` with absence meaning the default, so no `SCHEMA_VERSION` bump; opacity multiplies
+      into `color.a` at pack time beside the alpha inherited from the tree.
 
 New sections
-- [ ] Effects (shadow, blur): model, renderer support, and a panel section. Nothing here draws
-      an effect today, only fills and strokes.
-- [ ] Selection colors: a read-only summary of every color used across the current selection.
+- [x] Selection colors: a read-only summary of every color used across the current selection.
+      Pure tally in `apps/editor/src/state/selectionColors.ts` (tested), rendered in
+      `apps/editor/src/ui/PropertiesPanel.tsx`. Deliberately non-subscribing, the same choice
+      the panel already makes for a multiple selection.
 
-Panel chrome
-- [ ] Header row controls: node-type dropdown, a code/inspect icon, a "make component" icon, and
-      a "..." overflow menu. The type-dropdown and overflow menu are panel-only work; the code
-      icon (dev mode) and component icon depend on features not in scope yet (no dev-mode
-      inspector, no component/instance model), so those two are blocked on larger work, not a
-      quick add.
+Deferred from this pass, with the reason:
+
+The three below were designed in full and then deliberately dropped, to finish the visible panel
+work first. The design for all of them is written up and can be picked up as it stands; none of
+it is UI work, which is what took them out of scope rather than any problem with the approach.
+
+- [ ] Gradient paint types, linear and radial. `Paint` is already written as a union so the type
+      slots in, but stops are variable length, so they need a storage buffer at
+      `@group(1) @binding(1)` indexed from the instance, following the `ClipRegions` precedent
+      rather than inflating every instance in the stress grid. `params.x` is reserved for the
+      index and bit 0 of the `flags.w` bitfield marks it. Note `clonePaint` is a `switch` that
+      will stop compiling when the union grows, which is the intended alarm: a gradient's stops
+      array needs its own deep copy or history and autosave share it.
+- [ ] Effects: drop shadow. An SDF gives the shadow nearly free (offset the distance, smooth it
+      over the blur), and bit 1 of the bitfield plus the two spare `flags` slots are reserved for
+      it. The design's one non-obvious move: the offset goes in the instance's transform, not in
+      the quad padding, because both padding computations assume uniform four-side padding and
+      folding it into the transform leaves them unchanged. `hit.ts` deliberately does not grow
+      for a shadow.
+- [ ] Per-paint blend mode, as run-batched draws: contiguous runs of instances sharing a mode,
+      one draw per run, so painter's order survives and a document using no blend modes stays
+      exactly one draw call. Four exact modes only (normal, multiply, screen, linear-dodge);
+      `darken` and `lighten` need min/max, which ignore the blend factors and seam every
+      antialiased edge. No node-level mode, since run-batching blends each instance separately
+      while Figma isolates the group. Premultiplied alpha, its prerequisite, has already landed.
+      Would also want the page to gain a real white fill, since the canvas clears to a UI grey
+      that a multiply paint would otherwise blend against.
+
+- [ ] Image paint type. Needs asset storage in the document, image bytes in the save format, a
+      runtime texture beyond the glyph atlas, and a fourth bind group.
+- [ ] Inner shadow, layer blur, background blur. A blur needs the subtree rendered to an
+      offscreen texture and a separate pass, which breaks the one-draw-call design.
+- [ ] Panel header chrome (node-type dropdown, code/inspect icon, "make component" icon, "..."
+      overflow menu). The code icon needs a dev mode inspector and the component icon needs a
+      component/instance model; neither exists, so this is blocked on features rather than on
+      panel work, and the remaining two are not worth the section alone.
+- [ ] Editing a color from the Selection colors list, which is what Figma does with it.
+- [ ] `darken` and `lighten` blend modes, and node-level (group-isolating) blend mode. Both need
+      the subtree rendered to an offscreen target and composited in a second pass. The run list
+      built for per-paint blending is exactly the data that pass would need to know where to
+      break, so this is a follow-up rather than a rewrite.
+- [ ] A per-corner radius past half the shorter side. `resolveCornerRadii` scales the four
+      together the way CSS does, but `distanceToRoundedBox` then caps each at
+      `min(half.x, half.y)`, because the `abs` fold that makes one rounded corner serve all four
+      puts the arc's centre at `half - r` and a larger radius sends it through the middle of the
+      box. CSS would draw that corner as a quarter disc spanning the whole box. Reaching that
+      needs an SDF without the fold, and the cap is applied identically in the shader and in
+      `hit.ts`, so drawing and hit testing still agree exactly. Only visible at extreme values.
+- [ ] Gradient text. A glyph instance has exactly one free slot and the feature bitfield takes
+      it, so a gradient on a text node falls back to stop 0's colour. Reachable later by packing
+      the paint index into the high bits of that same float (f32 holds integers exactly to 2^24)
+      or by a seventh vertex attribute.
+- [ ] Knocking a shape out of its own drop shadow. The shadow is drawn behind the shape rather
+      than masked by it, so a translucent fill shows its own shadow through. Needs a stencil or
+      the caster's coverage at the shadow's pixel, neither of which exists in one pass.
 
 ## Backlog
 
@@ -239,7 +321,6 @@ Deferred when rotation was picked as the day 7-9 direction:
 
 Known gaps noted in CLAUDE.md as deliberate, not yet built:
 
-- [ ] Only `fills[0]` and `strokes[0]` are read; no multi-paint stacking
 - [ ] `clipsContent` clips per pixel but doesn't cull subtrees outside their clip yet
 - [ ] Multi-selection resize on a rotated node scales along world axes, not its own
 - [ ] Accent colour is hardcoded in `OverlayInstances`, needs to come from theme

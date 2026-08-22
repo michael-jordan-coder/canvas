@@ -19,11 +19,18 @@ struct Camera {
 // One entry per clipping frame in view. `parent` chains outward, so a node inside two
 // nested clipping frames is tested against both by walking the chain rather than by the
 // CPU intersecting rectangles, which would be wrong the moment a frame is scaled.
+//
+// Laid out to mirror an instance: the linear part of a transform, then origin and size, then
+// the four corner radii. A `mat3x3f` here would spend five of the sixteen floats on the
+// padding its columns require, and the matrix is cheap to rebuild from vectors below.
 struct Clip {
-  worldInverse: mat3x3f,
-  size: vec2f,
-  radius: f32,
-  parent: f32,
+  // a, b, c, d of the frame's inverse world transform.
+  linearInverse: vec4f,
+  // Its translation in xy, the frame's size in zw.
+  originSize: vec4f,
+  radii: vec4f,
+  // The enclosing clip in x, or -1. The rest is the padding a vec4f wants anyway.
+  parent: vec4f,
 }
 
 @group(1) @binding(0) var<storage, read> clips: array<Clip>;
@@ -46,7 +53,9 @@ struct Instance {
   // Translation in xy, the node's size in zw.
   @location(1) originSize: vec4f,
   @location(2) color: vec4f,
-  // Corner radius, shape kind, stroke weight, stroke offset. Weight 0 means a fill.
+  // A spare slot, shape kind, stroke weight, stroke offset. Weight 0 means a fill. The
+  // spare held the corner radius until there were four of them; it is reserved for the
+  // index of this instance's gradient.
   //
   // A glyph reuses the three slots that mean nothing to it: params.x and params.z are the
   // top left of its patch of the atlas and params.w is the right edge, with the bottom edge
@@ -54,7 +63,11 @@ struct Instance {
   // vertex format and no second draw call.
   @location(3) params: vec4f,
   // Index into `clips`, or -1. Then, for a glyph, the atlas bottom edge and distance range.
+  // flags.w is a bitfield of the features this instance uses, zero for all of them today.
   @location(4) flags: vec4f,
+  // Corner radii, already resolved on the CPU: top left, top right, bottom right, bottom
+  // left, clockwise from the origin. Zero on an ellipse and on a glyph.
+  @location(5) radii: vec4f,
 }
 
 struct VertexOutput {
@@ -75,6 +88,11 @@ struct VertexOutput {
   @location(6) uv: vec2f,
   // Width of the glyph's distance field, in atlas pixels. Also meaningless on a shape.
   @location(7) @interpolate(flat) pxRange: f32,
+  @location(8) @interpolate(flat) radii: vec4f,
+  // The feature bitfield, carried as a float and read as a u32. Nothing sets a bit yet, so
+  // nothing reads it yet either; it is forwarded now because the alternative is a stride
+  // change later, and this is the phase that pays for one.
+  @location(9) @interpolate(flat) bits: f32,
 }
 
 const CORNERS = array(
@@ -127,11 +145,26 @@ fn vs(@builtin(vertex_index) index: u32, instance: Instance) -> VertexOutput {
   let uv1 = vec2f(instance.params.w, instance.flags.y);
   out.uv = mix(uv0, uv1, CORNERS[index]);
   out.pxRange = instance.flags.z;
+  out.radii = instance.radii;
+  out.bits = instance.flags.w;
   return out;
 }
 
-// Distance from p to a box of half extent `half` with corner radius r. Negative inside.
-fn sdRoundedBox(p: vec2f, half: vec2f, r: f32) -> f32 {
+// Distance from p to a box of half extent `half`, negative inside. `radii` is top left, top
+// right, bottom right, bottom left, resolved on the CPU so no two of them overlap.
+//
+// Picking the corner before the abs below is the whole trick: abs folds all four quadrants
+// onto one and takes the only evidence of which corner this pixel is nearest with it. Both
+// selects compile to a bitwise select rather than a branch, so there is no divergence and
+// this stays callable from inside the clip walk.
+fn sdRoundedBox(p: vec2f, half: vec2f, radii: vec4f) -> f32 {
+  let pair = select(radii.wz, radii.xy, p.y < 0.0);   // top (tl, tr) or bottom (bl, br)
+  var r = select(pair.y, pair.x, p.x < 0.0);          // its left member or its right one
+  // Last-ditch guard, and the reason it lives here rather than at the call sites: a radius
+  // past the shortest half extent puts the arc's centre outside the box and turns the corner
+  // inside out. It used to be written out at both callers and inside the TypeScript twin,
+  // three copies agreeing by accident.
+  r = min(r, min(half.x, half.y));
   let q = abs(p) - half + vec2f(r);
   return length(max(q, vec2f(0.0))) + min(max(q.x, q.y), 0.0) - r;
 }
@@ -166,18 +199,25 @@ fn clipCoverage(start: f32, world: vec2f, dx: vec2f, dy: vec2f) -> f32 {
       break;
     }
     let clip = clips[index];
-    let half = clip.size * 0.5;
+    let half = clip.originSize.zw * 0.5;
+    // Rebuilt per iteration from vectors the loop is loading anyway, which costs nothing the
+    // compiler does not hoist and saves the record five floats of column padding.
+    let worldInverse = mat3x3f(
+      vec3f(clip.linearInverse.xy, 0.0),
+      vec3f(clip.linearInverse.zw, 0.0),
+      vec3f(clip.originSize.xy, 1.0),
+    );
 
-    let p = (clip.worldInverse * vec3f(world, 1.0)).xy - half;
+    let p = (worldInverse * vec3f(world, 1.0)).xy - half;
     // Directions, so the translation column is left out.
-    let lx = (clip.worldInverse * vec3f(dx, 0.0)).xy;
-    let ly = (clip.worldInverse * vec3f(dy, 0.0)).xy;
+    let lx = (worldInverse * vec3f(dx, 0.0)).xy;
+    let ly = (worldInverse * vec3f(dy, 0.0)).xy;
 
-    let d = sdRoundedBox(p, half, min(clip.radius, min(half.x, half.y)));
+    let d = sdRoundedBox(p, half, clip.radii);
     let fw = max(length(lx) + length(ly), 1e-6);
     coverage *= clamp(0.5 - d / fw, 0.0, 1.0);
 
-    index = i32(clip.parent);
+    index = i32(clip.parent.x);
   }
 
   return coverage;
@@ -230,8 +270,7 @@ fn fs(in: VertexOutput) -> @location(0) vec4f {
 
   var d = 0.0;
   if in.params.y < 0.5 {
-    // A radius larger than the shortest side would turn the corners inside out.
-    d = sdRoundedBox(p, half, min(in.params.x, min(half.x, half.y)));
+    d = sdRoundedBox(p, half, in.radii);
   } else if in.params.y < 1.5 {
     d = sdEllipse(p, half);
   }
@@ -265,5 +304,10 @@ fn fs(in: VertexOutput) -> @location(0) vec4f {
 
   coverage *= clipCoverage(in.clip, in.world, dWorldX, dWorldY);
 
-  return vec4f(in.color.rgb, in.color.a * coverage);
+  // Premultiplied, and the pipeline's blend state expects it. Straight alpha survives a
+  // source-over blend but is wrong for every other one: `screen` reads the colour channels
+  // directly, so an antialiased edge at half coverage would contribute its full colour and
+  // draw a dark fringe around every shape.
+  let a = in.color.a * coverage;
+  return vec4f(in.color.rgb * a, a);
 }

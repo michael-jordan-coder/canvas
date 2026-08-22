@@ -1,6 +1,5 @@
 import source from '../shaders/shape.wgsl?raw'
-
-const BYTES_PER_INSTANCE = 80
+import { BYTES_PER_INSTANCE, SHAPE_ATTRIBUTES } from '../instanceLayout.js'
 
 /**
  * One pipeline for every shape in the document, and for every glyph of every text node.
@@ -38,13 +37,8 @@ export function createShapePipeline(
         {
           arrayStride: BYTES_PER_INSTANCE,
           stepMode: 'instance',
-          attributes: [
-            { shaderLocation: 0, offset: 0, format: 'float32x4' },
-            { shaderLocation: 1, offset: 16, format: 'float32x4' },
-            { shaderLocation: 2, offset: 32, format: 'float32x4' },
-            { shaderLocation: 3, offset: 48, format: 'float32x4' },
-            { shaderLocation: 4, offset: 64, format: 'float32x4' },
-          ],
+          // Copied because the descriptor's field is mutable and the shared one is not.
+          attributes: [...SHAPE_ATTRIBUTES],
         },
       ],
     },
@@ -54,13 +48,14 @@ export function createShapePipeline(
       targets: [
         {
           format,
-          // Straight alpha, since the fragment shader returns coverage in the alpha channel
-          // rather than folding it into the colour. Without blending, antialiased edges
-          // would write their partial alpha as opaque and every shape would have a hard
-          // fringe.
+          // Source over, against a premultiplied source. The fragment shader has already
+          // folded coverage into the colour, so the source factor is `one` rather than
+          // `src-alpha`: multiplying by alpha a second time would darken every antialiased
+          // edge. Without blending at all, those edges would write their partial alpha as
+          // opaque and every shape would have a hard fringe.
           blend: {
             color: {
-              srcFactor: 'src-alpha',
+              srcFactor: 'one',
               dstFactor: 'one-minus-src-alpha',
               operation: 'add',
             },

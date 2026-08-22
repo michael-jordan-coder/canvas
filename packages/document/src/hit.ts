@@ -15,42 +15,38 @@ import {
   type PaintedNode,
   type SceneNode,
 } from './node.js'
-import { activeStroke, strokeOutset } from './paint.js'
-
-/**
- * Distance from a point to a rounded box, negative inside. The same function the fragment
- * shader uses, so what you can click is exactly what you can see, including the bite the
- * corner radius takes out of each corner.
- */
-function distanceToRoundedBox(p: Vec2, half: Vec2, radius: number): number {
-  const r = Math.min(radius, Math.min(half.x, half.y))
-  const qx = Math.abs(p.x) - half.x + r
-  const qy = Math.abs(p.y) - half.y + r
-  const outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0))
-  return outside + Math.min(Math.max(qx, qy), 0) - r
-}
+import { strokesOutset } from './paint.js'
+import {
+  distanceToRoundedBox,
+  resolveCornerRadii,
+  uniformCornerRadii,
+  type CornerRadii,
+} from './sdf.js'
 
 /**
  * `point` is in the node's own space, where the node spans 0..size.
  *
  * A stroke that sits outside the edge is part of what you can see, so it is part of what you
  * can click. An inside stroke adds nothing, which is the same reason it leaves the node's
- * drawn footprint alone. Note the whole interior stays clickable even when a node has only a
- * stroke and no fill: Figma would make you hit the outline itself, which is precise and
- * unpleasant, and nothing here needs that yet.
+ * drawn footprint alone. With several strokes it is the widest reach that counts, since all
+ * of them are drawn at once and the area has to cover the outermost. Note the whole interior
+ * stays clickable even when a node has only a stroke and no fill: Figma would make you hit
+ * the outline itself, which is precise and unpleasant, and nothing here needs that yet.
  */
 export function containsPoint(node: SceneNode, point: Vec2): boolean {
   if (!isPainted(node)) return false
   // A text node carries strokes because every painted node does, but nothing draws them yet.
   // Growing its clickable area for a stroke that is not on screen would break the one rule
-  // this file exists to keep: you can click exactly what you can see.
-  const stroke = node.type === 'text' ? undefined : activeStroke(node.strokes)
-  return withinShape(node, point, stroke ? strokeOutset(stroke) : 0)
+  // this file exists to keep: you can click exactly what you can see. A hidden stroke is
+  // dropped by `strokesOutset` for that same reason.
+  return withinShape(node, point, node.type === 'text' ? 0 : strokesOutset(node.strokes))
 }
 
+const SQUARE_CORNERS = uniformCornerRadii()
+
 /** Ellipses have no corner, and a text node's box is its layout bounds, square cornered. */
-function cornerRadiusOf(node: PaintedNode): number {
-  return node.type === 'frame' || node.type === 'rectangle' ? node.cornerRadius : 0
+function cornerRadiiOf(node: PaintedNode): CornerRadii {
+  return node.type === 'frame' || node.type === 'rectangle' ? node.cornerRadii : SQUARE_CORNERS
 }
 
 function withinShape(node: SceneNode, point: Vec2, outset: number): boolean {
@@ -69,9 +65,20 @@ function withinShape(node: SceneNode, point: Vec2, outset: number): boolean {
 
   // Growing the box rather than subtracting from the distance, because the corner radius
   // grows with an outward stroke too: the outer edge of a stroke around a rounded corner is
-  // a wider arc, not the same arc pushed out squarely.
+  // a wider arc, not the same arc pushed out squarely. The grown radii are then resolved
+  // against the grown box, since that is the shape being asked about.
   const grown = { x: half.x + outset, y: half.y + outset }
-  return distanceToRoundedBox(p, grown, cornerRadiusOf(node) + outset) <= 0
+  const radii = cornerRadiiOf(node)
+  const resolved = resolveCornerRadii(
+    { width: grown.x * 2, height: grown.y * 2 },
+    {
+      topLeft: radii.topLeft + outset,
+      topRight: radii.topRight + outset,
+      bottomRight: radii.bottomRight + outset,
+      bottomLeft: radii.bottomLeft + outset,
+    },
+  )
+  return distanceToRoundedBox(p, grown, resolved) <= 0
 }
 
 /**

@@ -166,8 +166,8 @@ Every silent bug this project has had was in that category.
 frame time. Autosave is off in stress mode, so throwaway nodes are never persisted.
 
 Measured on a 10,000 node grid, CPU side. **These were taken when an instance was 64 bytes and
-have not been retaken since it grew to 80 for the clip index**, so read the build rows as a floor
-rather than a current figure:
+have not been retaken since it grew to 80 for the clip index and then to 96 for the four corner
+radii**, so read the build rows as a floor rather than a current figure:
 
 | | |
 | --- | --- |
@@ -224,17 +224,47 @@ Built:
   one 48 byte write and touches no geometry, which is why a document of any size pans as cheaply
   as an empty one.
 - Strokes, as a second instance of the same shape rather than a wider one. Given the SDF an
-  outline is the band `abs(d - offset) <= weight / 2`, so a stroke instance is the same 80 bytes
+  outline is the band `abs(d - offset) <= weight / 2`, so a stroke instance is the same 96 bytes
   as a fill with two more slots filled in, and a node without one pays nothing. Alignment is
   carried entirely by the sign of that offset: `-weight / 2` inside, `0` centred, `+weight / 2`
   outside. `strokeOffset` and `strokeOutset` in `paint.ts` are the single source for it, shared
   by packing, culling and hit testing.
+- A stack of paints per node, each one its own instance, which is the stroke trick applied a
+  second time. Painter's order composites the stack for free because the instances are
+  contiguous, so there is no second pass and no blending to arrange. Two rules go with it. The
+  list runs **the opposite way to the buffer**: the panel puts the topmost paint in the first
+  row, the way Figma does, so `fills[0]` is emitted last and lands on top. And a paint carries
+  its own `opacity` and `visible`, both optional with absence meaning the default, which is why
+  they cost no schema version. Opacity multiplies into `color.a` at pack time alongside the
+  alpha inherited from the tree, so the colour's own alpha, the paint's and the node's compose
+  rather than override. `drawnPaints`, `drawnStrokes` and `strokesOutset` in `paint.ts` are the
+  single source for all of it, shared by packing and hit testing exactly as the stroke helpers
+  are. Text is the one case that is a pass per paint rather than a paint per glyph, so a second
+  colour lands over the whole word instead of interleaving where two glyphs overlap.
 - `clipsContent`, as a per instance index into a storage buffer of clip records rather than a
-  scissor rect. Each record holds the frame's **inverse** world transform, its size and radius,
+  scissor rect. Each record holds the frame's **inverse** world transform, its size and radii,
   and the index of the clip enclosing it, so the fragment shader maps its own world position back
   into each frame in turn and walks that chain outward. Nesting therefore needs no intersection
   on the CPU, and a scaled frame clips correctly, which an axis aligned screen rectangle would
   not. It also keeps the whole document in one draw call.
+
+- Per corner radii, as a fifth vertex attribute rather than as four numbers squeezed into the
+  spares. `packages/document/src/sdf.ts` owns both halves of the geometry: `resolveCornerRadii`
+  and the TypeScript twin of `sdRoundedBox`. Resolution is CSS's, a **single scale factor across
+  all four radii** rather than a clamp per corner, because two radii clamped independently still
+  overlap on a shared edge and fold the distance field there, and drawing and hit testing then
+  disagree in exactly that region. It runs once per instance on the CPU because it needs all four
+  radii and both sides at once and gives the same answer for every pixel. The packer, the clip
+  table and `hit.ts` all consume its output, which is what stops them being three careful
+  reimplementations of one clamp. In the shader the corner is chosen by the sign of `p` **before**
+  the `abs`, since that fold maps all four quadrants onto one and takes the evidence with it.
+
+- Premultiplied alpha out of the shape shader, with `one / one-minus-src-alpha` on both colour and
+  alpha. Byte identical to straight alpha here, because the surface is `alphaMode: 'opaque'` and
+  the pass clears to `a = 1`, so destination alpha is 1 for the whole pass and the two agree. It
+  is a prerequisite rather than a fix: every blend mode other than source over reads the colour
+  channels directly, and a straight alpha source would draw a dark fringe along every antialiased
+  edge.
 
 Drawing is on demand, not a permanent `requestAnimationFrame` loop. `CanvasHost` redraws on
 resize and on document change, coalesced into one frame. An editor is static most of the time and
@@ -295,7 +325,7 @@ Text is the first thing here that is not an analytic shape, and the whole design
 giving up as little as possible for it.
 
 **A glyph is an instance in the same buffer as every shape.** Not a second pipeline and not a
-second draw call. The 80 byte instance has six slots a letter has no use for, and a glyph
+second draw call. The 96 byte instance has six slots a letter has no use for, and a glyph
 needs five: `params.x` and `params.z` are the top left of its patch of the atlas, `params.w`
 the right edge, and two spare slots in `flags` carry the bottom edge and the distance range.
 Kind and clip index stay exactly where a shape keeps them, because the shader reads both
@@ -528,8 +558,6 @@ and check it off there.
 
 A few things are worth knowing because the code looks finished but is not:
 
-- Only `fills[0]` and `strokes[0]` are read. The model holds arrays because Figma stacks paints,
-  and nothing above the first one is drawn.
 - Clipping is honoured per pixel but not yet used to cull. A subtree entirely outside its clipping
   frame is still walked and packed, only to be thrown away by the fragment shader. Skipping it
   would be a real win on a deep document and would also make the `culled` figure in the perf

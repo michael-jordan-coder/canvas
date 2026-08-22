@@ -3,6 +3,7 @@ import {
   createRectangle,
   fromHex,
   translation,
+  uniformCornerRadii,
   type SceneDocument,
 } from '@figma-canvas/document'
 
@@ -39,7 +40,7 @@ export function seedStressScene(document: SceneDocument, count: number): void {
 
       document.insert(
         index % 2 === 0
-          ? createRectangle({ name: `R${index}`, transform, size, fills, cornerRadius: 8 })
+          ? createRectangle({ name: `R${index}`, transform, size, fills, cornerRadii: uniformCornerRadii(8) })
           : createEllipse({ name: `E${index}`, transform, size, fills }),
       )
     }
