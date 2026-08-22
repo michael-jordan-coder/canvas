@@ -175,6 +175,57 @@ Deferred, deliberately:
 - [ ] Reorder drag for multiple selections (falls back to drop-on-release)
 - [ ] `space-between` has no icon treatment, only the Space segment
 
+## Design panel parity
+
+Gaps found comparing the Design (properties) panel against Figma's own, 2026-08-22. Position,
+size, opacity, single fill/stroke, and auto layout's row/column with gap/padding/alignment
+already have a working equivalent and are not listed again here.
+
+Position
+- [ ] Align/distribute: align selection to left/center/right and top/middle/bottom, relative to
+      the parent frame or to the selection's own bounds. No command for this exists yet, only
+      z-order (`apps/editor/src/state/order.ts`).
+- [ ] Flip horizontal / flip vertical. Rotation exists (`setNodesAngle`,
+      `apps/editor/src/state/rotate.ts`) but a flip is a different operation, not just a 180
+      degree turn, and nothing implements it.
+- [ ] Move the angle field out of Appearance into its own Rotation subsection under Position,
+      next to the new flip icons. `apps/editor/src/ui/PropertiesPanel.tsx:206`
+
+Auto layout
+- [ ] Grid flow mode, alongside the existing row/column. Wrap is already tracked separately in
+      the Auto layout backlog below; grid is a distinct third mode.
+- [ ] Baseline alignment option in the cross-axis align control.
+      `apps/editor/src/ui/PropertiesPanel.tsx:357`
+- [ ] Collapse the Hug width/height checkboxes (`PropertiesPanel.tsx:139`) and the Fill
+      width/height checkboxes (`:169`) into one Hug/Fixed/Fill dropdown per axis, docked in the
+      Auto layout section itself rather than split across Size.
+
+Appearance
+- [ ] Independent per-corner radius, with a toggle to switch a single `R` field into four.
+      Model only stores one `cornerRadius` scalar today (`packages/document/src/node.ts`), so
+      this needs a model change, not just a panel change.
+- [ ] Blend mode control (the opacity row's droplet icon in Figma). No blend mode field exists
+      on any node.
+
+Fill / Stroke
+- [ ] Multiple paints per node, not just `fills[0]` / `strokes[0]`. Already a known gap in
+      `CLAUDE.md`; listing here because it is also the reason there is no per-paint list UI.
+- [ ] Gradient and image paint types. `Paint` is solid-color only today
+      (`packages/document/src/paint.ts`).
+- [ ] Per-paint opacity, blend mode, and visibility toggle on each fill/stroke row.
+
+New sections
+- [ ] Effects (shadow, blur): model, renderer support, and a panel section. Nothing here draws
+      an effect today, only fills and strokes.
+- [ ] Selection colors: a read-only summary of every color used across the current selection.
+
+Panel chrome
+- [ ] Header row controls: node-type dropdown, a code/inspect icon, a "make component" icon, and
+      a "..." overflow menu. The type-dropdown and overflow menu are panel-only work; the code
+      icon (dev mode) and component icon depend on features not in scope yet (no dev-mode
+      inspector, no component/instance model), so those two are blocked on larger work, not a
+      quick add.
+
 ## Backlog
 
 Deferred from the panel polish pass:
