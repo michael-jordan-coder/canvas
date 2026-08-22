@@ -17,14 +17,18 @@ import { createOverlayPipeline } from './pipelines/overlay.js'
 
 /** Mid grey, matching --backdrop. Written in the same 0..1 form the GPU stores. */
 const BACKDROP: GPUColor = { r: 138 / 255, g: 138 / 255, b: 138 / 255, a: 1 }
+/** The overlay surface is composited over the page, so its empty pixels have to be nothing. */
+const NOTHING: GPUColor = { r: 0, g: 0, b: 0, a: 0 }
 
 /**
- * Two passes over the same surface: the document in world space, then the selection overlay
- * in screen space. They differ only in which matrix they are bound to.
+ * Two passes: the document in world space, then the selection overlay in screen space. They
+ * differ in which matrix they are bound to and, since the React component layer sits between
+ * them on screen, in which surface they draw into.
  */
 class WebGPURenderer implements Renderer {
   #surface: GPUSurface
   #canvas: HTMLCanvasElement
+  #overlayCanvas: HTMLCanvasElement
   #document: SceneDocument
 
   #worldToClip: MatrixUniform
@@ -44,12 +48,14 @@ class WebGPURenderer implements Renderer {
   constructor(
     surface: GPUSurface,
     canvas: HTMLCanvasElement,
+    overlayCanvas: HTMLCanvasElement,
     document: SceneDocument,
     atlas: GlyphAtlasSource,
     layouts: TextLayoutCache,
   ) {
     this.#surface = surface
     this.#canvas = canvas
+    this.#overlayCanvas = overlayCanvas
     this.#document = document
 
     const layout = createMatrixBindGroupLayout(surface.device)
@@ -80,15 +86,19 @@ class WebGPURenderer implements Renderer {
   resize(viewport: Viewport, dpr: number): void {
     if (this.#destroyed) return
     this.#viewport = viewport
-    // The renderer owns the backing store. The host reports CSS pixels, the device decides
+    // The renderer owns the backing stores. The host reports CSS pixels, the device decides
     // how many real ones that is, clamped so a huge window on a 3x display cannot ask for a
     // texture the GPU refuses to allocate.
     const max = this.#surface.device.limits.maxTextureDimension2D
     const width = Math.max(1, Math.min(max, Math.round(viewport.width * dpr)))
     const height = Math.max(1, Math.min(max, Math.round(viewport.height * dpr)))
-    if (this.#canvas.width === width && this.#canvas.height === height) return
-    this.#canvas.width = width
-    this.#canvas.height = height
+    // Both surfaces, always to the same size: they are stacked exactly on top of each other,
+    // and a half pixel of disagreement between them would put every handle off its box.
+    for (const canvas of [this.#canvas, this.#overlayCanvas]) {
+      if (canvas.width === width && canvas.height === height) continue
+      canvas.width = width
+      canvas.height = height
+    }
   }
 
   render(view: ViewState): void {
@@ -109,10 +119,12 @@ class WebGPURenderer implements Renderer {
       this.#viewport,
       view.marquee,
       view.editing,
+      view.dropPreview,
     )
 
     const encoder = device.createCommandEncoder()
-    const pass = encoder.beginRenderPass({
+    const scene = encoder.beginRenderPass({
+      label: 'document',
       colorAttachments: [
         {
           view: context.getCurrentTexture().createView(),
@@ -129,26 +141,43 @@ class WebGPURenderer implements Renderer {
     const shapes = this.#shapes.buffer
     const clips = this.#clips.bindGroup
     if (shapes && clips && this.#shapes.count > 0) {
-      pass.setPipeline(this.#shapePipeline)
-      pass.setBindGroup(0, this.#worldToClip.bindGroup)
-      pass.setBindGroup(1, clips)
-      pass.setBindGroup(2, this.#atlas.bindGroup)
-      pass.setVertexBuffer(0, shapes)
+      scene.setPipeline(this.#shapePipeline)
+      scene.setBindGroup(0, this.#worldToClip.bindGroup)
+      scene.setBindGroup(1, clips)
+      scene.setBindGroup(2, this.#atlas.bindGroup)
+      scene.setVertexBuffer(0, shapes)
       // Four corners, one instance per shape and one per glyph. The whole document, text
       // included, in a single call.
-      pass.draw(4, this.#shapes.count)
+      scene.draw(4, this.#shapes.count)
     }
+    scene.end()
 
-    // Second, so it lands on top. There is no depth buffer to sort them, and none is wanted.
+    /*
+     * The overlay, on its own surface above the component layer.
+     *
+     * Run even with nothing to draw, because the clear is the point: leaving the pass out
+     * would leave the previous frame's handles on screen after the selection was dropped.
+     */
+    const overlayPass = encoder.beginRenderPass({
+      label: 'overlay',
+      colorAttachments: [
+        {
+          view: this.#surface.overlay.getCurrentTexture().createView(),
+          loadOp: 'clear',
+          storeOp: 'store',
+          clearValue: NOTHING,
+        },
+      ],
+    })
+
     const overlay = this.#overlay.buffer
     if (overlay && this.#overlay.count > 0) {
-      pass.setPipeline(this.#overlayPipeline)
-      pass.setBindGroup(0, this.#pixelsToClip.bindGroup)
-      pass.setVertexBuffer(0, overlay)
-      pass.draw(4, this.#overlay.count)
+      overlayPass.setPipeline(this.#overlayPipeline)
+      overlayPass.setBindGroup(0, this.#pixelsToClip.bindGroup)
+      overlayPass.setVertexBuffer(0, overlay)
+      overlayPass.draw(4, this.#overlay.count)
     }
-
-    pass.end()
+    overlayPass.end()
 
     device.queue.submit([encoder.finish()])
   }
@@ -184,9 +213,16 @@ export async function createWebGPURenderer(
   // needs no device at all. Awaiting them in turn would add the whole download to the time
   // before the first frame, for no reason beyond the order the lines happened to be written.
   const pending = loadGlyphAtlas()
-  const surface = await createGPUSurface(init.canvas)
+  const surface = await createGPUSurface(init.canvas, init.overlayCanvas)
   if (options.onLost) onDeviceLost(surface.device, options.onLost)
   // Still awaited before the renderer exists, so the first frame already has its glyphs. A
   // placeholder texture swapped in later would flash the document in blank boxes.
-  return new WebGPURenderer(surface, init.canvas, init.document, await pending, init.layouts)
+  return new WebGPURenderer(
+    surface,
+    init.canvas,
+    init.overlayCanvas,
+    init.document,
+    await pending,
+    init.layouts,
+  )
 }

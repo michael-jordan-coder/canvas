@@ -10,9 +10,10 @@ import {
 } from './math.js'
 import {
   canHaveChildren,
+  hasBounds,
   isPainted,
+  type BoxedNode,
   type NodeId,
-  type PaintedNode,
   type SceneNode,
 } from './node.js'
 import { strokesOutset } from './paint.js'
@@ -34,23 +35,28 @@ import {
  * the outline itself, which is precise and unpleasant, and nothing here needs that yet.
  */
 export function containsPoint(node: SceneNode, point: Vec2): boolean {
-  if (!isPainted(node)) return false
+  if (!hasBounds(node)) return false
   // A text node carries strokes because every painted node does, but nothing draws them yet.
   // Growing its clickable area for a stroke that is not on screen would break the one rule
   // this file exists to keep: you can click exactly what you can see. A hidden stroke is
-  // dropped by `strokesOutset` for that same reason.
-  return withinShape(node, point, node.type === 'text' ? 0 : strokesOutset(node.strokes))
+  // dropped by `strokesOutset` for that same reason. A component node has no strokes at all:
+  // what it looks like belongs to the React component, and its box is exactly its bounds.
+  const outset = isPainted(node) && node.type !== 'text' ? strokesOutset(node.strokes) : 0
+  return withinShape(node, point, outset)
 }
 
 const SQUARE_CORNERS = uniformCornerRadii()
 
-/** Ellipses have no corner, and a text node's box is its layout bounds, square cornered. */
-function cornerRadiiOf(node: PaintedNode): CornerRadii {
+/**
+ * Ellipses have no corner, a text node's box is its layout bounds, and a component's box is
+ * the rectangle its DOM mount occupies. All three are square cornered here.
+ */
+function cornerRadiiOf(node: BoxedNode): CornerRadii {
   return node.type === 'frame' || node.type === 'rectangle' ? node.cornerRadii : SQUARE_CORNERS
 }
 
 function withinShape(node: SceneNode, point: Vec2, outset: number): boolean {
-  if (!isPainted(node)) return false
+  if (!hasBounds(node)) return false
 
   const half = { x: node.size.width / 2, y: node.size.height / 2 }
   if (half.x <= 0 || half.y <= 0) return false

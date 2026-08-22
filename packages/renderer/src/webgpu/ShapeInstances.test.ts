@@ -3,6 +3,7 @@ import {
   SceneDocument,
   createEllipse,
   createFrame,
+  createComponent,
   createRectangle,
   createText,
   fromHex,
@@ -979,5 +980,52 @@ describe('a stack of paints', () => {
     expect([at(2, FIELD.red), at(3, FIELD.red)]).toEqual([1, 1])
     expect(at(0, FIELD.alpha)).toBeCloseTo(0.5, 6)
     expect(at(2, FIELD.alpha)).toBe(1)
+  })
+})
+
+/**
+ * The one rule the DOM layer depends on: a component node is mounted by React, so the GPU
+ * must never draw a stand-in for it. If the packer ever emitted an instance here, the canvas
+ * would paint a box behind the real component and the two would drift apart at the first
+ * prop change, which is exactly the failure mode this whole design exists to avoid.
+ */
+describe('component nodes never reach the GPU', () => {
+  it('packs nothing for a component, whatever its size', () => {
+    const world = scene()
+    const stub = createStubDevice()
+    const instances = build(stub)
+    instances.sync(world.document, camera, viewport)
+    const before = instances.count
+
+    world.document.insert(
+      createComponent({
+        component: 'button',
+        transform: translation(20, 20),
+        size: { width: 96, height: 32 },
+      }),
+      world.frame.id,
+    )
+    instances.sync(world.document, camera, viewport)
+
+    expect(instances.count).toBe(before)
+    // Not culled either: it was never a candidate, so it costs nothing to skip.
+    expect(instances.culled).toBe(0)
+  })
+
+  it('leaves the packing of the nodes around it untouched', () => {
+    const world = scene()
+    const stub = createStubDevice()
+    const instances = build(stub)
+    world.document.insert(
+      createComponent({ component: 'input', size: { width: 200, height: 32 } }),
+      world.frame.id,
+    )
+    instances.sync(world.document, camera, viewport)
+
+    const read = (index: number, slot: number): number =>
+      instanceAt(stub.written(), STRIDE, index, slot)
+    expect(instances.count).toBe(3)
+    expect(read(1, FIELD.width)).toBe(140)
+    expect(read(2, FIELD.kind)).toBe(1)
   })
 })

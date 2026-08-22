@@ -2,7 +2,18 @@ import { WebGPUUnavailableError } from '../Renderer.js'
 
 export interface GPUSurface {
   device: GPUDevice
+  /** The document's surface. Opaque, and the bottom of the three layers on screen. */
   context: GPUCanvasContext
+  /**
+   * The selection overlay's surface. Transparent, and the top of the three.
+   *
+   * A second canvas rather than a second pass on the first one, because the DOM layer that
+   * mounts React components sits between them. The document has to be under those components
+   * (a frame's fill is behind what it contains) and the outline and handles have to be over
+   * them (a selected component still shows its own box), and one surface cannot be in two
+   * places at once.
+   */
+  overlay: GPUCanvasContext
   format: GPUTextureFormat
 }
 
@@ -30,7 +41,10 @@ const configuredBy = new WeakMap<GPUCanvasContext, GPUDevice>()
  *
  * A laptop on battery with a blocklisted driver fails at the second, not the first.
  */
-export async function createGPUSurface(canvas: HTMLCanvasElement): Promise<GPUSurface> {
+export async function createGPUSurface(
+  canvas: HTMLCanvasElement,
+  overlayCanvas: HTMLCanvasElement,
+): Promise<GPUSurface> {
   if (!navigator.gpu) {
     throw new WebGPUUnavailableError('This browser does not support WebGPU.')
   }
@@ -42,25 +56,40 @@ export async function createGPUSurface(canvas: HTMLCanvasElement): Promise<GPUSu
 
   const device = await adapter.requestDevice()
 
-  const context = canvas.getContext('webgpu')
-  if (!context) {
-    throw new WebGPUUnavailableError('The canvas did not return a WebGPU context.')
-  }
-
   // The preferred format is bgra8unorm on Apple silicon and rgba8unorm elsewhere. Asking
   // for the wrong one still works but costs a conversion on every present.
   const format = navigator.gpu.getPreferredCanvasFormat()
 
-  context.configure({
-    device,
-    format,
-    // The canvas covers its whole area and nothing shows through it, so the compositor can
-    // skip blending the page behind.
-    alphaMode: 'opaque',
-  })
-  configuredBy.set(context, device)
+  // The document's surface covers its whole area and nothing shows through it, so the
+  // compositor can skip blending the page behind it.
+  const context = configure(device, canvas, format, 'opaque')
+  /*
+   * The overlay's surface is nearly all transparent, so it has to be composited over what is
+   * beneath it: the React components, and the document below them.
+   *
+   * Premultiplied is what the pass already produces. The overlay pipeline blends with
+   * `src-alpha / one-minus-src-alpha` on colour and `one / one-minus-src-alpha` on alpha, so
+   * against a cleared, fully transparent target the result is `rgb * a` with alpha `a`, which
+   * is premultiplied by definition. No shader and no blend state changes for the split.
+   */
+  const overlay = configure(device, overlayCanvas, format, 'premultiplied')
 
-  return { device, context, format }
+  return { device, context, overlay, format }
+}
+
+function configure(
+  device: GPUDevice,
+  canvas: HTMLCanvasElement,
+  format: GPUTextureFormat,
+  alphaMode: GPUCanvasAlphaMode,
+): GPUCanvasContext {
+  const context = canvas.getContext('webgpu')
+  if (!context) {
+    throw new WebGPUUnavailableError('The canvas did not return a WebGPU context.')
+  }
+  context.configure({ device, format, alphaMode })
+  configuredBy.set(context, device)
+  return context
 }
 
 /**
@@ -70,9 +99,10 @@ export async function createGPUSurface(canvas: HTMLCanvasElement): Promise<GPUSu
  * canvas state, so it is only unconfigured while this device is still the one holding it.
  */
 export function releaseGPUSurface(surface: GPUSurface): void {
-  if (configuredBy.get(surface.context) === surface.device) {
-    configuredBy.delete(surface.context)
-    surface.context.unconfigure()
+  for (const context of [surface.context, surface.overlay]) {
+    if (configuredBy.get(context) !== surface.device) continue
+    configuredBy.delete(context)
+    context.unconfigure()
   }
   surface.device.destroy()
 }

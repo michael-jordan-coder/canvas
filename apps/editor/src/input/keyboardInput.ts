@@ -10,7 +10,7 @@ import {
 import { alignSelection, type AlignCommand } from '../state/align'
 import { relayout, toggleAutoLayout, wrapInAutoLayout } from '../state/autoLayout'
 import { reorderSelection } from '../state/order'
-import type { ToolId } from '../state/uiStore'
+import type { EditorMode, ToolId } from '../state/uiStore'
 import { isEditingText } from './isEditingText'
 
 export interface KeyboardInputOptions {
@@ -18,6 +18,8 @@ export interface KeyboardInputOptions {
   getSelection: () => readonly NodeId[]
   setSelection: (ids: readonly NodeId[]) => void
   setTool: (tool: ToolId) => void
+  /** Design or preview. Every shortcut here edits the document, so preview has none of them. */
+  getMode: () => EditorMode
 }
 
 const NUDGE_STEP = 1
@@ -132,6 +134,12 @@ export function createKeyboardInput(options: KeyboardInputOptions): () => void {
 
   const onKeyDown = (event: KeyboardEvent): void => {
     if (isEditingText(event.target)) return
+    /*
+     * Nothing in here runs in preview mode. Every one of these shortcuts edits the document,
+     * and a Backspace meant for the input someone is typing into on the canvas must not
+     * delete the component that input is part of.
+     */
+    if (options.getMode() === 'preview') return
 
     const accel = event.metaKey || event.ctrlKey
 

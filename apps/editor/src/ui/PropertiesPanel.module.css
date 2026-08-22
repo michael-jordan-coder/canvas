@@ -286,3 +286,18 @@
   flex: none;
   color: var(--text-secondary);
 }
+
+/*
+ * Where a component comes from in the codebase. Quiet and monospaced, because it is a path
+ * to be read rather than a label, and it is the one line in this panel that talks about code.
+ */
+.source {
+  margin: 0;
+  padding: 0 var(--space-2);
+  color: var(--text-disabled);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

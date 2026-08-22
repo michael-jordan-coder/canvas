@@ -15,7 +15,7 @@ import {
   type NodeId,
   type SceneDocument,
   type SceneNode,
-  type TextMeasurer,
+  type NodeMeasurer,
 } from '@figma-canvas/document'
 
 /**
@@ -29,15 +29,17 @@ import {
  */
 
 /**
- * How the layout measures text, registered by `font.ts` once the cache and the metrics
- * exist. Registered rather than imported, because importing the font module drags in the
- * atlas fetch and the live scene, and everything here has to work against any document a
- * test hands it. Until registration, text keeps its height, the same answer the font module
- * gives before the font arrives.
+ * How the layout measures the two node kinds it cannot size itself, text and a mounted
+ * component, registered by `state/measure.ts` once both halves exist.
+ *
+ * Registered rather than imported, because importing either half drags in the atlas fetch,
+ * the live scene and a React root, and everything here has to work against any document a
+ * test hands it. Until registration, a measured node keeps the size it has, which is the
+ * same answer the real measurer gives before the font arrives or before there is a DOM.
  */
-let measurer: TextMeasurer = { measure: () => null }
+let measurer: NodeMeasurer = { measure: () => null }
 
-export function setTextMeasurer(next: TextMeasurer): void {
+export function setNodeMeasurer(next: NodeMeasurer): void {
   measurer = next
 }
 

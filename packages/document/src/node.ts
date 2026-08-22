@@ -25,7 +25,7 @@ export function reserveNodeIds(ids: Iterable<NodeId>): void {
   }
 }
 
-export type NodeType = 'page' | 'frame' | 'rectangle' | 'ellipse' | 'text'
+export type NodeType = 'page' | 'frame' | 'rectangle' | 'ellipse' | 'text' | 'component'
 
 export type LayoutDirection = 'horizontal' | 'vertical'
 /** `space-between` is meaningful on the main axis only; the cross axis has no run to spread. */
@@ -139,12 +139,68 @@ export interface TextNode extends BaseNode {
   strokes: Stroke[]
 }
 
-export type SceneNode = PageNode | FrameNode | RectangleNode | EllipseNode | TextNode
+/**
+ * A value a component prop can hold.
+ *
+ * Deliberately the three JSON scalars and nothing else. The document is serialized, undone
+ * and redone by cloning, so a prop that held a function or a React element would be a
+ * reference the history could not copy and the save format could not write. Anything richer
+ * belongs in the registry, which is where the React side of a component lives.
+ */
+export type ComponentPropValue = string | number | boolean
 
-/** Nodes that paint something. Excludes the page, which is only a container. */
+/**
+ * An instance of a real React component, as far as the scene model is concerned.
+ *
+ * `component` is a registry key and `props` is a bag of scalars, and that is the whole of
+ * what this package knows: it has no DOM and no React, so it cannot hold a component type
+ * and must not try. The editor's registry turns the key into something React can mount, and
+ * the DOM layer mounts it. Nothing here or in the renderer ever draws one, which is the
+ * point: a component node contributes no instances to the shape buffer, so what you see is
+ * the React component itself rather than a canvas impression of it.
+ *
+ * It carries no fills or strokes for the same reason. What it looks like is the component's
+ * business, and offering paint here would be offering a setting nothing reads.
+ */
+export interface ComponentNode extends BaseNode {
+  readonly type: 'component'
+  /** Key into the editor's component registry. Unknown keys load and render a placeholder. */
+  component: string
+  props: Record<string, ComponentPropValue>
+  /**
+   * True while `size` is the measured size of what the component renders, which is how a
+   * node starts. Dragging a resize handle turns it off, exactly as it turns off a text
+   * node's `autoWidth`, and from then on the box is the setting and the component fills it.
+   */
+  autoSize: boolean
+}
+
+export type SceneNode =
+  | PageNode
+  | FrameNode
+  | RectangleNode
+  | EllipseNode
+  | TextNode
+  | ComponentNode
+
+/** Nodes that paint something on the GPU. Excludes the page and every component instance. */
 export type PaintedNode = FrameNode | RectangleNode | EllipseNode | TextNode
 
+/**
+ * Nodes that occupy a box: everything except the page, which is a container with no extent
+ * of its own.
+ *
+ * Separate from `isPainted` because a component node has bounds without having paint. Hit
+ * testing, the selection box and auto layout all ask about the box; only the packer asks
+ * about the paint.
+ */
+export type BoxedNode = Exclude<SceneNode, PageNode>
+
 export function isPainted(node: SceneNode): node is PaintedNode {
+  return node.type !== 'page' && node.type !== 'component'
+}
+
+export function hasBounds(node: SceneNode): node is BoxedNode {
   return node.type !== 'page'
 }
 
@@ -206,6 +262,24 @@ export function createText(init: Partial<Omit<TextNode, 'id' | 'type'>> = {}): T
     autoWidth: true,
     fills: [],
     strokes: [],
+    ...init,
+  }
+}
+
+/**
+ * A component instance. `size` is filled in by whoever creates it, from the measurement of
+ * what the component actually renders, in the same transaction: `size` is a cache of the
+ * render exactly as a text node's is a cache of its text.
+ */
+export function createComponent(
+  init: Partial<Omit<ComponentNode, 'id' | 'type'>> = {},
+): ComponentNode {
+  return {
+    ...base('component', 'Component'),
+    type: 'component',
+    component: '',
+    props: {},
+    autoSize: true,
     ...init,
   }
 }
@@ -320,6 +394,18 @@ export function cloneNodeAs(node: SceneNode, id: NodeId): SceneNode {
         autoWidth: node.autoWidth,
         fills: node.fills.map(clonePaint),
         strokes: node.strokes.map(cloneStroke),
+      }
+    case 'component':
+      return {
+        ...shared,
+        id,
+        type: 'component',
+        component: node.component,
+        // Copied rather than shared, for the same reason `children` is: history hands these
+        // clones back to the live document, and a shared bag would let the next prop edit
+        // rewrite the step that came before it.
+        props: { ...node.props },
+        autoSize: node.autoSize,
       }
   }
 }

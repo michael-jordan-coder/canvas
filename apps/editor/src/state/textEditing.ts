@@ -1,6 +1,6 @@
 import type { NodeId } from '@figma-canvas/document'
 import { scene } from './scene'
-import { useUI, type ToolId } from './uiStore'
+import { useUI, type EditorMode, type ToolId } from './uiStore'
 
 /**
  * The rules of an inline editing session: what a typing burst is, and how a session ends.
@@ -93,4 +93,16 @@ export function endEditing(): void {
 export function selectTool(tool: ToolId): void {
   endEditing()
   useUI.getState().setTool(tool)
+}
+
+/**
+ * Switches between design and preview, ending any session first.
+ *
+ * Leaving preview mode with an open editing session would leave a caret blinking over a
+ * component nobody can type into, and the same exit a tool change takes is the one that
+ * closes the typing burst and discards an empty node.
+ */
+export function selectMode(mode: EditorMode): void {
+  endEditing()
+  useUI.getState().setMode(mode)
 }

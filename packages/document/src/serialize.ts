@@ -6,6 +6,7 @@ import {
   createNodeId,
   type AxisSizing,
   type ChildSizing,
+  type ComponentPropValue,
   type FrameLayout,
   type LayoutAlign,
   type LayoutChild,
@@ -47,8 +48,14 @@ import { uniformCornerRadii, type CornerRadii } from './sdf.js'
  * are optional in the model with absence meaning the default, so a paint written before
  * they existed and one that simply has neither are the same paint, which is what makes the
  * gate unnecessary in both directions.
+ *
+ * 6 added the component node, which is the text node's situation exactly: a version 5 file
+ * cannot contain one and every field it does have is unchanged, so nothing migrates in that
+ * direction. The bump earns its keep in the other one, where a build from before components
+ * refuses a version 6 file by version rather than failing on
+ * `nodes[4].type "component" is not a node type` halfway through a load.
  */
-export const SCHEMA_VERSION = 5
+export const SCHEMA_VERSION = 6
 
 export interface SerializedDocument {
   kind: 'figma-canvas/document'
@@ -270,7 +277,39 @@ function parseLayoutChild(value: unknown, path: string): LayoutChild {
   }
 }
 
-const NODE_TYPES: readonly string[] = ['page', 'frame', 'rectangle', 'ellipse', 'text']
+const NODE_TYPES: readonly string[] = [
+  'page',
+  'frame',
+  'rectangle',
+  'ellipse',
+  'text',
+  'component',
+]
+
+/**
+ * A component's props, as the three JSON scalars the model allows and nothing else.
+ *
+ * Validated key by key rather than cast, like everything else in this file, because a saved
+ * prop reaches a real React component: a nested object where a string was expected would be
+ * handed straight to a component that has no reason to survive it. Nothing is dropped
+ * silently, so a prop of the wrong shape names its own path.
+ */
+function parseComponentProps(value: unknown, path: string): Record<string, ComponentPropValue> {
+  const raw = requireRecord(value, path)
+  const props: Record<string, ComponentPropValue> = {}
+  for (const [key, item] of Object.entries(raw)) {
+    if (typeof item === 'string' || typeof item === 'boolean') {
+      props[key] = item
+      continue
+    }
+    if (typeof item === 'number') {
+      props[key] = requireNumber(item, `${path}.${key}`)
+      continue
+    }
+    throw new InvalidDocumentError(`${path}.${key} is not a string, number or boolean`)
+  }
+  return props
+}
 
 function parseNode(value: unknown, path: string, version: number): SceneNode {
   const n = requireRecord(value, path)
@@ -340,6 +379,17 @@ function parseNode(value: unknown, path: string, version: number): SceneNode {
           version < 3 ? true : requireBoolean(n['autoWidth'], `${path}.autoWidth`),
         fills: parsePaints(n['fills'], `${path}.fills`),
         strokes: parseStrokes(n['strokes'], `${path}.strokes`),
+      }
+    case 'component':
+      return {
+        ...shared,
+        type: 'component',
+        // Deliberately not checked against the registry, which does not exist down here and
+        // is a different question anyway: a file naming a component this build no longer
+        // ships is a valid file the editor renders a placeholder for, not a corrupt one.
+        component: requireString(n['component'], `${path}.component`),
+        props: parseComponentProps(n['props'], `${path}.props`),
+        autoSize: requireBoolean(n['autoSize'], `${path}.autoSize`),
       }
   }
 }

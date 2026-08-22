@@ -20,13 +20,35 @@ import type { FrameLayout, FrameNode, NodeId, SceneNode, TextNode } from '../nod
  *   that a second pass would revise is a layout that disagrees with itself the next time it
  *   runs.
  *
- * Text cannot be measured here, having no DOM, so a measurer comes in from the editor the
- * same way font metrics do for text layout.
+ * Text cannot be measured here, having no DOM, and neither can a mounted React component, so
+ * a measurer comes in from the editor the same way font metrics do for text layout.
  */
 
-/** Editor supplied. Returns null while the font has not arrived; layout keeps the old height. */
-export interface TextMeasurer {
-  measure(node: TextNode, wrapWidth: number): Size | null
+/**
+ * Editor supplied, and the only way anything in here learns a size it cannot compute.
+ *
+ * Two kinds of node are measured rather than sized: text, whose height is however many lines
+ * the width produces, and a component instance, whose height is whatever its React component
+ * renders at that width. This package can do neither, having no DOM, so both come back
+ * through here.
+ *
+ * Returns null when the measurement is not available yet, which is the font not having
+ * arrived or there being no DOM at all. Layout then keeps the height the node already has,
+ * which is stale rather than wrong, and the editor remeasures once it can.
+ */
+export interface NodeMeasurer {
+  measure(node: SceneNode, width: number): Size | null
+}
+
+/**
+ * Whether a node's height follows from the width it is given.
+ *
+ * Such a node is never a fill height child: its height is an answer, so stretching it to a
+ * number would be overwriting that answer with the frame's own. It is also the set of nodes
+ * that go back through the measurer when a width is forced on them.
+ */
+function measuresAtWidth(node: SceneNode): boolean {
+  return node.type === 'text' || (node.type === 'component' && node.autoSize)
 }
 
 export interface LayoutPatch {
@@ -96,7 +118,7 @@ export function layoutRootsFor(doc: SceneDocument, dirty: Iterable<NodeId>): Nod
 export function computeLayout(
   doc: SceneDocument,
   frameId: NodeId,
-  measurer: TextMeasurer,
+  measurer: NodeMeasurer,
   exclude?: ReadonlySet<NodeId>,
 ): LayoutPatch[] {
   const frame = doc.getNode(frameId)
@@ -254,10 +276,10 @@ interface Solved {
 class Solver {
   readonly patches: LayoutPatch[] = []
   readonly #doc: SceneDocument
-  readonly #measurer: TextMeasurer
+  readonly #measurer: NodeMeasurer
   readonly #exclude: ReadonlySet<NodeId>
 
-  constructor(doc: SceneDocument, measurer: TextMeasurer, exclude: ReadonlySet<NodeId>) {
+  constructor(doc: SceneDocument, measurer: NodeMeasurer, exclude: ReadonlySet<NodeId>) {
     this.#doc = doc
     this.#measurer = measurer
     this.#exclude = exclude
@@ -308,7 +330,7 @@ class Solver {
    */
   #resolveSize(node: SceneNode, forced: Forced): Size {
     if (isAutoLayoutFrame(node)) return this.#solve(node, forced).size
-    if (node.type === 'text' && forced.width !== undefined) {
+    if (forced.width !== undefined && measuresAtWidth(node)) {
       const measured = this.#measurer.measure(node, forced.width)
       return { width: forced.width, height: measured ? measured.height : node.size.height }
     }
@@ -364,9 +386,9 @@ class Solver {
       // fill its parent rather than silently losing fill sizing because of the sign.
       const plain = near(Math.abs(t.a), 1) && near(t.b, 0) && near(t.c, 0) && near(Math.abs(t.d), 1)
       const mode = node.layoutChild
-      // Text height is measured from the text, so it is never anyone's to fill.
+      // A measured height is an answer, not a slot, so it is never anyone's to fill.
       const fillWidth = plain && mode?.widthMode === 'fill'
-      const fillHeight = plain && mode?.heightMode === 'fill' && node.type !== 'text'
+      const fillHeight = plain && mode?.heightMode === 'fill' && !measuresAtWidth(node)
       return {
         node,
         plain,

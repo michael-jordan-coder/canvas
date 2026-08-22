@@ -15,6 +15,7 @@ import {
   type FrameNode,
   type LayoutAlign,
   type LayoutDirection,
+  type ComponentNode,
   type NodeId,
   type Paint,
   type PaintedNode,
@@ -35,6 +36,8 @@ import {
   updateFrameLayout,
   updateLayoutChild,
 } from '../state/autoLayout'
+import { setComponentAutoSize, updateComponentProps } from '../state/componentNodes'
+import { componentSpec } from '../components/registry'
 import { flipNodes } from '../state/flip'
 import { updateText } from '../state/font'
 import { setNodesAngle } from '../state/rotate'
@@ -60,6 +63,8 @@ import {
 } from './icons'
 import { NumberField } from './NumberField'
 import { SegmentedField } from './SegmentedField'
+import { SelectField } from './SelectField'
+import { TextField } from './TextField'
 import styles from './PropertiesPanel.module.css'
 
 export function PropertiesPanel(): ReactElement {
@@ -279,7 +284,15 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
             */}
           <NumberField
             label="W"
-            readOnly={(node.type === 'text' && node.autoWidth) || hugs('width') || fills('width')}
+            readOnly={
+              (node.type === 'text' && node.autoWidth) ||
+              // An auto sized component reports its measured box for the same reason a hug
+              // axis does: the number is an answer, and a field that set it would be
+              // overwritten by the next measurement.
+              (node.type === 'component' && node.autoSize) ||
+              hugs('width') ||
+              fills('width')
+            }
             value={node.size.width}
             onCommit={(width) =>
               node.type === 'text'
@@ -289,7 +302,12 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
           />
           <NumberField
             label="H"
-            readOnly={node.type === 'text' || hugs('height') || fills('height')}
+            readOnly={
+              node.type === 'text' ||
+              (node.type === 'component' && node.autoSize) ||
+              hugs('height') ||
+              fills('height')
+            }
             value={node.size.height}
             onCommit={(height) =>
               setSize({ ...node.size, height: Math.max(MIN_NODE_SIZE, height) })
@@ -335,6 +353,7 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
       {(node.type === 'frame' || inAutoLayout) && (
         <AutoLayoutSection node={node} inAutoLayout={inAutoLayout} />
       )}
+      {node.type === 'component' && <ComponentSection node={node} />}
       {node.type === 'text' && <TextSection node={node} />}
       {isPainted(node) && <FillSection node={node} />}
       {/*
@@ -614,6 +633,105 @@ function AutoLayoutSection({
 }
 
 /** Below 1 the text is a smudge, and the field's own floor keeps a typo from erasing it. */
+/**
+ * A component instance: which component it is, and everything it can be told.
+ *
+ * The fields are built from the registry rather than written out here, so a component that
+ * gains a prop gains a row with no change to this file. Every commit goes through
+ * `updateComponentProps`, which measures the component at its new props and writes the size
+ * in the same transaction, which is what keeps the selection box around a longer label.
+ */
+function ComponentSection({ node }: { node: ComponentNode }): ReactElement {
+  const spec = componentSpec(node.component)
+
+  if (!spec) {
+    return (
+      <section className={styles.section}>
+        <h3 className={styles.title}>Component</h3>
+        <p className={styles.empty}>
+          This file was saved with a component called &ldquo;{node.component}&rdquo;, which this
+          build does not have.
+        </p>
+      </section>
+    )
+  }
+
+  const set = (key: string, value: string | number | boolean): void => {
+    updateComponentProps(scene, node, { [key]: value })
+  }
+
+  return (
+    <section className={styles.section}>
+      <h3 className={styles.title}>{spec.name}</h3>
+      {/* The import a generated file would write. Read only, and the reason these are worth
+          calling components rather than widgets. */}
+      <p className={styles.source}>{spec.importPath}</p>
+
+      {spec.props.map((prop) => {
+        const value = node.props[prop.key] ?? prop.default
+        if (prop.kind === 'boolean') {
+          return (
+            <label key={prop.key} className={styles.toggle}>
+              <input
+                type="checkbox"
+                className={styles.checkbox}
+                checked={typeof value === 'boolean' ? value : false}
+                onChange={(event) => set(prop.key, event.target.checked)}
+              />
+              {prop.label}
+            </label>
+          )
+        }
+        if (prop.kind === 'select') {
+          return (
+            <SelectField
+              key={prop.key}
+              label={prop.label}
+              value={String(value)}
+              options={prop.options ?? []}
+              onChange={(next) => set(prop.key, next)}
+            />
+          )
+        }
+        if (prop.kind === 'number') {
+          return (
+            <NumberField
+              key={prop.key}
+              wide
+              label={prop.label}
+              value={typeof value === 'number' ? value : 0}
+              onCommit={(next) => set(prop.key, next)}
+            />
+          )
+        }
+        return (
+          <TextField
+            key={prop.key}
+            label={prop.label}
+            value={String(value)}
+            onCommit={(next) => set(prop.key, next)}
+          />
+        )
+      })}
+
+      {/*
+        * Dragging a handle sets this, and this is how it comes back off, exactly as Auto
+        * width does for a text box. Without it the resize would be a one way door out of a
+        * box that keeps up with what the component renders.
+        */}
+      <label className={styles.toggle}>
+        <input
+          type="checkbox"
+          className={styles.checkbox}
+          checked={node.autoSize}
+          onChange={(event) => setComponentAutoSize(scene, node, event.target.checked)}
+        />
+        Auto size
+      </label>
+    </section>
+  )
+}
+
 const MIN_FONT_SIZE = 1
 
 /** Setting a width is what makes a box fixed width, the same as dragging its edge. */

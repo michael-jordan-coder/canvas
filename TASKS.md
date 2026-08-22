@@ -308,6 +308,75 @@ it is UI work, which is what took them out of scope rather than any problem with
       than masked by it, so a translucent fill shows its own shadow through. Needs a stencil or
       the caster's coverage at the shadow's pixel, neither of which exists in one pass.
 
+## React components on the canvas
+
+Real React components, mounted through React DOM, placed and edited on the WebGPU canvas. The
+first milestone has shipped: a Button can be dragged in from the panel, stays aligned through a
+pan and a zoom, is selected and moved in design mode, has its label and variant edited from the
+properties panel, is interactive in preview mode, and comes back after a reload.
+
+Document (`document`)
+- [x] `ComponentNode`: a registry key, a bag of scalar props, and `autoSize`. No fills, no
+      strokes: what it looks like belongs to the component. `packages/document/src/node.ts`
+- [x] `isPainted` split from a new `hasBounds`, which is what lets a component be hit tested,
+      boxed and laid out while packing zero instances. `packages/document/src/node.ts`,
+      `packages/document/src/hit.ts`
+- [x] `SCHEMA_VERSION` 6. Props validated key by key; an unknown component key is a valid file,
+      not an error. `packages/document/src/serialize.ts`
+- [x] `TextMeasurer` generalised to `NodeMeasurer`, so a fill width component is re-measured at
+      the width the layout gives it, exactly as text is.
+      `packages/document/src/layout/autoLayout.ts`
+
+Renderer (`renderer`)
+- [x] A second, transparent surface for the overlay pass, so the component layer can sit
+      between the document and the selection outline. No shader or blend state changes: the
+      overlay pipeline already produces premultiplied output.
+      `packages/renderer/src/webgpu/device.ts`, `WebGPURenderer.ts`
+- [x] `ViewState.dropPreview`, drawn by the overlay while a component is dragged onto the
+      canvas. `packages/renderer/src/webgpu/OverlayInstances.ts`
+- [x] A test pinning that a component node packs no instances and disturbs nothing around it.
+      `packages/renderer/src/webgpu/ShapeInstances.test.ts`
+
+Editor (`editor`)
+- [x] The camera moved out of a ref in `CanvasHost` into `state/viewport.ts`, so both layers
+      read the same object rather than two copies that are usually equal.
+- [x] The registry: Button, Input and Card, each with its import path, export name, editable
+      props with defaults, and a render adapter that coerces the document's scalars.
+      `apps/editor/src/components/registry.tsx`
+- [x] The component layer: one element per artboard, one shadow root per component, camera
+      applied imperatively as a CSS matrix, artboards outside the viewport unmounted.
+      `apps/editor/src/canvas/ComponentLayer.tsx`
+- [x] Synchronous offscreen measurement, cached, so `size` is written in the same transaction
+      as the props that changed it. `apps/editor/src/components/measure.ts`
+- [x] Native drag and drop from the panel, with a semantic insert: a point in a plain frame,
+      an index in an auto layout one. `apps/editor/src/input/componentDrop.ts`,
+      `apps/editor/src/state/componentNodes.ts`
+- [x] Design and preview modes, switched from the toolbar. Preview hands the pointer to the
+      components and silences the keyboard and clipboard shortcuts, which `isEditingText`
+      cannot do for events retargeted out of a shadow root.
+- [x] A Component section in the properties panel, built from the registry, plus an Auto size
+      toggle that mirrors a text box's Auto width. New `TextField` and `SelectField`.
+- [x] Only the adopted renderer may report a lost device, and the overlay surface hides itself
+      when one is reported: a lost surface presents opaque and would take the whole component
+      layer off screen with it. `apps/editor/src/canvas/CanvasHost.tsx`
+
+Next, in rough order of value:
+
+- [ ] Code generation. The registry already records the import path and export name, and the
+      document already holds the props, so a frame of components is a React tree waiting to be
+      printed. Absolutely positioned children need a layout story first; an auto layout frame
+      is a flex container and prints directly.
+- [ ] Components that hold other components. Today a Card is a leaf and an auto layout frame is
+      the container, which is honest but means a component cannot own its own slot. Needs a
+      children model in the registry and a way for the document's transforms to defer to the
+      component's own layout.
+- [ ] A drop preview that shows the slot when the target is an auto layout frame, rather than
+      the component's box under the pointer.
+- [ ] Per-instance state reset in preview, so a previewed flow can be started again without a
+      reload.
+- [ ] Interleaving a component with the shapes around it in z-order. Needs a surface per z-run,
+      which is the same machinery per-paint blend modes would want.
+
 ## Backlog
 
 Deferred from the panel polish pass:

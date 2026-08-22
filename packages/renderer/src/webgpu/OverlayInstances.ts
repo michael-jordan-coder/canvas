@@ -44,6 +44,13 @@ const TRANSPARENT = { r: 0, g: 0, b: 0, a: 0 }
 /** Faint enough to read what is underneath, which is the whole point of a rubber band. */
 const MARQUEE_FILL = { r: 10 / 255, g: 124 / 255, b: 1, a: 0.1 }
 /**
+ * A drop preview is answering "will it land here", so it reads heavier than a rubber band,
+ * which is answering "what am I sweeping over".
+ */
+const DROP_FILL = { r: 10 / 255, g: 124 / 255, b: 1, a: 0.18 }
+/** Matches the corner radius the component panel draws its own cards with. */
+const DROP_RADIUS = 4
+/**
  * The text selection highlight sits under the glyphs it covers, so it has to stay light
  * enough to read them through. Matching --accent-subtle in the editor's tokens.
  */
@@ -90,6 +97,7 @@ export class OverlayInstances {
     viewport: Viewport,
     marquee?: Rect | null,
     editing?: TextEditing | null,
+    dropPreview?: Rect | null,
   ): void {
     this.#count = 0
 
@@ -97,6 +105,12 @@ export class OverlayInstances {
       // Already in CSS pixels, so it needs no camera at all: the rubber band is drawn where
       // the pointer is, not where the world is. Never rotated, whatever is selected.
       this.#push(marquee, MARQUEE_FILL, ACCENT, OUTLINE_WIDTH, 0, 0)
+    }
+
+    if (dropPreview) {
+      // Also CSS pixels, and for the same reason: the caller has already put the pointer's
+      // world position through the camera to work out how big the component will be.
+      this.#push(dropPreview, DROP_FILL, ACCENT, OUTLINE_WIDTH, DROP_RADIUS, 0)
     }
 
     /*

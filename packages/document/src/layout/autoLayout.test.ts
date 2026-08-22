@@ -18,18 +18,26 @@ import {
   insertionIndex,
   layoutRootsFor,
   type LayoutPatch,
-  type TextMeasurer,
+  type NodeMeasurer,
 } from './autoLayout.js'
 
-/** A measurer that wraps to the given width at 20 units a line, 100 units of text per line. */
-const measurer: TextMeasurer = {
-  measure: (node, wrapWidth) => ({
-    width: wrapWidth,
-    height: 20 * Math.max(1, Math.ceil((node.characters.length * 10) / wrapWidth)),
-  }),
+/**
+ * A measurer that wraps to the given width at 20 units a line, 100 units of text per line.
+ *
+ * It answers for text and nothing else, which is also how the real one behaves for a node
+ * type it has no way to size: null means "keep what you have".
+ */
+const measurer: NodeMeasurer = {
+  measure: (node, wrapWidth) =>
+    node.type === 'text'
+      ? {
+          width: wrapWidth,
+          height: 20 * Math.max(1, Math.ceil((node.characters.length * 10) / wrapWidth)),
+        }
+      : null,
 }
 
-const unmeasured: TextMeasurer = { measure: () => null }
+const unmeasured: NodeMeasurer = { measure: () => null }
 
 function layout(overrides: Partial<FrameLayout> = {}): FrameLayout {
   return {
@@ -45,7 +53,7 @@ function patchFor(patches: LayoutPatch[], id: NodeId): LayoutPatch | undefined {
 }
 
 /** Applies and re-runs, asserting the second pass finds nothing left to do. */
-function settle(document: SceneDocument, frameId: NodeId, m: TextMeasurer = measurer): void {
+function settle(document: SceneDocument, frameId: NodeId, m: NodeMeasurer = measurer): void {
   applyLayout(document, computeLayout(document, frameId, m))
   expect(computeLayout(document, frameId, m)).toEqual([])
 }

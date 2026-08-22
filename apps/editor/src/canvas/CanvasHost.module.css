@@ -43,6 +43,32 @@
   cursor: grabbing;
 }
 
+/*
+ * The overlay surface: the selection outline, its handles, the marquee and the caret.
+ *
+ * Stacked above the component layer, which is itself above the canvas that draws the
+ * document. Transparent everywhere it has drawn nothing, and invisible to the pointer, so
+ * hit testing, cursors and drops all still reach the canvas underneath it.
+ */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/*
+ * A surface whose device is gone presents opaque rather than transparent, and this one is
+ * stacked above the React components: a lost device would take the whole component layer off
+ * screen with it, which reads as the components having been deleted rather than as the GPU
+ * having failed. It cannot draw anything once that has happened, so it stops covering.
+ */
+.overlay[data-failed='true'] {
+  display: none;
+}
+
 .error {
   position: absolute;
   inset: auto 0 0 0;

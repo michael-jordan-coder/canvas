@@ -1,6 +1,6 @@
 import { TextLayoutCache, type FontMetrics, type Size, type TextNode } from '@figma-canvas/document'
 import { loadFontMetrics } from '@figma-canvas/renderer'
-import { relayout, relayoutAll, setTextMeasurer } from './autoLayout'
+import { relayout, relayoutAll } from './autoLayout'
 import { scene } from './scene'
 
 let loaded: FontMetrics | null = null
@@ -18,21 +18,22 @@ let loaded: FontMetrics | null = null
  */
 export const textLayouts = new TextLayoutCache()
 
-/*
+/**
  * How auto layout measures a text child it is about to hand a width: through the shared
  * cache under the node's own id, so the layout the measurement builds is the one the
  * renderer packs and the caret reads a frame later.
+ *
+ * Exported rather than registered here, because there are now two kinds of node the layout
+ * cannot size and only one measurer slot. `state/measure.ts` is where the halves are joined.
  */
-setTextMeasurer({
-  measure: (node, wrapWidth) => {
-    const metrics = loaded
-    if (!metrics) return null
-    return textLayouts.measure(
-      { ...node, autoWidth: false, size: { ...node.size, width: wrapWidth } },
-      metrics,
-    )
-  },
-})
+export function measureTextNode(node: TextNode, wrapWidth: number): Size | null {
+  const metrics = loaded
+  if (!metrics) return null
+  return textLayouts.measure(
+    { ...node, autoWidth: false, size: { ...node.size, width: wrapWidth } },
+    metrics,
+  )
+}
 
 /**
  * The font the editor measures with, or null until it arrives.

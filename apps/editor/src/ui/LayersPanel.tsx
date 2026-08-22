@@ -5,6 +5,7 @@ import { scene, useChildren, useNode } from '../state/scene'
 import { useUI } from '../state/uiStore'
 import {
   ChevronIcon,
+  ComponentIcon,
   EllipseIcon,
   FrameIcon,
   HiddenIcon,
@@ -29,6 +30,7 @@ const ICONS: Record<NodeType, ComponentType<IconProps>> = {
   rectangle: RectangleIcon,
   ellipse: EllipseIcon,
   text: TextIcon,
+  component: ComponentIcon,
 }
 
 /**

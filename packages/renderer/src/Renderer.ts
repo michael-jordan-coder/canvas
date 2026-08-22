@@ -3,6 +3,12 @@ import type { Camera, Viewport } from './camera.js'
 
 export interface RendererInit {
   canvas: HTMLCanvasElement
+  /**
+   * The surface the selection overlay is drawn on, stacked above the component layer while
+   * `canvas` sits below it. Separate elements because the DOM between them is what a single
+   * surface could not be on both sides of.
+   */
+  overlayCanvas: HTMLCanvasElement
   document: SceneDocument
   /**
    * Where laid out text is kept, shared with the app rather than owned here.
@@ -47,6 +53,16 @@ export interface ViewState {
   marquee?: Rect | null
   /** The text node being edited, or null when nothing is. */
   editing?: TextEditing | null
+  /**
+   * Where a component dragged out of the component panel would land, in CSS pixels, or null
+   * when nothing is being dragged in.
+   *
+   * Drawn here rather than by the DOM layer that will eventually mount the component,
+   * because drag feedback is overlay furniture in exactly the sense the marquee and the
+   * handles are: it is measured in screen pixels, it is not in the document, and it has to
+   * sit above everything the canvas draws.
+   */
+  dropPreview?: Rect | null
 }
 
 /**

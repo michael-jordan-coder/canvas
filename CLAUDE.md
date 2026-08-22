@@ -4,6 +4,11 @@ A reverse engineering of Figma. The canvas is drawn with **WebGPU**, everything 
 **React**. That split is the whole point of the project, and it is the one rule that never bends:
 React never draws a shape, and the renderer never knows a component exists.
 
+There is now one thing on the canvas React does draw, and it is the exception that states the
+rule: a **component node** is a real React component, mounted through React DOM in a layer
+between two GPU surfaces. The renderer still does not know it exists, because a component node
+packs no instances at all. See "React components on the canvas" below.
+
 This repo sits next to `portfolio/` and `generative-ui/` inside `portfolio-projects/`, but it is a
 separate repo with its own remote. Nothing here is shared with them.
 
@@ -15,7 +20,7 @@ of transform updates during a drag. So the scene never lives in React state.
 ```
 packages/document   the scene. plain TypeScript. no DOM, no GPU, no React.
 packages/renderer   WebGPU. reads the document directly. no React.
-apps/editor         React panels, input handling, wiring.
+apps/editor         React panels, input handling, the component registry, wiring.
 ```
 
 The boundaries are real module boundaries in a pnpm workspace, so crossing one is an import error
@@ -110,7 +115,14 @@ onto itself or reverses it, and both are covered by tests.
 `packages/document/src/serialize.ts` is the only place untrusted input enters the app, so it
 validates by hand rather than trusting a cast, and every failure names the path that failed
 (`nodes[3].opacity is not a finite number`) instead of saying "invalid". `SCHEMA_VERSION` is
-written into every file and a future version is refused rather than half read.
+written into every file and a future version is refused rather than half read. It is at 6,
+which added the component node.
+
+A component's props are validated key by key like everything else, because a saved prop is
+handed to a real React component: a nested object where a string was expected would reach
+something that has no reason to survive it. A component **key** the registry does not know is
+deliberately not an error, though. That is a valid file this build cannot fully render, and
+dropping the node would silently edit someone's document on load.
 
 The saved shape is flat: a list of nodes, with structure carried by each node's `children`.
 
@@ -311,6 +323,13 @@ would have returned had it been callable there.
 - Text, as a node type, a pure layout, an MSDF atlas and an inline editor. It draws in the
   same instanced call as everything else. See the text section below.
 
+- **Real React components on the canvas.** A component node names a registry entry and carries
+  a bag of scalar props; the editor mounts the actual component through React DOM in a layer
+  between the document's GPU surface and the overlay's. It is dragged in from a component
+  panel, selected and moved with the same hit testing every other node uses, edited from the
+  properties panel, and it keeps its own React state through a pan, a zoom and a prop change.
+  The renderer packs **nothing** for it. See the section below.
+
 - Rotation. The transform was always a full affine, so the renderer needed no change at all: a
   turned node draws correctly the moment its matrix says so. What rotation actually cost was
   everything built on the assumption that a selection is upright.
@@ -458,10 +477,12 @@ node (fixed or fill per axis). Absence of `layout` is what "no auto layout" is; 
 `'none'` value, so old files need no field and one presence check answers every caller.
 
 **The engine is pure and lives in `packages/document/src/layout/autoLayout.ts`.** It reads
-the document and returns patches; it never writes. Like text layout it cannot measure text,
-so a `TextMeasurer` comes in from the editor, registered by `state/font.ts` through
-`setTextMeasurer` rather than imported, because importing the font module drags the atlas
-fetch and the live scene into every test that touches a command module.
+the document and returns patches; it never writes. There are two kinds of node it cannot size
+itself, text and a mounted component, and both come back through one `NodeMeasurer` registered
+by `state/measure.ts` through `setNodeMeasurer` rather than imported, because importing either
+half drags the atlas fetch, the live scene and a React root into every test that touches a
+command module. One slot and two halves is why neither half registers itself: whichever module
+was imported second would silently replace the first.
 
 Two properties everything downstream leans on:
 
@@ -510,6 +531,161 @@ new frame drawn 10 around its bounds (`wrapInAutoLayout`): hug on both axes, no 
 fill, and the wrapped nodes keep their world positions, so the padding infers to exactly
 that margin and the wrap is a regrouping rather than a rearrangement. One undo removes it
 entirely, old selection included.
+
+## React components on the canvas
+
+A **component node** is an instance of a real React component: `Button`, `Input` or `Card`
+today, whatever the registry holds tomorrow. It is the one thing on the canvas the GPU does
+not draw, and everything about it is arranged so that stays an exception rather than a crack.
+
+**The document holds a key and a bag of scalars, and nothing else.** `ComponentNode.component`
+is a registry key, `props` is `Record<string, string | number | boolean>`. `packages/document`
+has no DOM and no React and does not gain either: it cannot hold a component type, so it
+holds a name for one. Anything richer than a scalar could not be cloned by history, written
+by the save format, or sent over a wire to a collaborator, which is the same list of reasons.
+
+**A component node has bounds without having paint.** Those used to be one question, answered
+by `isPainted`, and the split into `isPainted` and `hasBounds` is what makes the whole feature
+work: the packer asks about paint and finds none, so a component contributes **zero
+instances**; hit testing, the selection box and auto layout ask about bounds and get the box.
+`ShapeInstances.test.ts` pins the zero, because the day the GPU starts drawing a stand-in is
+the day the canvas and the mounted component begin to disagree.
+
+### Three layers, and why the renderer has two surfaces
+
+```
+the document        a GPU surface, opaque
+the component layer React DOM, one shadow root per component
+the overlay         a GPU surface, transparent: outline, handles, marquee, caret
+```
+
+A frame's fill has to be **behind** the components it contains, and a selected component's
+outline and handles have to be **in front** of it. One surface cannot be on both sides of a
+piece of DOM, so `createGPUSurface` configures two canvases on one device and `render` runs
+its two passes into them separately. The overlay costs nothing extra to composite correctly:
+its pipeline already blends `src-alpha / one-minus-src-alpha` on colour and
+`one / one-minus-src-alpha` on alpha, which against a cleared transparent target produces
+exactly premultiplied output. No shader and no blend state changed for the split.
+
+The overlay pass runs even with nothing to draw, because the clear is the point: skipping it
+would leave the previous frame's handles on screen after the selection was dropped. And the
+overlay canvas hides itself when the device is lost, since a surface with no device presents
+opaque and would take the entire component layer off screen with it.
+
+### Alignment is by construction, not by agreement
+
+The layer's root carries `viewMatrix(camera, viewport)` as a CSS `matrix()`. That is the same
+function the world to clip matrix is built from, so the two layers cannot drift: they are not
+two implementations that agree, they are one matrix used twice. `Mat2D` and CSS `matrix()`
+have the same component order, so writing one into the other is a spelling rather than a
+conversion.
+
+Below the camera the nesting does the composing: one element per artboard carrying the frame's
+world transform, and one element per component carrying its own local transform. A frame full
+of components is therefore **one** transform update per pan, not one per component, and a
+rotated or scaled frame carries its components with it for free.
+
+The camera is written imperatively, into a custom property, from a subscription. A pan is a
+hundred and twenty of those a second and none of them is a React render. That is also why the
+camera moved out of a ref inside `CanvasHost` into `state/viewport.ts`: two layers reading the
+same numbers has to mean the same object, not two copies that are usually equal.
+
+### Isolation, and what it is not
+
+Each component gets a **shadow root**, with the library's stylesheet adopted into it (one
+constructed sheet, shared, rather than a `<style>` per mount). The editor's tokens, resets and
+panel styles stop at the boundary, and so does anything the components do to buttons and
+inputs. An iframe would isolate more and cost far more: a document, a stylesheet and a React
+root per artboard, and every pointer coordinate crossing a frame boundary. A shadow root is
+the amount of isolation this needs.
+
+The positioning stays outside the shadow root, in the editor's own CSS modules. Only what the
+component renders is inside it.
+
+### Design and preview, which is entirely about who gets the pointer
+
+In **design mode** the layer is `pointer-events: none`, so every click reaches the canvas and
+selection, dragging, resizing and hit testing are unchanged: a component is selected by the
+same `hitTest` a rectangle is, and its bounds and handles are drawn by the same overlay. In
+**preview mode** each mount takes its events back and behaves as it would in a real
+application, while the canvas keeps only pan and zoom. Nothing remounts across the switch, so
+the state inside a component survives it.
+
+Preview also silences the keyboard and clipboard shortcuts, and `isEditingText` cannot stand
+in for that: an event from inside a shadow root is **retargeted to the host element** on its
+way out, so a copy from a real input in a previewed component looks to a window listener like
+a copy from a plain div, and would copy the selected nodes instead.
+
+### Size is a cache of the render, measured synchronously
+
+A component node's `size` is what its component renders at, in exactly the sense a text node's
+`size` is its laid out text, and it carries the same rule: **whatever writes the props writes
+the size in the same transaction**. Hit testing and the selection box need the box and cannot
+measure a component, so a box that lagged its contents would be a component you can see in one
+place and click in another.
+
+Measurement renders the component into an offscreen root with the same shadow root and the
+same stylesheet, and reads the layout back through `flushSync`. A `ResizeObserver` on the real
+mount would be the obvious way and would arrive a frame late, outside the transaction that
+caused it: the measurement would either land in the next edit's undo step or open one of its
+own, and a session would accumulate history steps nobody performed. Measurements are cached by
+component, props and width, because auto layout measures a fill width child on every pass and a
+pass runs on every frame of a drag through the frame that holds it.
+
+`autoSize` is the text node's `autoWidth` again: true until a resize handle is dragged, and the
+panel's Auto size toggle is the way back, because nothing else returns a box to fitting its
+contents and a one way door is not a setting.
+
+A component that declares a `defaultWidth` in the registry is laid out **by** its width and its
+height follows; one that does not is measured at its natural size on both axes. Asking a button
+to be 400 wide is a resize, not a measurement.
+
+### The registry
+
+`apps/editor/src/components/registry.tsx` is the only place that knows a key names a React
+component. Each entry carries the import path and export name a code generator would need
+(nothing else can recover them later), the editable props with their kinds and defaults, and a
+**render adapter** rather than a component type. The adapter is the boundary where the
+document's scalars become typed props, and it is where a variant a saved file names but this
+build no longer has falls back, rather than inside a component that has no reason to expect
+one. An unknown key is a real answer, not an error: the layer draws a placeholder where the
+node sits, because losing it would silently edit someone's document on load.
+
+### Dropping, and why it is a semantic operation
+
+The panel starts a native HTML5 drag, and the canvas answers `dragover` and `drop`. Native,
+because the gesture crosses two elements that know nothing about each other and the platform
+already owns the drag image, the cursor and the escape key. What is being dragged is a module
+level value rather than something read back off the `DataTransfer`, because the platform hides
+a drag's data until it is dropped and the preview rectangle needs the size on every move. That
+preview is drawn by the **overlay pass**, since drag feedback is screen space furniture in
+exactly the sense the marquee is.
+
+Where it lands depends on what it lands on, and the difference is the point:
+
+- A plain frame is positional, so the component is centred on the drop point.
+- An **auto layout frame is not**. The point becomes an `insertionIndex` and the layout decides
+  the coordinates. Writing a transform there would be inventing a position the very next
+  layout pass overwrites, and it is the difference between a component that joins a stack and
+  one that merely lands on top of it.
+
+Dragging a component that is already in a stack reorders it through the same `applyFlow` a
+shape goes through, so none of this is a second code path.
+
+### Virtualization
+
+An artboard whose components are more than half a viewport outside the view is unmounted, on
+the same margin and for the same reason the instance buffer culls with one: unmounting at the
+exact edge would rebuild a whole React tree, and lose everything typed into it, on a pan that
+barely moved. The visible set is recomputed on camera and document changes and only ever
+replaced when it actually differs, so a drag that changes nothing re-renders nothing.
+
+### What this arrangement cannot do
+
+A component always paints above every GPU shape in its frame, whatever the z-order says,
+because the two live in different planes and only one of them is a compositing layer. Sending
+a component to the back of a frame reorders it for auto layout and for the layers panel, and
+does not put it behind a rectangle. Interleaving would need a surface per z-run.
 
 ## Rotation, and the one rule it added
 
@@ -572,3 +748,10 @@ A few things are worth knowing because the code looks finished but is not:
   negative scale needs the SDF and hit testing to agree on what an inside out shape is.
 - The accent colour is hardcoded in `OverlayInstances` because the renderer has no access to CSS.
   It needs passing in when the theme toggle exists, since dark uses a lighter blue.
+- A component node always paints above every GPU shape in its frame, whatever the z-order says.
+  The two live in different planes and only one of them is a compositing layer, so sending a
+  component to the back reorders it for auto layout and for the layers panel without putting it
+  behind a rectangle.
+- The drop preview drawn while a component is dragged in is the component's own box under the
+  pointer. Over an auto layout frame the component will actually land in a slot, so the preview
+  says what is coming rather than exactly where.

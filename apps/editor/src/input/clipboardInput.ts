@@ -9,12 +9,20 @@ import {
 } from '@figma-canvas/document'
 import { relayout } from '../state/autoLayout'
 import { duplicateNodes } from '../state/duplicate'
+import type { EditorMode } from '../state/uiStore'
 import { isEditingText } from './isEditingText'
 
 export interface ClipboardInputOptions {
   document: SceneDocument
   getSelection: () => readonly NodeId[]
   setSelection: (ids: readonly NodeId[]) => void
+  /**
+   * Design or preview. None of this runs in preview, and `isEditingText` cannot stand in for
+   * that: an event from inside a component's shadow root is retargeted to the host element on
+   * its way out, so a copy from a real input in a previewed component looks to a window
+   * listener like a copy from a plain div, and would copy the selected nodes instead.
+   */
+  getMode: () => EditorMode
 }
 
 /** Far enough to see that something happened, near enough to stay obviously related. */
@@ -54,13 +62,13 @@ export function createClipboardInput(options: ClipboardInputOptions): () => void
   }
 
   const onCopy = (event: ClipboardEvent): void => {
-    if (isEditingText(event.target)) return
+    if (options.getMode() === 'preview' || isEditingText(event.target)) return
     if (!copySelection(event)) return
     event.preventDefault()
   }
 
   const onCut = (event: ClipboardEvent): void => {
-    if (isEditingText(event.target)) return
+    if (options.getMode() === 'preview' || isEditingText(event.target)) return
     const subtree = copySelection(event)
     if (!subtree) return
     event.preventDefault()
@@ -77,7 +85,7 @@ export function createClipboardInput(options: ClipboardInputOptions): () => void
   }
 
   const onPaste = (event: ClipboardEvent): void => {
-    if (isEditingText(event.target)) return
+    if (options.getMode() === 'preview' || isEditingText(event.target)) return
     const text = event.clipboardData?.getData('text/plain')
     if (!text) return
 
@@ -98,7 +106,7 @@ export function createClipboardInput(options: ClipboardInputOptions): () => void
   }
 
   const onKeyDown = (event: KeyboardEvent): void => {
-    if (isEditingText(event.target)) return
+    if (options.getMode() === 'preview' || isEditingText(event.target)) return
     if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'd') return
 
     event.preventDefault()

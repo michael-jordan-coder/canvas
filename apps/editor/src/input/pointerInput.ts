@@ -14,6 +14,7 @@ import {
   isAutoLayoutFrame,
   containsPoint,
   nodesIn,
+  type ComponentNode,
   type FrameLayout,
   type LayoutChild,
   type Mat2D,
@@ -56,7 +57,7 @@ import {
   scaleFactors,
   type ResizeTarget,
 } from './resize'
-import type { ToolId } from '../state/uiStore'
+import type { EditorMode, ToolId } from '../state/uiStore'
 import { isEditingText } from './isEditingText'
 
 export interface PointerInputOptions {
@@ -66,6 +67,14 @@ export interface PointerInputOptions {
   setCamera: (camera: Camera) => void
   getTool: () => ToolId
   setTool: (tool: ToolId) => void
+  /**
+   * Design or preview.
+   *
+   * Preview mode hands every pointer event over: a click on a component belongs to the
+   * component, and a drag on empty canvas is a pan. Nothing here selects, moves, resizes or
+   * draws while it is on, because the document is being run rather than edited.
+   */
+  getMode: () => EditorMode
   getSelection: () => readonly NodeId[]
   setSelection: (ids: readonly NodeId[]) => void
   toggleInSelection: (id: NodeId) => void
@@ -136,6 +145,8 @@ interface DraggedNode {
 
 interface ResizedNode extends ResizeTarget {
   id: NodeId
+  /** Component only: whether its box was measured before the drag, for a cancel to give back. */
+  startAutoSize?: boolean
 }
 
 /**
@@ -156,6 +167,8 @@ interface LocalResize {
    */
   startLayout?: FrameLayout
   startLayoutChild?: LayoutChild
+  /** Component only, and the same idea: the drag takes `autoSize` away, a cancel gives it back. */
+  startAutoSize?: boolean
 }
 
 interface Drag {
@@ -316,8 +329,14 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     lastPointerScreen = screen
 
     // Middle button and held space both mean pan, whatever tool is active. Every canvas
-    // application agrees on this and muscle memory is stronger than the toolbar.
-    const wantsPan = options.getTool() === 'hand' || spaceHeld || event.button === 1
+    // application agrees on this and muscle memory is stronger than the toolbar. Preview
+    // mode is pan and nothing else: a click that reaches this listener in preview is a click
+    // that missed every component, and there is nothing here to select.
+    const wantsPan =
+      options.getMode() === 'preview' ||
+      options.getTool() === 'hand' ||
+      spaceHeld ||
+      event.button === 1
     if (wantsPan) {
       drag = {
         pointerId: event.pointerId,
@@ -469,6 +488,7 @@ export function createPointerInput(options: PointerInputOptions): () => void {
                 ),
                 startTransform: { ...node.transform },
                 startSize: { ...node.size },
+                startAutoSize: node.type === 'component' ? node.autoSize : undefined,
               },
             ]
           }),
@@ -560,6 +580,7 @@ export function createPointerInput(options: PointerInputOptions): () => void {
           ? { ...node.layout, padding: { ...node.layout.padding } }
           : undefined,
       startLayoutChild: node.layoutChild ? { ...node.layoutChild } : undefined,
+      startAutoSize: node.type === 'component' ? node.autoSize : undefined,
     }
   }
 
@@ -628,7 +649,8 @@ export function createPointerInput(options: PointerInputOptions): () => void {
    * whatever happens to be under the pointer.
    */
   const updateIdleCursor = (screen: Vec2): void => {
-    const wantsPan = options.getTool() === 'hand' || spaceHeld
+    const wantsPan =
+      options.getMode() === 'preview' || options.getTool() === 'hand' || spaceHeld
     if (wantsPan) {
       canvas.dataset['pan'] = 'grab'
       delete canvas.dataset['handle']
@@ -841,6 +863,25 @@ export function createPointerInput(options: PointerInputOptions): () => void {
       const { transform, size } = resizedInPlace(localResize, anchor, sx, sy)
       const node = document.getNode(localResize.id)
 
+      if (node?.type === 'component') {
+        /*
+         * Dragging a component's edge is what turns its box into a setting, the same door a
+         * text node goes through to become fixed width. Until then the box is the size the
+         * component measured to, and a drag that left `autoSize` on would be overwritten by
+         * the next measurement: the handle would spring back the moment a prop changed.
+         */
+        document.transact(() => {
+          document.update<ComponentNode>(localResize.id, {
+            transform,
+            size,
+            autoSize: false,
+            ...flowOverrides(node, handle),
+          })
+          relayout(document, [localResize.id])
+        })
+        return
+      }
+
       if (node?.type === 'text') {
         /*
          * Dragging a text node's edge is what turns it into a fixed width box. The width is
@@ -881,7 +922,13 @@ export function createPointerInput(options: PointerInputOptions): () => void {
         // it is mapped across per node. The factors themselves need no conversion.
         const anchorInParent = applyToPoint(target.parentInverse, anchor)
         const { transform, size } = resizedNode(target, anchorInParent, sx, sy)
-        document.update(target.id, { transform, size })
+        // A component resized as one of a group loses its measured box exactly as one
+        // resized on its own does. Without this it would keep measuring and spring back.
+        if (document.getNode(target.id)?.type === 'component') {
+          document.update<ComponentNode>(target.id, { transform, size, autoSize: false })
+        } else {
+          document.update(target.id, { transform, size })
+        }
       }
       relayout(document, resizing.map((target) => target.id))
     })
@@ -1166,23 +1213,29 @@ export function createPointerInput(options: PointerInputOptions): () => void {
       })
     } else if (current.kind === 'resize' && current.grouped) {
       if (current.localResize) {
-        const { id, startTransform, startSize, startLayout, startLayoutChild } = current.localResize
+        const { id, startTransform, startSize, startLayout, startLayoutChild, startAutoSize } =
+          current.localResize
         const node = document.getNode(id)
         document.transact(() => {
-          document.update(id, {
+          document.update<ComponentNode>(id, {
             transform: startTransform,
             size: startSize,
             // Only put back what the gesture could have taken: a node that never had the
             // field must not gain a key holding undefined.
             ...(node?.type === 'frame' && node.layout ? { layout: startLayout } : {}),
             ...(node?.layoutChild ? { layoutChild: startLayoutChild } : {}),
+            ...(node?.type === 'component' ? { autoSize: startAutoSize ?? true } : {}),
           })
           relayout(document, [id])
         })
       } else if (current.resizing) {
         document.transact(() => {
           for (const target of current.resizing ?? []) {
-            document.update(target.id, { transform: target.startTransform, size: target.startSize })
+            document.update<ComponentNode>(target.id, {
+              transform: target.startTransform,
+              size: target.startSize,
+              ...(target.startAutoSize !== undefined ? { autoSize: target.startAutoSize } : {}),
+            })
           }
           relayout(document, (current.resizing ?? []).map((target) => target.id))
         })

@@ -1,0 +1,19 @@
+/*
+ * The offscreen host a component is rendered into to be measured.
+ *
+ * Off the left edge rather than hidden: `display: none` and `visibility: hidden` both give an
+ * element no layout to read, and reading the layout is the entire job. `contain` keeps what
+ * happens in here out of the page's own layout, so measuring can never reflow the editor.
+ *
+ * The width comes in through a custom property because it is the one thing about this
+ * element that is different per measurement: `max-content` measures what the component wants
+ * to be, and a length measures what it becomes when it is given that much room.
+ */
+.host {
+  position: absolute;
+  top: 0;
+  left: -10000px;
+  width: var(--measure-width, max-content);
+  contain: layout style;
+  pointer-events: none;
+}

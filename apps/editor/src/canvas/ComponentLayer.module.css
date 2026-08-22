@@ -1,0 +1,88 @@
+/*
+ * The DOM layer that mounts real React components over the canvas.
+ *
+ * Every transform in here comes from the same matrices the GPU is bound to, handed in as
+ * custom properties because they change at pointer rate and cannot live in a stylesheet as
+ * literals. The rules themselves still do, which is the point of using a property rather
+ * than writing `style.transform` in a component.
+ */
+
+.layer {
+  position: absolute;
+  inset: 0;
+  /* A component panned off the edge must not grow the page or raise a scrollbar. */
+  overflow: hidden;
+  /*
+   * Design mode: every pointer event belongs to the canvas underneath, which owns hit
+   * testing, selection and dragging. Preview mode hands them back, per mount, below.
+   */
+  pointer-events: none;
+}
+
+.layer[data-mode='design'] {
+  /* A drag across the canvas must not start selecting the text inside a component. */
+  user-select: none;
+}
+
+/*
+ * The camera, applied once for the whole layer.
+ *
+ * `--view-transform` is `viewMatrix(camera, viewport)`, which is the same function the world
+ * to clip matrix is built from, so the two layers cannot drift: they are not two
+ * implementations that agree, they are one matrix used twice.
+ */
+.world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+  transform: var(--view-transform, none);
+  /* Keeps the layer on its own compositor layer, so a pan is a transform and not a repaint. */
+  will-change: transform;
+}
+
+/*
+ * One per artboard: the frame that holds components, or the page for components dropped
+ * loose on the canvas. Positioned by the frame's world transform, so the mounts inside it
+ * are positioned by their own local transforms and nothing has to compose a chain by hand.
+ */
+.artboard {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--artboard-width, 0);
+  height: var(--artboard-height, 0);
+  transform-origin: 0 0;
+  transform: var(--artboard-transform, none);
+}
+
+/* A frame that clips its content clips the components in it too, exactly as the shader does. */
+.artboard[data-clip='true'] {
+  overflow: hidden;
+}
+
+/*
+ * One per component node. The shadow root hangs off this element, so this is the boundary:
+ * everything outside it is the editor's, everything inside it is the component's.
+ */
+.mount {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--mount-width, auto);
+  height: var(--mount-height, auto);
+  transform-origin: 0 0;
+  transform: var(--mount-transform, none);
+  opacity: var(--mount-opacity, 1);
+}
+
+/*
+ * Preview mode is the only time a component is allowed to see the pointer. In design mode
+ * the click has to reach the canvas, because selecting a component is the canvas's job and
+ * a button that swallowed the click would be unselectable.
+ */
+.layer[data-mode='preview'] .mount {
+  pointer-events: auto;
+}

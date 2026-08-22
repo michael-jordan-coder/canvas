@@ -52,6 +52,18 @@ export function RectangleIcon(props: IconProps): ReactElement {
   )
 }
 
+/** A component instance: Figma's four-diamond glyph, which is the one shape nothing else uses. */
+export function ComponentIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <path
+        {...stroke}
+        d="M8 1.8 10.4 4.2 8 6.6 5.6 4.2zM4.2 5.6 6.6 8 4.2 10.4 1.8 8zM11.8 5.6 14.2 8l-2.4 2.4L9.4 8zM8 9.4l2.4 2.4L8 14.2l-2.4-2.4z"
+      />
+    </Svg>
+  )
+}
+
 export function EllipseIcon(props: IconProps): ReactElement {
   return (
     <Svg {...props}>

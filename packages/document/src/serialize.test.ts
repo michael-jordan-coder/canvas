@@ -271,7 +271,7 @@ describe('the text node on disk', () => {
   it('is written at the current schema version', () => {
     const { document } = withText()
     expect(serializeDocument(document).version).toBe(SCHEMA_VERSION)
-    expect(SCHEMA_VERSION).toBe(5)
+    expect(SCHEMA_VERSION).toBe(6)
   })
 
   /*

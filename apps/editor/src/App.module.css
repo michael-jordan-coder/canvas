@@ -10,6 +10,18 @@
   min-height: 0;
 }
 
+/*
+ * The left column holds two panels: the component library, which is a fixed list, and the
+ * layers tree, which takes whatever is left. One border between the column and the canvas
+ * rather than one per panel, so the two read as one sidebar.
+ */
+.sidebar {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  border-right: 1px solid var(--line);
+}
+
 .viewport {
   position: relative;
   min-width: 0;

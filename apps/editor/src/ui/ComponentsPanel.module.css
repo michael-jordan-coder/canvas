@@ -1,0 +1,81 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 var(--space-3);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--line);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+}
+
+/*
+ * A card rather than a row, because it is a thing to pick up rather than a thing to open.
+ * `grab` says so before the drag starts, which is the only affordance a draggable item has.
+ */
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+  cursor: grab;
+  transition:
+    background var(--duration) var(--ease),
+    border-color var(--duration) var(--ease);
+}
+
+.item:hover {
+  background: var(--hover);
+  border-color: var(--line-strong);
+}
+
+.item:active {
+  cursor: grabbing;
+}
+
+.item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+}
+
+.name {
+  font-size: var(--text-md);
+}
+
+/* Where a generated file would import it from. Quiet, because it is reference rather than
+   instruction, and it is the one thing on the card that says these are real components. */
+.path {
+  margin-left: auto;
+  color: var(--text-disabled);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.hint {
+  padding: 0 var(--space-3) var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}

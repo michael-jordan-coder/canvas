@@ -1,0 +1,255 @@
+/*
+ * The component library's stylesheet, injected as text into every shadow root the DOM layer
+ * creates and into the offscreen root that measures a component before it is dropped.
+ *
+ * Not a CSS module, and that is the one place in this app where that is right: a shadow root
+ * is a separate style scope, so there is nothing here to collide with and hashed names would
+ * only make the generated class attributes unreadable in the inspector. It reaches the
+ * bundle through `?inline`, so the CSS still lives in a .css file rather than in a template
+ * literal in a component.
+ *
+ * Nothing here reads a design token from the editor's own sheet. The library is meant to be
+ * a stand-in for a product's real components, and a product's components do not inherit the
+ * design tool's palette.
+ */
+
+:host {
+  /* The mount is sized by the document, so the tree inside it starts from a known box. */
+  display: block;
+}
+
+.root {
+  box-sizing: border-box;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+  color: #1a1a1a;
+}
+
+.root *,
+.root *::before,
+.root *::after {
+  box-sizing: inherit;
+}
+
+/* Button ---------------------------------------------------------------------------------- */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.button[data-size='small'] {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 5px;
+}
+
+.button[data-size='medium'] {
+  padding: 7px 14px;
+}
+
+.button[data-size='large'] {
+  padding: 10px 18px;
+  font-size: 16px;
+}
+
+.button[data-variant='primary'] {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.button[data-variant='primary']:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.button[data-variant='secondary'] {
+  background: #ffffff;
+  border-color: #d4d4d8;
+  color: #1a1a1a;
+}
+
+.button[data-variant='secondary']:hover:not(:disabled) {
+  background: #f4f4f5;
+}
+
+.button[data-variant='ghost'] {
+  background: transparent;
+  color: #2563eb;
+}
+
+.button[data-variant='ghost']:hover:not(:disabled) {
+  background: #eff6ff;
+}
+
+.button[data-variant='danger'] {
+  background: #dc2626;
+  color: #ffffff;
+}
+
+.button[data-variant='danger']:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/*
+ * The press count, which only appears once the button has actually been clicked.
+ *
+ * A design system button would not ship this. It is here because the one thing a screenshot
+ * of a button cannot do is count your clicks, so it is the fastest proof that what is on the
+ * canvas is a mounted React component holding its own state.
+ */
+.badge {
+  display: inline-block;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.25);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.button[data-variant='secondary'] .badge,
+.button[data-variant='ghost'] .badge {
+  background: #e4e4e7;
+}
+
+/* Input ----------------------------------------------------------------------------------- */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #52525b;
+}
+
+.control {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid #d4d4d8;
+  border-radius: 6px;
+  background: #ffffff;
+  font: inherit;
+  color: inherit;
+}
+
+.control::placeholder {
+  color: #a1a1aa;
+}
+
+.control:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgb(37 99 235 / 0.15);
+}
+
+.control:disabled {
+  background: #f4f4f5;
+  cursor: not-allowed;
+}
+
+.control[data-invalid='true'] {
+  border-color: #dc2626;
+}
+
+.hint {
+  font-size: 11px;
+  color: #71717a;
+}
+
+.hint[data-invalid='true'] {
+  color: #dc2626;
+}
+
+/* Card ------------------------------------------------------------------------------------ */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 16px;
+  border: 1px solid #e4e4e7;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.card[data-elevated='true'] {
+  border-color: transparent;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.06),
+    0 8px 24px rgb(0 0 0 / 0.08);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.cardToggle {
+  border: 0;
+  padding: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: #2563eb;
+  cursor: pointer;
+}
+
+.cardBody {
+  margin: 0;
+  color: #52525b;
+}
+
+/* The placeholder for a saved node naming a component this build does not ship. -------------- */
+
+.missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 24px;
+  padding: 8px;
+  border: 1px dashed #dc2626;
+  border-radius: 6px;
+  color: #dc2626;
+  font-size: 12px;
+  text-align: center;
+}

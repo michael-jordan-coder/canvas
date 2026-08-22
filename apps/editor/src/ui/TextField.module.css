@@ -1,0 +1,43 @@
+/* The same row as NumberField, minus the scrubbing: a string has no direction to drag in. */
+.field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--row-height);
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  transition: border-color var(--duration) var(--ease);
+}
+
+.field:hover {
+  border-color: var(--line-strong);
+}
+
+.field:focus-within {
+  border-color: var(--accent);
+}
+
+.label {
+  flex: none;
+  width: 60px;
+  color: var(--text-secondary);
+  /* A prop name is whatever the component called it, so it can be longer than the column. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.input {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+
+.input:focus {
+  outline: none;
+}

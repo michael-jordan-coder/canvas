@@ -6,9 +6,14 @@ import { createKeyboardInput } from './input/keyboardInput'
 import { scene } from './state/scene'
 // Measures every text node once the font arrives. Imported for that effect.
 import './state/font'
+// Joins the text and component measurers and hands them to auto layout, then measures every
+// component in the loaded document. Also imported for its effect, and after the font module
+// because it reads the text half from it.
+import './state/measure'
 import { selectTool } from './state/textEditing'
 import { useUI } from './state/uiStore'
 import { showStatsFromLocation } from './state/stats'
+import { ComponentsPanel } from './ui/ComponentsPanel'
 import { LayersPanel } from './ui/LayersPanel'
 import { PerfReadout } from './ui/PerfReadout'
 import { PropertiesPanel } from './ui/PropertiesPanel'
@@ -26,6 +31,7 @@ export function App(): ReactElement {
       getSelection: () => useUI.getState().selection,
       setSelection: (ids: readonly NodeId[]) => useUI.getState().setSelection(ids),
       setTool: selectTool,
+      getMode: () => useUI.getState().mode,
     }
     const disposeKeyboard = createKeyboardInput(wiring)
     const disposeClipboard = createClipboardInput(wiring)
@@ -39,7 +45,10 @@ export function App(): ReactElement {
     <div className={styles.app}>
       <Toolbar />
       <div className={styles.body}>
-        <LayersPanel />
+        <div className={styles.sidebar}>
+          <ComponentsPanel />
+          <LayersPanel />
+        </div>
         <main className={styles.viewport}>
           <CanvasHost />
           {showStats && <PerfReadout />}

@@ -1,0 +1,46 @@
+/* The same row as TextField, so a component's props line up whatever kind each one is. */
+.field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--row-height);
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  transition: border-color var(--duration) var(--ease);
+}
+
+.field:hover {
+  border-color: var(--line-strong);
+}
+
+.field:focus-within {
+  border-color: var(--accent);
+}
+
+.label {
+  flex: none;
+  width: 60px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * A native select rather than a segmented row: a variant list is four or five long words, and
+ * a segmented control that wide either wraps or truncates every one of them.
+ */
+.select {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+
+.select:focus {
+  outline: none;
+}
