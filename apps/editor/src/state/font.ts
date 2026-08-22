@@ -1,5 +1,6 @@
 import { TextLayoutCache, type FontMetrics, type Size, type TextNode } from '@figma-canvas/document'
 import { loadFontMetrics } from '@figma-canvas/renderer'
+import { relayout, relayoutAll, setTextMeasurer } from './autoLayout'
 import { scene } from './scene'
 
 let loaded: FontMetrics | null = null
@@ -16,6 +17,22 @@ let loaded: FontMetrics | null = null
  * module loads synchronously. Nothing lays anything out before they land.
  */
 export const textLayouts = new TextLayoutCache()
+
+/*
+ * How auto layout measures a text child it is about to hand a width: through the shared
+ * cache under the node's own id, so the layout the measurement builds is the one the
+ * renderer packs and the caret reads a frame later.
+ */
+setTextMeasurer({
+  measure: (node, wrapWidth) => {
+    const metrics = loaded
+    if (!metrics) return null
+    return textLayouts.measure(
+      { ...node, autoWidth: false, size: { ...node.size, width: wrapWidth } },
+      metrics,
+    )
+  },
+})
 
 /**
  * The font the editor measures with, or null until it arrives.
@@ -49,10 +66,12 @@ function remeasureAll(metrics: FontMetrics): void {
     const size = textLayouts.measure(node, metrics)
     if (size.width !== node.size.width || size.height !== node.size.height) stale.push({ node, size })
   }
-  if (stale.length === 0) return
 
   scene.transact(() => {
     for (const { node, size } of stale) scene.update<TextNode>(node.id, { size })
+    // Run even when nothing was stale: a text child laid out with a fill width before the
+    // font arrived kept a guessed height, and only the layout knows which nodes those are.
+    relayoutAll(scene)
   })
   // Measuring is not an edit. Leaving it on the stack would make the first undo of a fresh
   // session shrink every text node to whatever it was before the font was known.
@@ -88,5 +107,9 @@ function measure(node: TextNode, changes: Partial<TextNode> = {}): Size | null {
  */
 export function updateText(node: TextNode, changes: Partial<TextNode>): void {
   const size = measure(node, changes)
-  scene.update<TextNode>(node.id, size ? { ...changes, size } : changes)
+  scene.transact(() => {
+    scene.update<TextNode>(node.id, size ? { ...changes, size } : changes)
+    // Typing into a hug frame grows it on the keystroke, in the keystroke's own undo step.
+    relayout(scene, [node.id])
+  })
 }

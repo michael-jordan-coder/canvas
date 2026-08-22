@@ -10,6 +10,7 @@ import {
   type SceneDocument,
   type Vec2,
 } from '@figma-canvas/document'
+import { relayout } from './autoLayout'
 
 /**
  * Rotation commands, built on `rotateAbout` the same way the z-order commands are built on
@@ -81,6 +82,8 @@ export function applyRotation(
         transform: multiply(multiply(target.startWorld, turn), target.parentInverse),
       })
     }
+    // A turned child occupies a different box in its parent's flow, so siblings follow.
+    relayout(document, targets.map((target) => target.id))
   })
 }
 
@@ -119,6 +122,7 @@ export function rotateNodes(
       // world, then the turn, then back out of the parent's space into local units.
       document.update(id, { transform: multiply(multiply(world, turn), invert(parentWorld)) })
     }
+    relayout(document, ids)
   })
 }
 

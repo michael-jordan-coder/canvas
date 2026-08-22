@@ -252,7 +252,7 @@ describe('the text node on disk', () => {
   it('is written at the current schema version', () => {
     const { document } = withText()
     expect(serializeDocument(document).version).toBe(SCHEMA_VERSION)
-    expect(SCHEMA_VERSION).toBe(3)
+    expect(SCHEMA_VERSION).toBe(4)
   })
 
   /*
@@ -329,5 +329,91 @@ describe('the text node on disk', () => {
     const original = document.expectNode(text.id)
     if (original.type !== 'text') throw new Error('expected a text node')
     expect(original.characters).toBe('Hello\nthere')
+  })
+})
+
+describe('auto layout on disk', () => {
+  function withLayout() {
+    const document = new SceneDocument()
+    const frame = document.insert(
+      createFrame({
+        name: 'Row',
+        size: { width: 300, height: 100 },
+        layout: {
+          direction: 'horizontal',
+          gap: 12,
+          padding: { top: 4, right: 8, bottom: 4, left: 8 },
+          mainAlign: 'space-between',
+          crossAlign: 'center',
+          mainSizing: 'fixed',
+          crossSizing: 'hug',
+        },
+      }),
+    )
+    const child = document.insert(
+      createRectangle({
+        size: { width: 50, height: 50 },
+        layoutChild: { widthMode: 'fill', heightMode: 'fixed' },
+      }),
+      frame.id,
+    )
+    return { document, frame, child }
+  }
+
+  it('round trips the frame layout and the child modes', () => {
+    const { document, frame, child } = withLayout()
+    const parsed = parseDocument(JSON.parse(JSON.stringify(serializeDocument(document))))
+
+    const backFrame = parsed.nodes.find((node) => node.id === frame.id)
+    expect(backFrame?.type === 'frame' && backFrame.layout).toEqual({
+      direction: 'horizontal',
+      gap: 12,
+      padding: { top: 4, right: 8, bottom: 4, left: 8 },
+      mainAlign: 'space-between',
+      crossAlign: 'center',
+      mainSizing: 'fixed',
+      crossSizing: 'hug',
+    })
+    expect(parsed.nodes.find((node) => node.id === child.id)?.layoutChild).toEqual({
+      widthMode: 'fill',
+      heightMode: 'fixed',
+    })
+  })
+
+  it('loads a version 3 file, where absence simply means no layout', () => {
+    const { document } = scene()
+    const older = { ...serializeDocument(document), version: 3 }
+    const parsed = parseDocument(JSON.parse(JSON.stringify(older)))
+    for (const node of parsed.nodes) {
+      expect(node.layoutChild).toBeUndefined()
+      if (node.type === 'frame') expect(node.layout).toBeUndefined()
+    }
+  })
+
+  it('rejects a direction that is not one', () => {
+    const { document } = withLayout()
+    const file = JSON.parse(JSON.stringify(serializeDocument(document)))
+    file.nodes.find((node: { type: string }) => node.type === 'frame').layout.direction =
+      'diagonal'
+    expect(() => parseDocument(file)).toThrow(/layout.direction "diagonal"/)
+  })
+
+  it('names a missing padding side by its path', () => {
+    const { document } = withLayout()
+    const file = JSON.parse(JSON.stringify(serializeDocument(document)))
+    delete file.nodes.find((node: { type: string }) => node.type === 'frame').layout.padding.left
+    expect(() => parseDocument(file)).toThrow(/layout.padding.left/)
+  })
+
+  it('clones the padding deeply, so history cannot be rewritten through it', () => {
+    const { document, frame } = withLayout()
+    const serialized = serializeDocument(document)
+    const stored = serialized.nodes.find((node) => node.id === frame.id)
+    if (stored?.type !== 'frame' || !stored.layout) throw new Error('expected the layout')
+
+    const live = document.expectNode(frame.id)
+    if (live.type !== 'frame' || !live.layout) throw new Error('expected the layout')
+    live.layout.padding.left = 999
+    expect(stored.layout.padding.left).toBe(8)
   })
 })

@@ -26,6 +26,53 @@ export function reserveNodeIds(ids: Iterable<NodeId>): void {
 
 export type NodeType = 'page' | 'frame' | 'rectangle' | 'ellipse' | 'text'
 
+export type LayoutDirection = 'horizontal' | 'vertical'
+/** `space-between` is meaningful on the main axis only; the cross axis has no run to spread. */
+export type LayoutAlign = 'start' | 'center' | 'end' | 'space-between'
+export type AxisSizing = 'fixed' | 'hug'
+export type ChildSizing = 'fixed' | 'fill'
+
+export interface LayoutPadding {
+  top: number
+  right: number
+  bottom: number
+  left: number
+}
+
+/**
+ * Auto layout, as a setting on a frame. Present means the frame lays its children out in a
+ * row or column; absent means children sit where their transforms say, which is how every
+ * frame starts.
+ *
+ * `mainSizing`/`crossSizing` are the frame's own hug/fixed choice per axis. A hug axis is
+ * measured from the children, so its `size` component becomes a cache in exactly the sense a
+ * text node's is: whatever changes the children writes the frame size in the same
+ * transaction.
+ */
+export interface FrameLayout {
+  direction: LayoutDirection
+  /** Between children, along the direction. Never negative. */
+  gap: number
+  padding: LayoutPadding
+  mainAlign: LayoutAlign
+  crossAlign: LayoutAlign
+  mainSizing: AxisSizing
+  crossSizing: AxisSizing
+}
+
+/**
+ * How a node behaves inside an auto layout parent. Absent means fixed on both axes.
+ *
+ * Stored per node axis (width/height) rather than per parent axis (main/cross), so flipping
+ * the parent's direction does not silently change which dimension stretches. Ignored when the
+ * parent is not an auto layout frame, and deliberately not cleared on reparent: a node
+ * dragged out and back keeps its intent.
+ */
+export interface LayoutChild {
+  widthMode: ChildSizing
+  heightMode: ChildSizing
+}
+
 export interface BaseNode {
   readonly id: NodeId
   readonly type: NodeType
@@ -38,6 +85,7 @@ export interface BaseNode {
   /** Local transform, relative to the parent. */
   transform: Mat2D
   size: Size
+  layoutChild?: LayoutChild
 }
 
 export interface PageNode extends BaseNode {
@@ -50,6 +98,7 @@ export interface FrameNode extends BaseNode {
   fills: Paint[]
   strokes: Stroke[]
   cornerRadius: number
+  layout?: FrameLayout
 }
 
 export interface RectangleNode extends BaseNode {
@@ -158,6 +207,19 @@ export function createText(init: Partial<Omit<TextNode, 'id' | 'type'>> = {}): T
   }
 }
 
+/** The layout a frame gets when auto layout is switched on with nothing to infer from. */
+export function defaultFrameLayout(direction: LayoutDirection = 'horizontal'): FrameLayout {
+  return {
+    direction,
+    gap: 10,
+    padding: { top: 10, right: 10, bottom: 10, left: 10 },
+    mainAlign: 'start',
+    crossAlign: 'start',
+    mainSizing: 'fixed',
+    crossSizing: 'fixed',
+  }
+}
+
 function clonePaint(paint: Paint): Paint {
   return { type: 'solid', color: { ...paint.color } }
 }
@@ -194,6 +256,9 @@ export function cloneNodeAs(node: SceneNode, id: NodeId): SceneNode {
     children: [...node.children],
     transform: { ...node.transform },
     size: { ...node.size },
+    // Spread conditionally so a node without the field clones without the key, keeping the
+    // clone indistinguishable from the original.
+    ...(node.layoutChild ? { layoutChild: { ...node.layoutChild } } : {}),
   }
 
   switch (node.type) {
@@ -208,6 +273,9 @@ export function cloneNodeAs(node: SceneNode, id: NodeId): SceneNode {
         cornerRadius: node.cornerRadius,
         fills: node.fills.map(clonePaint),
         strokes: node.strokes.map(cloneStroke),
+        ...(node.layout
+          ? { layout: { ...node.layout, padding: { ...node.layout.padding } } }
+          : {}),
       }
     case 'rectangle':
       return {

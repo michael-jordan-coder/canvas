@@ -4,6 +4,12 @@ import {
   cloneNode,
   cloneNodeAs,
   createNodeId,
+  type AxisSizing,
+  type ChildSizing,
+  type FrameLayout,
+  type LayoutAlign,
+  type LayoutChild,
+  type LayoutDirection,
   type NodeId,
   type NodeType,
   type SceneNode,
@@ -23,8 +29,14 @@ import type { Paint, RGBA, Stroke, StrokeAlign } from './paint.js'
  * every text node in a version 2 file predates fixed width boxes, so it was auto width.
  * That is why `parseNode` is told the version rather than defaulting the field whatever it
  * reads. Filling a gap silently is how a file that is actually malformed gets through.
+ *
+ * 4 added auto layout: `layout` on frames and `layoutChild` on every node. Both are optional
+ * in the model with absence meaning "not participating", so an older file needs no
+ * migration; an absent field and a version 3 file mean the same thing. The bump is for the
+ * other direction again, so a build from before auto layout refuses a version 4 file instead
+ * of silently dropping the layout and then overwriting the save without it.
  */
-export const SCHEMA_VERSION = 3
+export const SCHEMA_VERSION = 4
 
 export interface SerializedDocument {
   kind: 'figma-canvas/document'
@@ -151,6 +163,65 @@ function parseStrokes(value: unknown, path: string): Stroke[] {
   return requireArray(value, path).map((stroke, index) => parseStroke(stroke, `${path}[${index}]`))
 }
 
+const LAYOUT_DIRECTIONS: readonly string[] = ['horizontal', 'vertical']
+const LAYOUT_ALIGNS: readonly string[] = ['start', 'center', 'end', 'space-between']
+const AXIS_SIZINGS: readonly string[] = ['fixed', 'hug']
+const CHILD_SIZINGS: readonly string[] = ['fixed', 'fill']
+
+function requireOneOf<T extends string>(
+  value: unknown,
+  allowed: readonly string[],
+  path: string,
+  what: string,
+): T {
+  const text = requireString(value, path)
+  if (!allowed.includes(text)) {
+    throw new InvalidDocumentError(`${path} "${text}" is not ${what}`)
+  }
+  return text as T
+}
+
+function parseFrameLayout(value: unknown, path: string): FrameLayout {
+  const l = requireRecord(value, path)
+  const p = requireRecord(l['padding'], `${path}.padding`)
+  return {
+    direction: requireOneOf<LayoutDirection>(
+      l['direction'], LAYOUT_DIRECTIONS, `${path}.direction`, 'a layout direction',
+    ),
+    gap: requireNumber(l['gap'], `${path}.gap`),
+    padding: {
+      top: requireNumber(p['top'], `${path}.padding.top`),
+      right: requireNumber(p['right'], `${path}.padding.right`),
+      bottom: requireNumber(p['bottom'], `${path}.padding.bottom`),
+      left: requireNumber(p['left'], `${path}.padding.left`),
+    },
+    mainAlign: requireOneOf<LayoutAlign>(
+      l['mainAlign'], LAYOUT_ALIGNS, `${path}.mainAlign`, 'an alignment',
+    ),
+    crossAlign: requireOneOf<LayoutAlign>(
+      l['crossAlign'], LAYOUT_ALIGNS, `${path}.crossAlign`, 'an alignment',
+    ),
+    mainSizing: requireOneOf<AxisSizing>(
+      l['mainSizing'], AXIS_SIZINGS, `${path}.mainSizing`, 'an axis sizing',
+    ),
+    crossSizing: requireOneOf<AxisSizing>(
+      l['crossSizing'], AXIS_SIZINGS, `${path}.crossSizing`, 'an axis sizing',
+    ),
+  }
+}
+
+function parseLayoutChild(value: unknown, path: string): LayoutChild {
+  const c = requireRecord(value, path)
+  return {
+    widthMode: requireOneOf<ChildSizing>(
+      c['widthMode'], CHILD_SIZINGS, `${path}.widthMode`, 'a child sizing',
+    ),
+    heightMode: requireOneOf<ChildSizing>(
+      c['heightMode'], CHILD_SIZINGS, `${path}.heightMode`, 'a child sizing',
+    ),
+  }
+}
+
 const NODE_TYPES: readonly string[] = ['page', 'frame', 'rectangle', 'ellipse', 'text']
 
 function parseNode(value: unknown, path: string, version: number): SceneNode {
@@ -173,6 +244,11 @@ function parseNode(value: unknown, path: string, version: number): SceneNode {
     ),
     transform: parseMatrix(n['transform'], `${path}.transform`),
     size: parseSize(n['size'], `${path}.size`),
+    // Absence means "no layout behaviour" in the model itself, so a version 3 file and a
+    // node that simply has none read identically and no version check is needed.
+    ...(n['layoutChild'] !== undefined
+      ? { layoutChild: parseLayoutChild(n['layoutChild'], `${path}.layoutChild`) }
+      : {}),
   }
 
   switch (type as NodeType) {
@@ -186,6 +262,9 @@ function parseNode(value: unknown, path: string, version: number): SceneNode {
         cornerRadius: requireNumber(n['cornerRadius'], `${path}.cornerRadius`),
         fills: parsePaints(n['fills'], `${path}.fills`),
         strokes: parseStrokes(n['strokes'], `${path}.strokes`),
+        ...(n['layout'] !== undefined
+          ? { layout: parseFrameLayout(n['layout'], `${path}.layout`) }
+          : {}),
       }
     case 'rectangle':
       return {

@@ -1,4 +1,13 @@
-import { applyToVector, IDENTITY, invert, type NodeId, type SceneDocument, type Vec2 } from '@figma-canvas/document'
+import {
+  applyToVector,
+  IDENTITY,
+  invert,
+  isAutoLayoutFrame,
+  type NodeId,
+  type SceneDocument,
+  type Vec2,
+} from '@figma-canvas/document'
+import { relayout, toggleAutoLayout } from '../state/autoLayout'
 import { reorderSelection } from '../state/order'
 import type { ToolId } from '../state/uiStore'
 import { isEditingText } from './isEditingText'
@@ -49,10 +58,15 @@ export function createKeyboardInput(options: KeyboardInputOptions): () => void {
   const deleteSelection = (): void => {
     const selection = options.getSelection()
     if (selection.length === 0) return
+    // Parents noted before the removal, because afterwards the nodes cannot say who held them.
+    const parents = selection
+      .map((id) => scene.getNode(id)?.parent)
+      .filter((id): id is NodeId => id != null)
     // One transaction, so this is one undo step, and so the cleared selection is what the
     // step records as its "after". Undoing brings the nodes back and reselects them.
     scene.transact(() => {
       for (const id of selection) scene.remove(id)
+      relayout(scene, parents)
       options.setSelection([])
     })
   }
@@ -73,6 +87,20 @@ export function createKeyboardInput(options: KeyboardInputOptions): () => void {
       for (const id of selection) {
         const node = scene.getNode(id)
         if (!node || node.locked) continue
+
+        // Inside an auto layout frame position belongs to the layout, so an arrow along the
+        // flow steps the node one place through it instead, and one across it does nothing.
+        const parent = node.parent ? scene.getNode(node.parent) : undefined
+        if (isAutoLayoutFrame(parent)) {
+          const horizontal = parent.layout.direction === 'horizontal'
+          const along = horizontal ? direction.x : direction.y
+          if (along !== 0) {
+            scene.reorder(id, scene.indexOf(id) + Math.sign(along))
+            relayout(scene, [id])
+          }
+          continue
+        }
+
         const parentWorld = node.parent ? scene.worldTransform(node.parent) : IDENTITY
         const local = applyToVector(invert(parentWorld), worldDelta)
         scene.update(id, {
@@ -146,6 +174,19 @@ export function createKeyboardInput(options: KeyboardInputOptions): () => void {
       event.preventDefault()
       options.setSelection([])
       return
+    }
+
+    // Figma's shortcut for auto layout, on a single selected frame either way round.
+    if (!accel && !event.altKey && event.shiftKey && event.key.toLowerCase() === 'a') {
+      const selection = options.getSelection()
+      const first = selection.length === 1 ? selection[0] : undefined
+      const only = first ? scene.getNode(first) : undefined
+      if (only?.type === 'frame') {
+        event.preventDefault()
+        if (event.repeat) return
+        toggleAutoLayout(scene, only.id)
+        return
+      }
     }
 
     // After the accelerator chords above, so Cmd+A and Cmd+R keep meaning what they did.

@@ -420,6 +420,63 @@ It lives at module scope and `endEditing` closes it. A burst is one undo step, o
 first keystroke and closed after 600ms of quiet, on blur, on commit, or on window blur, which
 is the same shape and the same safety net the arrow key nudge uses.
 
+## Auto layout
+
+Frames can lay their children out in a row or column: `FrameLayout` on the frame (direction,
+gap, per-side padding, main and cross alignment, hug or fixed per axis), `LayoutChild` on any
+node (fixed or fill per axis). Absence of `layout` is what "no auto layout" is; there is no
+`'none'` value, so old files need no field and one presence check answers every caller.
+
+**The engine is pure and lives in `packages/document/src/layout/autoLayout.ts`.** It reads
+the document and returns patches; it never writes. Like text layout it cannot measure text,
+so a `TextMeasurer` comes in from the editor, registered by `state/font.ts` through
+`setTextMeasurer` rather than imported, because importing the font module drags the atlas
+fetch and the live scene into every test that touches a command module.
+
+Two properties everything downstream leans on:
+
+- **Idempotent.** Every write is epsilon-compared against what the node holds, so a settled
+  document produces zero patches: no version bump, no history step, no instance-buffer
+  rebuild, and no cost in stress mode. It is also what makes cancelling a gesture exact:
+  restore the inputs, relayout, and the siblings land where they started.
+- **Resolved once.** A child's final size is computed in one call carrying every constraint
+  that applies to it. Fill against a hug axis degenerates to fixed, because a child sized by
+  the frame while the frame is sized by the child has no answer; setting Fill in the panel
+  flips the frame's own axis to fixed for the same reason, which is Figma's resolution too.
+
+**Invocation is push, never subscribe.** Every mutation that can disturb a layout calls
+`relayout` (`apps/editor/src/state/autoLayout.ts`) inside its own transaction, so the
+layout's writes land in the same history step as the edit that caused them, and undo/redo
+never run layout at all: a step's snapshots already hold both. A subscriber could not do
+this: `#flush` runs listeners after depth reaches zero, so a listener's write is a second
+step, and it would also fire during undo. The cost of push is that the call sites are
+enumerated rather than implied; the list lives in TASKS.md and the grep for `relayout(` is
+the audit.
+
+`layoutRootsFor` climbs from each dirty node to the topmost auto-layout ancestor, because a
+hug axis hands its size upward and the chain solves from the top. On a document with no auto
+layout the walk is one or two steps to nothing, which is what keeps `?stress` free.
+
+The reorder drag (`applyFlow` in `pointerInput.ts`): a single dragged child of an auto frame
+**floats with the pointer and is excluded from every layout pass**, so the siblings shift
+around an open slot; entering a frame reparents live, leaving hands the node to whatever is
+under the pointer, and the release runs one pass without the exclusion, which is what snaps
+the node in. A live reparent rebases the drag against the new parent, but each dragged node
+keeps an untouched `origin` (parent, index, transform), because Escape has to reach past
+every rebase: it restores parent, then index, then transform, then relayouts, and
+determinism does the rest. Dragging a resize handle claims the axes it moves: a hug axis
+flips to fixed exactly as a text box loses `autoWidth` to the same gesture, and the captured
+`startLayout` is how Escape gives the hug back.
+
+Text inside auto layout: fill-width assigns the wrap width, so the engine emits
+`autoWidth: false` with the size, and height comes from the measurer through the shared
+`TextLayoutCache`, warming the entry the renderer packs a frame later. Before the font
+arrives the old height stands; `remeasureAll` relayouts everything when it lands, then
+clears history, since measuring is not an edit. Invisible children leave the flow entirely
+(locked ones stay), a hidden child's toggle relayouts, and enabling auto layout infers
+direction, gap, padding and flow order from where the children already sit, so Shift+A moves
+nothing.
+
 ## Rotation, and the one rule it added
 
 `SelectionBox` is an upright rect plus an angle, not four corner points. Everything asking where

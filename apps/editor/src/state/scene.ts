@@ -10,6 +10,7 @@ import {
   type NodeId,
   type SceneNode,
 } from '@figma-canvas/document'
+import { relayoutAll } from './autoLayout'
 import { useUI } from './uiStore'
 import { readSaved, startAutosave } from './persistence'
 import { seedStressScene, stressCountFromLocation } from './stress'
@@ -121,8 +122,11 @@ if (stressCount > 0) {
   const saved = readSaved()
   if (saved) scene.load(saved.root, saved.nodes)
   else seed()
+  // Defensive: a file this build saved is already settled and this writes nothing, but a
+  // file whose layout drifted (an older build, a hand edit) straightens out on open.
+  relayoutAll(scene)
 }
-// Neither the seed nor a load is an edit, so neither must be undoable.
+// Neither the seed, a load, nor the normalising layout is an edit, so none must be undoable.
 scene.clearHistory()
 
 // Autosave is off in stress mode. Persisting ten thousand throwaway nodes would then load

@@ -110,12 +110,19 @@ const IDENTITY_MATRIX: Mat2D = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 }
  *
  * This is what decides the parent of a newly drawn shape: draw inside a frame and the shape
  * belongs to that frame, so it moves with it afterwards.
+ *
+ * `exclude` skips whole subtrees. The reorder drag passes the node being dragged, because
+ * asking "what would hold this?" about a frame must not answer with the frame itself.
  */
-export function containerAt(document: SceneDocument, point: Vec2): SceneNode {
+export function containerAt(
+  document: SceneDocument,
+  point: Vec2,
+  exclude?: ReadonlySet<NodeId>,
+): SceneNode {
   const page = document.expectNode(document.rootId)
 
   const descend = (node: SceneNode, parent: Mat2D): SceneNode | null => {
-    if (!node.visible || node.locked) return null
+    if (!node.visible || node.locked || exclude?.has(node.id)) return null
     const world = multiply(node.transform, parent)
     const local = applyToPoint(invert(world), point)
 

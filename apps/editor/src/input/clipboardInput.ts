@@ -7,6 +7,7 @@ import {
   type SceneDocument,
   type SerializedSubtree,
 } from '@figma-canvas/document'
+import { relayout } from '../state/autoLayout'
 import { duplicateNodes } from '../state/duplicate'
 import { isEditingText } from './isEditingText'
 
@@ -63,9 +64,14 @@ export function createClipboardInput(options: ClipboardInputOptions): () => void
     const subtree = copySelection(event)
     if (!subtree) return
     event.preventDefault()
+    // Parents noted before the removal, because afterwards the nodes cannot say who held them.
+    const parents = subtree.roots
+      .map((id) => scene.getNode(id)?.parent)
+      .filter((id): id is NodeId => id != null)
     // One transaction, so the removal and the cleared selection are a single undo step.
     scene.transact(() => {
       for (const id of subtree.roots) scene.remove(id)
+      relayout(scene, parents)
       options.setSelection([])
     })
   }
@@ -84,8 +90,11 @@ export function createClipboardInput(options: ClipboardInputOptions): () => void
     }
 
     event.preventDefault()
-    const created = instantiateSubtree(scene, subtree, destination(), PASTE_OFFSET)
-    options.setSelection(created.map((node) => node.id))
+    scene.transact(() => {
+      const created = instantiateSubtree(scene, subtree, destination(), PASTE_OFFSET)
+      relayout(scene, created.map((node) => node.id))
+      options.setSelection(created.map((node) => node.id))
+    })
   }
 
   const onKeyDown = (event: KeyboardEvent): void => {

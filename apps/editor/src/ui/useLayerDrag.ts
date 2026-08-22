@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import type { NodeId } from '@figma-canvas/document'
+import { relayout } from '../state/autoLayout'
 import { scene } from '../state/scene'
 import { useUI } from '../state/uiStore'
 
@@ -90,8 +91,14 @@ export function useLayerDrag(): LayerDrag {
 }
 
 function applyDrop(id: NodeId, drop: DropTarget): void {
+  // The parent left behind closes its flow in the same step as the move that emptied it.
+  const oldParent = scene.getNode(id)?.parent
+
   if (drop.position === 'into') {
-    scene.reparent(id, drop.id)
+    scene.transact(() => {
+      scene.reparent(id, drop.id)
+      relayout(scene, oldParent ? [id, oldParent] : [id])
+    })
     // A collapsed frame still accepts a drop, but the moved row would vanish into the
     // closed subtree. Opening the target keeps the result of the drop on screen.
     useUI.getState().setCollapsed(drop.id, false)
@@ -100,17 +107,24 @@ function applyDrop(id: NodeId, drop: DropTarget): void {
 
   const sibling = scene.getNode(drop.id)
   if (!sibling?.parent) return
+  const siblingParent = sibling.parent
 
   // The panel lists children back to front reversed, so "before" on screen is a higher index.
   const base = scene.indexOf(drop.id)
   const index = drop.position === 'before' ? base + 1 : base
 
-  if (sibling.parent === scene.getNode(id)?.parent) {
+  if (siblingParent === scene.getNode(id)?.parent) {
     // Same parent, so this is only a reshuffle. Removing the node first would shift the
     // index, which is why reorder takes a final position rather than a delta.
     const from = scene.indexOf(id)
-    scene.reorder(id, from < index ? index - 1 : index)
+    scene.transact(() => {
+      scene.reorder(id, from < index ? index - 1 : index)
+      relayout(scene, [id])
+    })
     return
   }
-  scene.reparent(id, sibling.parent, index)
+  scene.transact(() => {
+    scene.reparent(id, siblingParent, index)
+    relayout(scene, oldParent ? [id, oldParent] : [id])
+  })
 }

@@ -9,9 +9,13 @@ import {
   caretAtPoint,
   fromHex,
   hitTest,
+  insertionIndex,
   invert,
+  isAutoLayoutFrame,
   containsPoint,
   nodesIn,
+  type FrameLayout,
+  type LayoutChild,
   type Mat2D,
   type NodeId,
   type Rect,
@@ -34,6 +38,7 @@ import {
   type HandleId,
   type Viewport,
 } from '@figma-canvas/renderer'
+import { relayout } from '../state/autoLayout'
 import { duplicateNodes } from '../state/duplicate'
 import {
   applyRotation,
@@ -44,6 +49,7 @@ import {
 } from '../state/rotate'
 import {
   anchorFor,
+  axesFor,
   localBox,
   resizedInPlace,
   resizedNode,
@@ -120,6 +126,12 @@ interface DraggedNode {
   parentInverse: Mat2D
   startTransform: Mat2D
   startLocal: Vec2
+  /**
+   * Where the gesture found the node, for Escape to put it back. Separate from the fields
+   * above because a live reparent mid drag rebases those against the new parent, while a
+   * cancel has to reach past every rebase to the true beginning.
+   */
+  origin: { parent: NodeId | null; index: number; transform: Mat2D }
 }
 
 interface ResizedNode extends ResizeTarget {
@@ -137,6 +149,13 @@ interface LocalResize {
   worldInverse: Mat2D
   startTransform: Mat2D
   startSize: Size
+  /**
+   * Dragging a handle can flip a hug axis or a fill axis to fixed, so a cancel has to be
+   * able to flip them back. Captured whole rather than as flags, for the same reason the
+   * transform is.
+   */
+  startLayout?: FrameLayout
+  startLayoutChild?: LayoutChild
 }
 
 interface Drag {
@@ -182,6 +201,12 @@ interface Drag {
   /** The one node's own angle at grab time, or null for a multiple selection. */
   startNodeAngle?: number | null
   rotating?: RotateTarget[]
+  /**
+   * Move only: the auto layout frame currently holding a slot open for the dragged node.
+   * While set, the node floats with the pointer, every layout pass excludes it, and the
+   * release is what snaps it into the slot.
+   */
+  reorderFrame?: NodeId
 }
 
 interface Modifiers {
@@ -274,6 +299,7 @@ export function createPointerInput(options: PointerInputOptions): () => void {
       document.update<TextNode>(node.id, {
         transform: { ...IDENTITY_MATRIX, tx: origin.x, ty: origin.y },
       })
+      relayout(document, [node.id])
       options.setSelection([node.id])
     })
 
@@ -529,6 +555,11 @@ export function createPointerInput(options: PointerInputOptions): () => void {
       worldInverse: invert(document.worldTransform(id)),
       startTransform: { ...node.transform },
       startSize: { ...node.size },
+      startLayout:
+        node.type === 'frame' && node.layout
+          ? { ...node.layout, padding: { ...node.layout.padding } }
+          : undefined,
+      startLayoutChild: node.layoutChild ? { ...node.layoutChild } : undefined,
     }
   }
 
@@ -561,9 +592,34 @@ export function createPointerInput(options: PointerInputOptions): () => void {
           parentInverse,
           startTransform: { ...node.transform },
           startLocal: applyToPoint(parentInverse, world),
+          origin: {
+            parent: node.parent,
+            index: document.indexOf(id),
+            transform: { ...node.transform },
+          },
         },
       ]
     })
+
+  /**
+   * The same node re-anchored against its parent of the moment, after a live reparent.
+   *
+   * The pointer's world offset from the node is unchanged, so recapturing both sides of the
+   * subtraction at the same instant keeps the node exactly where it was under the cursor.
+   * `origin` is deliberately carried over untouched: it is the cancel's, not the drag's.
+   */
+  const rebasedNode = (dragged: DraggedNode, world: Vec2): DraggedNode => {
+    const node = document.expectNode(dragged.id)
+    const parentInverse = invert(
+      node.parent ? document.worldTransform(node.parent) : IDENTITY_MATRIX,
+    )
+    return {
+      ...dragged,
+      parentInverse,
+      startTransform: { ...node.transform },
+      startLocal: applyToPoint(parentInverse, world),
+    }
+  }
 
   /**
    * Not dragging, so this is only about what the cursor should look like. The value goes on a
@@ -699,6 +755,64 @@ export function createPointerInput(options: PointerInputOptions): () => void {
         })
       }
     })
+
+    applyFlow(current, world)
+  }
+
+  /**
+   * Keeps a single dragged node honest against auto layout while it moves.
+   *
+   * Entering an auto layout frame parents the node there at once and opens a slot at the
+   * pointer; moving along the frame slides the slot; leaving hands the node to whatever is
+   * under the pointer, so the flow closes behind it. Every layout pass excludes the dragged
+   * node, which is what lets it float with the pointer while only the siblings shift; the
+   * release runs one pass without the exclusion and that is what snaps it in.
+   *
+   * A multiple selection has no single slot to hold open, so it keeps the drop-on-release
+   * path untouched.
+   */
+  const applyFlow = (current: Drag, world: Vec2): void => {
+    if (current.nodes.length !== 1) return
+    const dragged = current.nodes[0]
+    if (!dragged) return
+    const node = document.getNode(dragged.id)
+    if (!node) return
+
+    const exclude = new Set([dragged.id])
+    const target = containerAt(document, world, exclude)
+    if (document.isAncestorOf(dragged.id, target.id)) return
+
+    if (isAutoLayoutFrame(document.getNode(target.id))) {
+      const previous = node.parent
+      document.transact(() => {
+        if (node.parent !== target.id) {
+          document.reparent(dragged.id, target.id)
+          current.nodes = [rebasedNode(dragged, world)]
+        }
+        const local = applyToPoint(invert(document.worldTransform(target.id)), world)
+        const slot = insertionIndex(document, target.id, local, exclude)
+        if (document.indexOf(dragged.id) !== slot) document.reorder(dragged.id, slot)
+        relayout(
+          document,
+          previous && previous !== target.id ? [dragged.id, previous] : [dragged.id],
+          exclude,
+        )
+      })
+      current.reorderFrame = target.id
+      return
+    }
+
+    if (current.reorderFrame) {
+      const previous = node.parent
+      document.transact(() => {
+        if (node.parent !== target.id) {
+          document.reparent(dragged.id, target.id)
+          current.nodes = [rebasedNode(dragged, world)]
+        }
+        if (previous) relayout(document, [previous], exclude)
+      })
+      current.reorderFrame = undefined
+    }
   }
 
   const applyResize = (current: Drag, screen: Vec2, modifiers: Modifiers): void => {
@@ -741,7 +855,11 @@ export function createPointerInput(options: PointerInputOptions): () => void {
         return
       }
 
-      document.update(localResize.id, { transform, size })
+      document.transact(() => {
+        document.update(localResize.id, { transform, size, ...flowOverrides(node, handle) })
+        // A resized child reflows its siblings; a resized auto frame re-places its children.
+        relayout(document, [localResize.id])
+      })
       return
     }
 
@@ -765,7 +883,50 @@ export function createPointerInput(options: PointerInputOptions): () => void {
         const { transform, size } = resizedNode(target, anchorInParent, sx, sy)
         document.update(target.id, { transform, size })
       }
+      relayout(document, resizing.map((target) => target.id))
     })
+  }
+
+  /**
+   * Dragging a handle claims the axes it moves.
+   *
+   * On an auto layout frame a dragged hug axis becomes fixed, the frame's mirror of a text
+   * box losing `autoWidth` to the same gesture. On a child of one a dragged fill axis
+   * becomes fixed, because a hand set size and a computed one cannot both hold. Folded into
+   * the same update as the size, so one gesture is one step.
+   */
+  const flowOverrides = (
+    node: SceneNode | undefined,
+    handle: HandleId,
+  ): { layout?: FrameLayout; layoutChild?: LayoutChild } => {
+    if (!node) return {}
+    const axes = axesFor(handle)
+    const result: { layout?: FrameLayout; layoutChild?: LayoutChild } = {}
+
+    if (isAutoLayoutFrame(node)) {
+      const layout = node.layout
+      const horizontal = layout.direction === 'horizontal'
+      const dragsMain = horizontal ? axes.x : axes.y
+      const dragsCross = horizontal ? axes.y : axes.x
+      const mainSizing = dragsMain && layout.mainSizing === 'hug' ? 'fixed' : layout.mainSizing
+      const crossSizing = dragsCross && layout.crossSizing === 'hug' ? 'fixed' : layout.crossSizing
+      if (mainSizing !== layout.mainSizing || crossSizing !== layout.crossSizing) {
+        result.layout = { ...layout, padding: { ...layout.padding }, mainSizing, crossSizing }
+      }
+    }
+
+    const parent = node.parent ? document.getNode(node.parent) : undefined
+    if (isAutoLayoutFrame(parent) && node.layoutChild) {
+      const widthMode =
+        axes.x && node.layoutChild.widthMode === 'fill' ? 'fixed' : node.layoutChild.widthMode
+      const heightMode =
+        axes.y && node.layoutChild.heightMode === 'fill' ? 'fixed' : node.layoutChild.heightMode
+      if (widthMode !== node.layoutChild.widthMode || heightMode !== node.layoutChild.heightMode) {
+        result.layoutChild = { widthMode, heightMode }
+      }
+    }
+
+    return result
   }
 
   /**
@@ -872,6 +1033,7 @@ export function createPointerInput(options: PointerInputOptions): () => void {
         transform: { ...IDENTITY_MATRIX, tx: origin.x, ty: origin.y },
         size: { width: DEFAULT_SHAPE_SIZE, height: DEFAULT_SHAPE_SIZE },
       })
+      relayout(document, [node.id])
       options.setSelection([node.id])
     })
   }
@@ -883,6 +1045,9 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     if (drag.kind === 'create') {
       // Never moved, so it was a click. One default sized shape at the click point.
       if (!drag.created) createAtPoint(drag)
+      // Deferred from the draw itself: a shape being dragged out inside an auto frame would
+      // otherwise fight the layout for its own corner on every frame.
+      else relayout(document, [drag.created])
       if (drag.grouped) document.endHistoryGroup()
       // Back to move, the way Figma's tools are one shot rather than modal. Without this,
       // the very next click draws a second shape instead of selecting the first.
@@ -908,18 +1073,32 @@ export function createPointerInput(options: PointerInputOptions): () => void {
       return
     }
 
-    // A node dropped over a different frame joins it. Done on release rather than during the
-    // drag, so the tree does not churn while the pointer passes over things on its way.
     if (drag.kind === 'move' && drag.grouped) {
-      const target = containerAt(document, worldOf(screenOf(event)))
-      document.transact(() => {
-        for (const dragged of drag?.nodes ?? []) {
-          const node = document.getNode(dragged.id)
-          // reparent already refuses a node's own descendant, so a frame dropped onto itself
-          // simply stays where it is.
-          if (node && node.parent !== target.id) document.reparent(dragged.id, target.id)
-        }
-      })
+      if (drag.reorderFrame) {
+        // The gesture's layouts all excluded the dragged node so it could float. One pass
+        // without the exclusion is the release: the node snaps into the slot the siblings
+        // have been holding open. Reparenting already happened live.
+        relayout(document, [drag.reorderFrame])
+      } else {
+        // A node dropped over a different frame joins it. Done on release rather than during
+        // the drag, so the tree does not churn while the pointer passes over things on its way.
+        const target = containerAt(document, worldOf(screenOf(event)))
+        const moved: NodeId[] = []
+        const left: NodeId[] = []
+        document.transact(() => {
+          for (const dragged of drag?.nodes ?? []) {
+            const node = document.getNode(dragged.id)
+            // reparent already refuses a node's own descendant, so a frame dropped onto itself
+            // simply stays where it is.
+            if (node && node.parent !== target.id) {
+              if (node.parent) left.push(node.parent)
+              document.reparent(dragged.id, target.id)
+              moved.push(dragged.id)
+            }
+          }
+          if (moved.length > 0) relayout(document, [...moved, ...left])
+        })
+      }
     }
 
     if (drag.grouped) document.endHistoryGroup()
@@ -954,24 +1133,58 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     if (current.kind === 'move' && current.grouped) {
       const duplicatedFrom = current.duplicatedFrom
       document.transact(() => {
+        const parents: NodeId[] = []
         for (const dragged of current.nodes) {
           // An option drag copy has no meaningful "before": it did not exist until this
           // gesture created it, so cancelling removes it rather than trying to restore it.
-          if (duplicatedFrom) document.remove(dragged.id)
-          else document.update(dragged.id, { transform: dragged.startTransform })
+          if (duplicatedFrom) {
+            const parent = document.getNode(dragged.id)?.parent
+            if (parent) parents.push(parent)
+            document.remove(dragged.id)
+            continue
+          }
+          // The gesture may have reparented or reordered the node live on its way through
+          // an auto layout frame, so the cancel walks it all the way back: parent first,
+          // then place among the siblings, then the transform, which `origin` holds in the
+          // original parent's space.
+          const node = document.getNode(dragged.id)
+          if (!node) continue
+          if (node.parent) parents.push(node.parent)
+          if (dragged.origin.parent && node.parent !== dragged.origin.parent) {
+            document.reparent(dragged.id, dragged.origin.parent, dragged.origin.index)
+            parents.push(dragged.origin.parent)
+          } else if (document.indexOf(dragged.id) !== dragged.origin.index) {
+            document.reorder(dragged.id, dragged.origin.index)
+          }
+          document.update(dragged.id, { transform: dragged.origin.transform })
         }
+        // Deterministic and idempotent, so re-running the layout over the restored inputs
+        // lands the siblings exactly where the gesture found them.
+        relayout(document, [...current.nodes.map((dragged) => dragged.id), ...parents])
         // The originals never moved, so reselecting them leaves the gesture with no trace.
         if (duplicatedFrom) options.setSelection(duplicatedFrom)
       })
     } else if (current.kind === 'resize' && current.grouped) {
       if (current.localResize) {
-        const { id, startTransform, startSize } = current.localResize
-        document.update(id, { transform: startTransform, size: startSize })
+        const { id, startTransform, startSize, startLayout, startLayoutChild } = current.localResize
+        const node = document.getNode(id)
+        document.transact(() => {
+          document.update(id, {
+            transform: startTransform,
+            size: startSize,
+            // Only put back what the gesture could have taken: a node that never had the
+            // field must not gain a key holding undefined.
+            ...(node?.type === 'frame' && node.layout ? { layout: startLayout } : {}),
+            ...(node?.layoutChild ? { layoutChild: startLayoutChild } : {}),
+          })
+          relayout(document, [id])
+        })
       } else if (current.resizing) {
         document.transact(() => {
           for (const target of current.resizing ?? []) {
             document.update(target.id, { transform: target.startTransform, size: target.startSize })
           }
+          relayout(document, (current.resizing ?? []).map((target) => target.id))
         })
       }
     } else if (current.kind === 'rotate' && current.grouped && current.rotating && current.pivot) {

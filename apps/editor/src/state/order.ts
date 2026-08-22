@@ -1,4 +1,5 @@
 import type { NodeId, SceneDocument } from '@figma-canvas/document'
+import { relayout } from './autoLayout'
 
 /**
  * Z-order commands.
@@ -54,5 +55,9 @@ export function reorderSelection(
           break
       }
     }
+
+    // In an auto layout frame paint order and flow order are the same array, so a z-order
+    // command is also a move.
+    relayout(scene, selection)
   })
 }

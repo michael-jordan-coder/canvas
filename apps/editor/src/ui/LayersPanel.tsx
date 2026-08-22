@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactElement } from 'react'
 import type { NodeId, NodeType, SceneNode } from '@figma-canvas/document'
+import { relayout } from '../state/autoLayout'
 import { scene, useChildren, useNode } from '../state/scene'
 import { useUI } from '../state/uiStore'
 import {
@@ -154,7 +155,14 @@ function LayerRow({ id, drag }: { id: NodeId; drag: LayerDrag }): ReactElement |
           type="button"
           className={styles.visibility}
           aria-label={node.visible ? 'Hide' : 'Show'}
-          onClick={() => scene.update(id, { visible: !node.visible })}
+          onClick={() =>
+            // A hidden child leaves an auto layout flow, so the siblings close the gap in
+            // the same undo step as the toggle.
+            scene.transact(() => {
+              scene.update(id, { visible: !node.visible })
+              relayout(scene, [id])
+            })
+          }
         >
           {node.visible ? <VisibleIcon size={12} /> : <HiddenIcon size={12} />}
         </button>

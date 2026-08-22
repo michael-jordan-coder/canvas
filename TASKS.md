@@ -130,6 +130,47 @@ Deferred, and deliberately not in the MVP:
 - [ ] Rich text: more than one style in a node
 - [ ] Plain text pasted onto the canvas becoming a text node
 
+## Auto layout
+
+Figma-style auto layout: frames that lay their children out in a row or column. The core set
+has shipped; the engine is pure and lives in the document package, invocation is push-based
+from every mutation site.
+
+- [x] `FrameLayout` on frames (direction, gap, per-side padding, main and cross alignment,
+      hug/fixed per axis) and `LayoutChild` on every node (fixed/fill per axis).
+      `packages/document/src/node.ts`, with both deep-copied in `cloneNodeAs`.
+- [x] The engine: pure, DOM-free, measurer-injected like text layout. Resolves each child
+      once with its final constraints, epsilon-compares every write so a settled document
+      produces zero patches. `packages/document/src/layout/autoLayout.ts`
+- [x] `SCHEMA_VERSION` 4. Absence means no layout, so version 3 files need no migration and
+      an older build refuses a version 4 file by version. `packages/document/src/serialize.ts`
+- [x] Push invocation: `relayout` called inside the same transact as every mutation that can
+      disturb a layout, so one edit is one undo step and undo never runs layout.
+      `apps/editor/src/state/autoLayout.ts`, wired into delete/cut/paste/duplicate, layer
+      drop, z-order, updateText, remeasureAll, load, visibility toggle, resize, rotate, nudge.
+- [x] Panel: Auto layout section on frames (add/remove, direction, gap, padding X/Y,
+      alignments), Hug toggles in Size, Fill toggles on children of auto frames, X/Y and
+      derived axes reporting readOnly. `apps/editor/src/ui/PropertiesPanel.tsx`
+- [x] Shift+A toggles auto layout on a single selected frame; enabling infers direction, gap
+      and padding from where the children sit, so nothing moves.
+- [x] Canvas reorder drag: a single child of an auto frame floats with the pointer, siblings
+      shift live around an excluded slot, leaving the frame un-parents live, release snaps
+      in, Escape restores parent, index, transform and siblings exactly.
+      `apps/editor/src/input/pointerInput.ts` (`applyFlow`)
+- [x] Dragging a handle claims its axes: a hug axis flips to fixed, a child's fill axis
+      flips to fixed, both restored by Escape.
+- [x] Arrow keys on an auto child step it through the flow along the main axis; cross-axis
+      arrows do nothing.
+
+Deferred, deliberately:
+
+- [ ] Wrap, min/max sizes, absolutely positioned children, negative gap
+- [ ] Per-side padding editor (the model already stores four sides)
+- [ ] Insertion indicator line while reorder-dragging (the siblings shifting is the current
+      affordance)
+- [ ] Reorder drag for multiple selections (falls back to drop-on-release)
+- [ ] `space-between` has no icon treatment, only the Space segment
+
 ## Backlog
 
 Deferred from the panel polish pass:

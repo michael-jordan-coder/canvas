@@ -3,19 +3,31 @@ import {
   angleOf,
   degrees,
   fromHex,
+  isAutoLayoutFrame,
   isPainted,
   normalizeDegrees,
   radians,
+  type FrameLayout,
   type FrameNode,
+  type LayoutAlign,
+  type LayoutDirection,
   type PaintedNode,
   type RectangleNode,
   type RGBA,
   type SceneNode,
+  type Size,
   type Stroke,
   type StrokeAlign,
   type TextNode,
 } from '@figma-canvas/document'
 import { scene, useNode } from '../state/scene'
+import {
+  addAutoLayout,
+  relayout,
+  removeAutoLayout,
+  updateFrameLayout,
+  updateLayoutChild,
+} from '../state/autoLayout'
 import { updateText } from '../state/font'
 import { setNodesAngle } from '../state/rotate'
 import { useUI } from '../state/uiStore'
@@ -43,19 +55,50 @@ export function PropertiesPanel(): ReactElement {
   )
 }
 
+/** Which of the frame's sizing slots a panel axis is, given the direction. */
+function sizingKey(
+  layout: FrameLayout,
+  axis: keyof Size,
+): 'mainSizing' | 'crossSizing' {
+  const isMain = (axis === 'width') === (layout.direction === 'horizontal')
+  return isMain ? 'mainSizing' : 'crossSizing'
+}
+
 function NodeProperties({ node }: { node: SceneNode }): ReactElement {
+  // The parent decides whether position and size belong to a layout, and its own layout can
+  // change under a still selected child, so the panel subscribes to it too.
+  const parent = useNode(node.parent ?? undefined)
+  const inAutoLayout = isAutoLayoutFrame(parent)
+  const layout = node.type === 'frame' ? node.layout : undefined
+
+  const setSize = (size: Size): void => {
+    scene.transact(() => {
+      scene.update(node.id, { size })
+      relayout(scene, [node.id])
+    })
+  }
+
+  const hugs = (axis: keyof Size): boolean =>
+    layout !== undefined && layout[sizingKey(layout, axis)] === 'hug'
+  const fills = (axis: keyof Size): boolean =>
+    inAutoLayout &&
+    (axis === 'width' ? node.layoutChild?.widthMode : node.layoutChild?.heightMode) === 'fill'
+
   return (
     <div className={styles.sections}>
       <section className={styles.section}>
         <h3 className={styles.title}>Position</h3>
         <div className={styles.grid}>
+          {/* Inside an auto layout frame position belongs to the layout, so both report. */}
           <NumberField
             label="X"
+            readOnly={inAutoLayout}
             value={node.transform.tx}
             onCommit={(tx) => scene.update(node.id, { transform: { ...node.transform, tx } })}
           />
           <NumberField
             label="Y"
+            readOnly={inAutoLayout}
             value={node.transform.ty}
             onCommit={(ty) => scene.update(node.id, { transform: { ...node.transform, ty } })}
           />
@@ -68,31 +111,91 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
           {/*
             * On text, W is editable only once the box is fixed width, where it is the width
             * lines wrap to. H always reports: it is however many lines that produces, and a
-            * field that set it would be overwritten by the next keystroke.
+            * field that set it would be overwritten by the next keystroke. A hug axis and a
+            * fill axis report for the same reason: the number is the layout's answer.
             */}
           <NumberField
             label="W"
-            readOnly={node.type === 'text' && node.autoWidth}
+            readOnly={(node.type === 'text' && node.autoWidth) || hugs('width') || fills('width')}
             value={node.size.width}
             onCommit={(width) =>
               node.type === 'text'
                 ? setTextWidth(node, Math.max(MIN_NODE_SIZE, width))
-                : scene.update(node.id, {
-                    size: { ...node.size, width: Math.max(MIN_NODE_SIZE, width) },
-                  })
+                : setSize({ ...node.size, width: Math.max(MIN_NODE_SIZE, width) })
             }
           />
           <NumberField
             label="H"
-            readOnly={node.type === 'text'}
+            readOnly={node.type === 'text' || hugs('height') || fills('height')}
             value={node.size.height}
             onCommit={(height) =>
-              scene.update(node.id, {
-                size: { ...node.size, height: Math.max(MIN_NODE_SIZE, height) },
-              })
+              setSize({ ...node.size, height: Math.max(MIN_NODE_SIZE, height) })
             }
           />
         </div>
+        {layout && (
+          <>
+            <label className={styles.toggle}>
+              <input
+                type="checkbox"
+                className={styles.checkbox}
+                checked={hugs('width')}
+                onChange={(event) =>
+                  updateFrameLayout(scene, node.id, {
+                    [sizingKey(layout, 'width')]: event.target.checked ? 'hug' : 'fixed',
+                  })
+                }
+              />
+              Hug width
+            </label>
+            <label className={styles.toggle}>
+              <input
+                type="checkbox"
+                className={styles.checkbox}
+                checked={hugs('height')}
+                onChange={(event) =>
+                  updateFrameLayout(scene, node.id, {
+                    [sizingKey(layout, 'height')]: event.target.checked ? 'hug' : 'fixed',
+                  })
+                }
+              />
+              Hug height
+            </label>
+          </>
+        )}
+        {inAutoLayout && (
+          <>
+            <label className={styles.toggle}>
+              <input
+                type="checkbox"
+                className={styles.checkbox}
+                checked={fills('width')}
+                onChange={(event) =>
+                  updateLayoutChild(scene, node, {
+                    widthMode: event.target.checked ? 'fill' : 'fixed',
+                  })
+                }
+              />
+              Fill width
+            </label>
+            {/* Text height is measured from the text, so it is never anyone's to fill. */}
+            {node.type !== 'text' && (
+              <label className={styles.toggle}>
+                <input
+                  type="checkbox"
+                  className={styles.checkbox}
+                  checked={fills('height')}
+                  onChange={(event) =>
+                    updateLayoutChild(scene, node, {
+                      heightMode: event.target.checked ? 'fill' : 'fixed',
+                    })
+                  }
+                />
+                Fill height
+              </label>
+            )}
+          </>
+        )}
       </section>
 
       <section className={styles.section}>
@@ -145,6 +248,7 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
         )}
       </section>
 
+      {node.type === 'frame' && <AutoLayoutSection node={node} />}
       {node.type === 'text' && <TextSection node={node} />}
       {isPainted(node) && <FillSection node={node} />}
       {/*
@@ -153,6 +257,109 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
         */}
       {isPainted(node) && node.type !== 'text' && <StrokeSection node={node} />}
     </div>
+  )
+}
+
+const DIRECTIONS = [
+  { value: 'horizontal', label: 'Row' },
+  { value: 'vertical', label: 'Column' },
+] as const satisfies readonly { value: LayoutDirection; label: string }[]
+
+const MAIN_ALIGNS = [
+  { value: 'start', label: 'Start' },
+  { value: 'center', label: 'Center' },
+  { value: 'end', label: 'End' },
+  { value: 'space-between', label: 'Space' },
+] as const satisfies readonly { value: LayoutAlign; label: string }[]
+
+const CROSS_ALIGNS = [
+  { value: 'start', label: 'Start' },
+  { value: 'center', label: 'Center' },
+  { value: 'end', label: 'End' },
+] as const satisfies readonly { value: LayoutAlign; label: string }[]
+
+function AutoLayoutSection({ node }: { node: FrameNode }): ReactElement {
+  const layout = node.layout
+
+  if (!layout) {
+    return (
+      <section className={styles.section}>
+        <h3 className={styles.title}>Auto layout</h3>
+        <button
+          type="button"
+          className={styles.add}
+          onClick={() => addAutoLayout(scene, node.id)}
+        >
+          Add auto layout
+        </button>
+      </section>
+    )
+  }
+
+  const set = (changes: Partial<FrameLayout>): void =>
+    updateFrameLayout(scene, node.id, changes)
+
+  return (
+    <section className={styles.section}>
+      <h3 className={styles.title}>Auto layout</h3>
+      <div className={styles.headed}>
+        <SegmentedField
+          label="Flow"
+          value={layout.direction}
+          options={DIRECTIONS}
+          onChange={(direction: LayoutDirection) => set({ direction })}
+        />
+        <button
+          type="button"
+          className={styles.remove}
+          aria-label="Remove auto layout"
+          onClick={() => removeAutoLayout(scene, node.id)}
+        >
+          &minus;
+        </button>
+      </div>
+      <NumberField
+        wide
+        label="Gap"
+        value={layout.gap}
+        onCommit={(gap) => set({ gap: Math.max(0, gap) })}
+      />
+      {/*
+        * The panel edits padding as a horizontal and a vertical pair, which is Figma's own
+        * resting shape for it. The model keeps all four sides, so a per side editor can land
+        * later without touching the file format.
+        */}
+      <NumberField
+        wide
+        label="Pad X"
+        value={layout.padding.left}
+        onCommit={(value) => {
+          const side = Math.max(0, value)
+          set({ padding: { ...layout.padding, left: side, right: side } })
+        }}
+      />
+      <NumberField
+        wide
+        label="Pad Y"
+        value={layout.padding.top}
+        onCommit={(value) => {
+          const side = Math.max(0, value)
+          set({ padding: { ...layout.padding, top: side, bottom: side } })
+        }}
+      />
+      <SegmentedField
+        label="Align"
+        value={layout.mainAlign}
+        options={MAIN_ALIGNS}
+        onChange={(mainAlign: LayoutAlign) => set({ mainAlign })}
+      />
+      <SegmentedField
+        label="Cross"
+        value={layout.crossAlign}
+        options={CROSS_ALIGNS}
+        onChange={(crossAlign: LayoutAlign) => set({ crossAlign })}
+      />
+    </section>
   )
 }
 

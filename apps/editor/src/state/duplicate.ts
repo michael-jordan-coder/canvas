@@ -6,6 +6,7 @@ import {
   type SceneNode,
   type Vec2,
 } from '@figma-canvas/document'
+import { relayout } from './autoLayout'
 
 /**
  * Copies nodes next to themselves and returns the copies.
@@ -23,5 +24,10 @@ export function duplicateNodes(
 
   const firstRoot = subtree.roots[0]
   const parent = (firstRoot ? scene.getNode(firstRoot)?.parent : null) ?? scene.rootId
-  return instantiateSubtree(scene, subtree, parent, offset)
+  return scene.transact(() => {
+    const created = instantiateSubtree(scene, subtree, parent, offset)
+    // A copy dropped into an auto layout frame joins the flow immediately.
+    relayout(scene, created.map((node) => node.id))
+    return created
+  })
 }
