@@ -15,6 +15,7 @@ import {
   VisibleIcon,
   type IconProps,
 } from './icons'
+import { PanelResizer } from './PanelResizer'
 import { useLayerDrag, type LayerDrag } from './useLayerDrag'
 import styles from './LayersPanel.module.css'
 
@@ -51,6 +52,12 @@ export function LayersPanel(): ReactElement {
 
   return (
     <aside className={styles.panel}>
+      <PanelResizer
+        side="left"
+        cssVar="--panel-width-left"
+        storageKey="figma-canvas:layers-width"
+        label="Resize layers panel"
+      />
       <header className={styles.header}>Layers</header>
       <div className={styles.tree}>
         {roots.length === 0 ? (

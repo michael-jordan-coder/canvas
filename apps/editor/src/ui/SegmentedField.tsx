@@ -3,8 +3,15 @@ import styles from './SegmentedField.module.css'
 
 interface SegmentedFieldProps<T extends string> {
   label: string
+  /** Drops the visible label column where the layout around the control already names it. */
+  hideLabel?: boolean
   value: T
-  options: readonly { readonly value: T; readonly label: string }[]
+  options: readonly {
+    readonly value: T
+    readonly label: string
+    /** Drawn instead of the label text; the label still names the option for assistive tech. */
+    readonly icon?: ReactElement
+  }[]
   onChange: (value: T) => void
 }
 
@@ -12,18 +19,19 @@ interface SegmentedFieldProps<T extends string> {
  * A row of mutually exclusive choices, all of them visible.
  *
  * A select would hide two of three behind a click, and these are the kind of thing people
- * flip between rather than set once. Which one is on is carried by the accent, since that
- * is the only thing on screen allowed to be a colour.
+ * flip between rather than set once. Which one is on reads as a raised chip on the field
+ * tone, so the control needs no colour until it is focused.
  */
 export function SegmentedField<T extends string>({
   label,
+  hideLabel,
   value,
   options,
   onChange,
 }: SegmentedFieldProps<T>): ReactElement {
   return (
     <div className={styles.field}>
-      <span className={styles.label}>{label}</span>
+      {!hideLabel && <span className={styles.label}>{label}</span>}
       <div className={styles.segments} role="group" aria-label={label}>
         {options.map((option) => (
           <button
@@ -31,9 +39,11 @@ export function SegmentedField<T extends string>({
             type="button"
             className={styles.segment}
             aria-pressed={option.value === value}
+            aria-label={option.icon ? option.label : undefined}
+            title={option.icon ? option.label : undefined}
             onClick={() => onChange(option.value)}
           >
-            {option.label}
+            {option.icon ?? option.label}
           </button>
         ))}
       </div>

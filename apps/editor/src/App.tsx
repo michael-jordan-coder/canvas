@@ -1,5 +1,6 @@
 import { useEffect, type ReactElement } from 'react'
 import type { NodeId } from '@figma-canvas/document'
+import { createAgentConnection } from './agent/connection'
 import { CanvasHost } from './canvas/CanvasHost'
 import { createClipboardInput } from './input/clipboardInput'
 import { createKeyboardInput } from './input/keyboardInput'
@@ -9,6 +10,7 @@ import './state/font'
 import { selectTool } from './state/textEditing'
 import { useUI } from './state/uiStore'
 import { showStatsFromLocation } from './state/stats'
+import { AgentPanel } from './ui/AgentPanel'
 import { LayersPanel } from './ui/LayersPanel'
 import { PerfReadout } from './ui/PerfReadout'
 import { PropertiesPanel } from './ui/PropertiesPanel'
@@ -29,9 +31,11 @@ export function App(): ReactElement {
     }
     const disposeKeyboard = createKeyboardInput(wiring)
     const disposeClipboard = createClipboardInput(wiring)
+    const disposeAgent = createAgentConnection()
     return () => {
       disposeKeyboard()
       disposeClipboard()
+      disposeAgent()
     }
   }, [])
 
@@ -42,6 +46,7 @@ export function App(): ReactElement {
         <LayersPanel />
         <main className={styles.viewport}>
           <CanvasHost />
+          <AgentPanel />
           {showStats && <PerfReadout />}
         </main>
         <PropertiesPanel />

@@ -1,11 +1,16 @@
+/*
+ * A filled slot rather than a border that appears on hover: the field tone against the
+ * panel is what says "this number is editable" before the pointer ever arrives.
+ */
 .field {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   height: var(--row-height);
   padding: 0 var(--space-2);
+  background: var(--field);
   border: 1px solid transparent;
-  border-radius: var(--radius);
+  border-radius: var(--radius-field);
   transition: border-color var(--duration) var(--ease);
 }
 
@@ -22,6 +27,14 @@
      the thing that shrinks, so no two rows would share a column. */
   flex: none;
   width: 12px;
+  color: var(--text-secondary);
+}
+
+/* An icon standing in for the label text: centred in a slightly wider column. */
+.iconLabel {
+  display: grid;
+  place-items: center;
+  width: 16px;
   color: var(--text-secondary);
 }
 
@@ -61,6 +74,10 @@
  * both would offer an edit that will not happen, and the secondary text colour to say the
  * number is reported rather than set.
  */
+.readOnly {
+  background: transparent;
+}
+
 .readOnly:hover,
 .readOnly:focus-within {
   border-color: transparent;

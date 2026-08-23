@@ -274,3 +274,148 @@ export function CornersIcon(props: IconProps): ReactElement {
     </Svg>
   )
 }
+
+/*
+ * Field labels for the number fields: each shows the measurement it stands for, drawn in
+ * the same 1.25 stroke as the toolbar so a label and a button read as one family.
+ */
+
+export function AngleIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <g>
+        <path {...stroke} d="M12.5 12.5H3.5V3.5" />
+        <path {...stroke} d="M8.5 12.5a5 5 0 0 0-5-5" />
+      </g>
+    </Svg>
+  )
+}
+
+export function RadiusIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <path {...stroke} d="M3.5 12.5v-4a5 5 0 0 1 5-5h4" />
+    </Svg>
+  )
+}
+
+export function OpacityIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <g>
+        <circle {...stroke} cx="6.2" cy="8" r="4.4" />
+        <path {...stroke} d="M9.8 3.7a4.4 4.4 0 0 1 0 8.6" strokeDasharray="1.6 1.7" />
+      </g>
+    </Svg>
+  )
+}
+
+export function GapIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <g>
+        <path {...stroke} d="M4 3v10M12 3v10" />
+        <path {...stroke} d="M6.5 8h3" />
+      </g>
+    </Svg>
+  )
+}
+
+export function PaddingXIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <g>
+        <path {...stroke} d="M3 3.5v9M13 3.5v9" />
+        <rect {...stroke} x="6.25" y="6.25" width="3.5" height="3.5" />
+      </g>
+    </Svg>
+  )
+}
+
+export function PaddingYIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <g>
+        <path {...stroke} d="M3.5 3h9M3.5 13h9" />
+        <rect {...stroke} x="6.25" y="6.25" width="3.5" height="3.5" />
+      </g>
+    </Svg>
+  )
+}
+
+export function ArrowRightIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <path {...stroke} d="M3 8h10m0 0L9.5 4.5M13 8l-3.5 3.5" />
+    </Svg>
+  )
+}
+
+export function ArrowDownIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <path {...stroke} d="M8 3v10m0 0 3.5-3.5M8 13 4.5 9.5" />
+    </Svg>
+  )
+}
+
+/** Space between: children pushed to the ends of the axis. */
+export function SpaceBetweenIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <g>
+        <path {...stroke} d="M3 3v10M13 3v10" />
+        <rect {...stroke} x="4.75" y="5.5" width="2" height="5" />
+        <rect {...stroke} x="9.25" y="5.5" width="2" height="5" />
+      </g>
+    </Svg>
+  )
+}
+
+export function MinusIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <path {...stroke} d="M3.5 8h9" />
+    </Svg>
+  )
+}
+
+export function AssistantIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <path {...stroke} d="M8 2.5 9.4 6.6 13.5 8 9.4 9.4 8 13.5 6.6 9.4 2.5 8 6.6 6.6z" />
+    </Svg>
+  )
+}
+
+export function PlusIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <path {...stroke} d="M8 3.5v9M3.5 8h9" />
+    </Svg>
+  )
+}
+
+export function CloseIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <path {...stroke} d="m4.5 4.5 7 7m0-7-7 7" />
+    </Svg>
+  )
+}
+
+export function SendIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <path {...stroke} d="M8 12.5v-9m0 0L4.5 7M8 3.5 11.5 7" />
+    </Svg>
+  )
+}
+
+export function StopIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <rect {...stroke} x="4.5" y="4.5" width="7" height="7" />
+    </Svg>
+  )
+}

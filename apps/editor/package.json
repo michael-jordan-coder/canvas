@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@figma-canvas/agent-server": "workspace:*",
     "@figma-canvas/document": "workspace:*",
     "@figma-canvas/renderer": "workspace:*",
     "react": "^19.2.8",
