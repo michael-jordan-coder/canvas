@@ -369,8 +369,15 @@ frames stay as they are.
 Read, which has shipped:
 
 - [x] The hand-written registry is gone. A Vite plugin parses the component folder with a real
-      type checker and serves it as `virtual:component-library`; the registry pairs that with
-      the modules from `import.meta.glob`. `apps/editor/vite-plugins/`
+      type checker and serves it as `virtual:component-library`, which carries the description
+      and an `import.meta.glob` over the same folder, so the registry is handed both halves at
+      once. `apps/editor/vite-plugins/`
+- [x] A component file added or removed while the editor is running reaches the panel with no
+      restart and no reload. Two causes, and either one alone left it broken: `handleHotUpdate`
+      is called for edits only, so create and delete reached no plugin, and a glob written in
+      `registry.tsx` could never re-expand, since Vite does not invalidate an importer that
+      accepts the module which changed. `hotUpdate` fixes the first, emitting the glob into the
+      virtual module fixes the second.
 - [x] The properties panel is generated from the props type. A union of string literals is a
       dropdown, a default comes from the destructuring, and a prop the document cannot store
       gets no control rather than a broken one.

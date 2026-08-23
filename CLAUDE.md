@@ -651,10 +651,29 @@ variant added to `ButtonVariant` showed up in TypeScript, in autocomplete and in
 component's behaviour, and nowhere in the panel offering it.
 
 So the library is read off disk. The Vite plugin in `apps/editor/vite-plugins/` parses the
-component folder and serves the result as `virtual:component-library`; the registry pairs that
-description with the modules themselves, which come from `import.meta.glob` so Vite owns
-loading and React Fast Refresh keeps working. **Adding a prop to a component's type adds a
-field to the properties panel, on save, with no reload and no registration anywhere.**
+component folder and serves the result as `virtual:component-library`, which carries both
+halves: the description as data, and the modules through an `import.meta.glob` in the emitted
+source, so Vite owns loading and React Fast Refresh keeps working. **Adding a prop to a
+component's type adds a field to the properties panel, on save, with no reload and no
+registration anywhere. So does adding a whole component file.**
+
+**The glob is emitted by the plugin rather than written in the registry, and that is what makes
+a new file appear.** A glob is expanded when its module is transformed, and a glob written in
+`registry.tsx` could never be expanded again: that module accepts the virtual one as a hot
+dependency, and Vite deliberately does not invalidate an importer that accepts the module which
+changed, so the description would gain a component and nothing would be behind it. Emitting the
+glob into the virtual module means the thing being invalidated is the thing the glob is written
+in. It also means the two halves arrive together, which two separate modules could not
+guarantee.
+
+The hook is `hotUpdate`, not `handleHotUpdate`, and that is not only a deprecation: Vite calls
+the older one for `type === 'update'` alone, so a created or deleted file reached no plugin at
+all and adding a component did nothing until the dev server was restarted. A delete is the one
+case that returns the virtual module **instead of** the modules Vite worked out rather than
+alongside them, because those are the file that has just gone and asking the client to fetch
+them is a failed reload. Dropping them is also the whole behaviour: the glob re-expands without
+the component, the registry drops the spec, and a node still naming it falls back to the
+placeholder an unknown key already gets.
 
 Three things follow from that, and they are the point of it:
 

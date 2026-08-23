@@ -1,6 +1,6 @@
 import { createElement, useSyncExternalStore, type ComponentType, type ReactElement } from 'react'
 import type { ComponentPropValue, Size } from '@figma-canvas/document'
-import library from 'virtual:component-library'
+import { components, modules as initialModules } from 'virtual:component-library'
 import type { ComponentMeta, PropMeta } from './libraryTypes'
 
 /**
@@ -13,10 +13,14 @@ import type { ComponentMeta, PropMeta } from './libraryTypes'
  * behaviour, and nowhere in the panel offering it.
  *
  * So the panel is generated now. The dev server parses the library with a real type checker
- * and serves the result as `virtual:component-library`; `import.meta.glob` picks up the
- * modules themselves so Vite owns loading and React Fast Refresh still works. Editing a
- * component's props type updates the panel without touching this file, and there is no list
- * here to forget to update.
+ * and serves the result as `virtual:component-library`, which carries both halves: the
+ * description as data, and the modules through a glob that Vite expands into real imports, so
+ * Vite owns loading and React Fast Refresh still works. Editing a component's props type
+ * updates the panel without touching this file, and there is no list here to forget to update.
+ *
+ * The two halves arriving together is what lets a component file be added or removed while the
+ * editor is running. It also means they cannot be a step apart, which two separate modules
+ * could be.
  */
 
 export type { PropKind, PropMeta } from './libraryTypes'
@@ -43,13 +47,13 @@ export interface ComponentSpec {
 }
 
 /**
- * Every module in the library folder, loaded eagerly.
+ * The modules themselves, which arrive with the description rather than being fetched here.
  *
- * Eager because the editor mounts a component the moment a saved document names one, and a
- * lazy import would leave a hole on the canvas for a frame. Vite rewrites this to real static
- * imports, so Fast Refresh treats them exactly as if they had been imported by name.
+ * Eager, because the editor mounts a component the moment a saved document names one and a
+ * lazy import would leave a hole on the canvas for a frame. Vite expands the glob into real
+ * static imports, so Fast Refresh treats them exactly as if they had been imported by name.
  */
-const modules = import.meta.glob<Record<string, unknown>>('./library/*.tsx', { eager: true })
+type LibraryModules = Record<string, Record<string, unknown>>
 
 /** A component whose size is entirely its own content still needs a number where there is no DOM. */
 const FALLBACK_SIZE: Size = { width: 120, height: 40 }
@@ -89,7 +93,10 @@ function coerce(
 }
 
 /** The component function a piece of metadata describes, or undefined if the module is gone. */
-function componentFor(meta: ComponentMeta): ComponentType<never> | undefined {
+function componentFor(
+  meta: ComponentMeta,
+  modules: LibraryModules,
+): ComponentType<never> | undefined {
   const suffix = `/${meta.file.split('/').pop() ?? ''}`
   for (const [path, module] of Object.entries(modules)) {
     if (!path.endsWith(suffix)) continue
@@ -99,8 +106,8 @@ function componentFor(meta: ComponentMeta): ComponentType<never> | undefined {
   return undefined
 }
 
-function toSpec(meta: ComponentMeta): ComponentSpec | null {
-  const Component = componentFor(meta)
+function toSpec(meta: ComponentMeta, modules: LibraryModules): ComponentSpec | null {
+  const Component = componentFor(meta, modules)
   // Metadata without a module means the file was deleted between the parse and the load.
   // Skipping it leaves the node rendering the same placeholder an unknown key gets.
   if (!Component) return null
@@ -132,13 +139,15 @@ let byKey = new Map<string, ComponentSpec>()
 let revision = 0
 const listeners = new Set<() => void>()
 
-function rebuild(source: readonly ComponentMeta[]): void {
-  specs = source.map(toSpec).filter((spec): spec is ComponentSpec => spec !== null)
+function rebuild(source: readonly ComponentMeta[], modules: LibraryModules): void {
+  specs = source
+    .map((meta) => toSpec(meta, modules))
+    .filter((spec): spec is ComponentSpec => spec !== null)
   byKey = new Map(specs.map((spec) => [spec.key, spec]))
   revision += 1
 }
 
-rebuild(library)
+rebuild(components, initialModules)
 
 /** In the order the files sort, which is the order the panel lists them. */
 export function componentSpecs(): readonly ComponentSpec[] {
@@ -203,9 +212,13 @@ export function useLibrary(): number {
  */
 if (import.meta.hot) {
   import.meta.hot.accept('virtual:component-library', (updated) => {
-    const next = (updated as { default?: ComponentMeta[] } | undefined)?.default
-    if (!next) return
-    rebuild(next)
+    const next = updated as
+      | { components?: ComponentMeta[]; modules?: LibraryModules }
+      | undefined
+    // Both halves or neither. A component added since the last update is only in this
+    // module's own glob, so pairing a new description with the old modules would drop it.
+    if (!next?.components || !next.modules) return
+    rebuild(next.components, next.modules)
     for (const listener of listeners) listener()
   })
 }
