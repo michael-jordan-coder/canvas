@@ -1,12 +1,7 @@
 import { useState, type ReactElement } from 'react'
+import * as Label from '@radix-ui/react-label'
 
-/**
- * How this component wants to be placed on a canvas, declared where the component is.
- *
- * A field fills the room it is given and its height follows, so it is laid out by its width
- * rather than measured at a natural one. That is a fact about the component, so it belongs in
- * the component's file rather than in a table beside it.
- */
+/** A field fills the room it is given and its height follows, so it is laid out by its width. */
 export const canvasDefaults = { width: 220 }
 
 export interface InputProps {
@@ -22,8 +17,10 @@ export interface InputProps {
  *
  * What you type into it is React state and nothing to do with the scene: the document holds
  * the label and the placeholder, which are the design, while the value is the runtime. That
- * split is the point of mounting components rather than drawing them, and it is why typing
- * here survives a pan, a zoom and an edit to any other node.
+ * split is the point of mounting components rather than drawing them.
+ *
+ * Radix's Label is here for the one thing it does that a `<label>` does not: it stops a click
+ * on the text from selecting it, which is what makes a label feel like part of the control.
  */
 export function Input({
   label = 'Label',
@@ -35,10 +32,10 @@ export function Input({
   const [value, setValue] = useState('')
 
   return (
-    <label className="field">
-      {label && <span className="label">{label}</span>}
+    <div className="field">
+      {label && <Label.Root className="field-label">{label}</Label.Root>}
       <input
-        className="control"
+        className="field-control"
         data-invalid={invalid}
         placeholder={placeholder}
         disabled={disabled}
@@ -46,10 +43,10 @@ export function Input({
         onChange={(event) => setValue(event.target.value)}
       />
       {hint && (
-        <span className="hint" data-invalid={invalid}>
+        <span className="field-hint" data-invalid={invalid}>
           {hint}
         </span>
       )}
-    </label>
+    </div>
   )
 }

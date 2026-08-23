@@ -8,7 +8,7 @@ import {
   type ComponentNode,
   type FrameNode,
 } from '@figma-canvas/document'
-import { componentSpec } from '../components/registry'
+import { componentSpec, componentSpecs } from '../components/registry'
 import { insertComponent, updateComponentProps } from './componentNodes'
 
 /*
@@ -44,7 +44,7 @@ describe('dropping a component into a plain frame', () => {
     const document = new SceneDocument()
     const node = insertComponent(document, spec('button'), document.rootId, { x: 0, y: 0 })
     expect(node.autoSize).toBe(true)
-    expect(Object.keys(node.props).sort()).toEqual(['disabled', 'label', 'size', 'variant'])
+    expect(Object.keys(node.props).sort()).toEqual(['disabled', 'label'])
     expect(node.component).toBe('button')
   })
 
@@ -53,7 +53,7 @@ describe('dropping a component into a plain frame', () => {
     const frame = document.insert(createFrame({ size: { width: 400, height: 300 } }))
     document.clearHistory()
 
-    const node = insertComponent(document, spec('card'), frame.id, { x: 100, y: 100 })
+    const node = insertComponent(document, spec('accordion'), frame.id, { x: 100, y: 100 })
     expect(document.historyDepth).toBe(1)
     document.undo()
     expect(document.getNode(node.id)).toBeUndefined()
@@ -125,7 +125,8 @@ describe('editing props', () => {
     const after = document.expectNode(node.id) as ComponentNode
 
     expect(after.props['label']).toBe('Save')
-    expect(after.props['variant']).toBe('primary')
+    // The prop the change said nothing about, which a merge keeps and an assign would drop.
+    expect(after.props['disabled']).toBe(false)
   })
 
   it('is one undo step per commit, and undo puts the old props back', () => {
@@ -134,19 +135,46 @@ describe('editing props', () => {
     document.clearHistory()
 
     updateComponentProps(document, document.expectNode(node.id) as ComponentNode, {
-      variant: 'danger',
+      disabled: true,
     })
     expect(document.historyDepth).toBe(1)
     document.undo()
-    expect((document.expectNode(node.id) as ComponentNode).props['variant']).toBe('primary')
+    expect((document.expectNode(node.id) as ComponentNode).props['disabled']).toBe(false)
   })
 })
 
 describe('the registry', () => {
-  it('has the three components the panel offers', () => {
-    expect(componentSpec('button')?.name).toBe('Button')
-    expect(componentSpec('input')?.name).toBe('Input')
-    expect(componentSpec('card')?.name).toBe('Card')
+  /*
+   * Pinned deliberately, in the spirit of the test on `SCHEMA_VERSION`: the library is read off
+   * disk, so adding or removing a file changes what the app offers with no code change anywhere
+   * to notice. This is the thing that notices.
+   */
+  it('offers exactly the library on disk', () => {
+    expect(componentSpecs().map((entry) => entry.key)).toEqual([
+      'accordion',
+      'avatar',
+      'button',
+      'checkbox',
+      'input',
+      'progress',
+      'radiogroup',
+      'select',
+      'separator',
+      'slider',
+      'switch',
+      'tabs',
+      'togglegroup',
+    ])
+  })
+
+  // Radix does the behaviour and each file is a thin wrapper, so the props the panel offers
+  // are the wrapper's own and never the primitive's callbacks and elements.
+  it('describes a wrapper by its own scalar signature', () => {
+    expect(componentSpec('switch')?.props.map((prop) => prop.key)).toEqual([
+      'label',
+      'checked',
+      'disabled',
+    ])
   })
 
   it('records where each one would be imported from, which nothing else can recover', () => {

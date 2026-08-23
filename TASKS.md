@@ -391,7 +391,20 @@ Read, which has shipped:
 - [x] 17 tests on the extractor, including the two cases that justify a checker: a type alias,
       and a props type imported from a sibling file. `apps/editor/vite-plugins/extract.test.ts`
 
+- [x] The library is headless, on Radix primitives: thirteen components, one wrapper file each,
+      with a stylesheet that is structure rather than a look. `Button` lost its `variant` and
+      `size` props, because a look expressed as four hardcoded variants is a look nobody can
+      change from the canvas. `apps/editor/src/components/library/`
+
 Known rough edges in what shipped:
+
+- [ ] The document holds scalars, so a component about a list takes it as a comma separated
+      string (`Tabs`, `Select`, `RadioGroup`, `Accordion`, `ToggleGroup`). The honest fix is
+      arrays in the document, which is a schema version plus the panel, the printer and the
+      reader. `apps/editor/src/components/library/_parts.ts`
+- [ ] The library is the set of primitives that render in place. Anything portalled and hidden
+      by default, a dialog, a popover, a tooltip, would measure as nothing, so it needs
+      `forceMount` and an inline container before it can be a node with bounds.
 
 - [ ] The remeasure after a hot update runs three times on a timer rather than once on a
       signal, because Fast Refresh debounces its re-render and offers no completion callback.

@@ -535,8 +535,8 @@ entirely, old selection included.
 
 ## React components on the canvas
 
-A **component node** is an instance of a real React component: `Button`, `Input` or `Card`
-today, whatever the registry holds tomorrow. It is the one thing on the canvas the GPU does
+A **component node** is an instance of a real React component. The library is thirteen of
+them today, whatever the registry holds tomorrow. It is the one thing on the canvas the GPU does
 not draw, and everything about it is arranged so that stays an exception rather than a crack.
 
 **The document holds a key and a bag of scalars, and nothing else.** `ComponentNode.component`
@@ -640,6 +640,42 @@ contents and a one way door is not a setting.
 A component that declares a `defaultWidth` in the registry is laid out **by** its width and its
 height follows; one that does not is measured at its natural size on both axes. Asking a button
 to be 400 wide is a resize, not a measurement.
+
+### The library is headless, and Radix does the behaviour
+
+The components are **wrappers over Radix primitives**, one file each, and the reason is the same
+one that made the registry read itself off disk: a checkbox that keeps its own focus, keyboard
+and ARIA behaviour is a pile of details nobody should reimplement to demonstrate a canvas.
+Radix owns the behaviour, the wrapper owns the signature.
+
+**The wrapper is not ceremony, it is the boundary.** Radix ships compound components
+(`Select.Root` and `Select.Trigger` and `Select.Content`), as declaration files rather than
+source, with props that are callbacks, elements and `asChild`. The document holds scalars and
+the extractor reads `.tsx` source, so pointing the scan at `node_modules` could not work. Each
+wrapper is where a compound tree becomes one function with a scalar signature, which is exactly
+what the panel, the printer and the reader are written against. `Button` is the one file with no
+primitive under it, because a button has no behaviour worth a library.
+
+**The stylesheet is structure, not design**, and that distinction is the point of the whole
+arrangement. There is one grey, one accent, one radius and one spacing rhythm, and no variants
+of anything: enough for a component to be visible, laid out and measurable, and no more.
+Choosing how it looks is the job the canvas exists to do, which is why `Button` no longer has a
+`variant` prop. A look expressed as four hardcoded variants is a look nobody can change from
+the canvas.
+
+**A component that is genuinely about a list takes it as a comma separated string**, split by
+the one helper in `_parts.ts`. The document holds `string | number | boolean` because a prop
+has to survive a clone by history, a write by the save format and a trip to a collaborator. So
+`Tabs` takes `"Design, Code, Notes"`. This is a real limitation rather than a preference, and
+the honest fix is for the document to hold arrays, which is a schema version and a change to
+the panel, the printer and the reader. It is written down in `TASKS.md` rather than worked
+around quietly.
+
+Every component measures at a real size, which is not automatic: a primitive that renders into
+a portal would measure as nothing, so the library is the set that renders in place. `Select` is
+the interesting case and it is correct rather than lucky: closed, the node is its trigger and
+measures as one, and open, the list is drawn above everything outside the canvas transform,
+which is what a menu should do.
 
 ### The registry, which is generated from the source rather than written
 
