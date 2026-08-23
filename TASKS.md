@@ -178,7 +178,8 @@ Deferred, deliberately:
 - [ ] Insertion indicator line while reorder-dragging (the siblings shifting is the current
       affordance)
 - [ ] Reorder drag for multiple selections (falls back to drop-on-release)
-- [ ] `space-between` has no icon treatment, only the Space segment
+- [x] `space-between` has an icon treatment: a toggle beside the Gap field, remembering the
+      alignment it replaced so switching it off reverts. `apps/editor/src/ui/PropertiesPanel.tsx`
 
 ## Design panel parity
 
@@ -307,6 +308,39 @@ it is UI work, which is what took them out of scope rather than any problem with
 - [ ] Knocking a shape out of its own drop shadow. The shadow is drawn behind the shape rather
       than masked by it, so a translucent fill shows its own shadow through. Needs a stencil or
       the caster's coverage at the shadow's pixel, neither of which exists in one pass.
+
+## Panel UI3 pass
+
+A visual and structural pass over the properties panel against Figma's UI3, 2026-08-23, plus
+resizable side panels and a page background color. Shipped in one commit (`7edac60`), then
+hardened by a ten-finding code review applied in full.
+
+- [x] Filled field wells: `--field` darkened, new `--radius-field` token, hover border and
+      accent focus shared by number fields, color chips and the new selects.
+      `apps/editor/src/styles/tokens.css`, `NumberField.module.css`, `ColorField.module.css`
+- [x] Icon labels on number fields (angle, radius, opacity, gap, padding) and icon options
+      on segmented fields; label moves to `aria-label`. `apps/editor/src/ui/NumberField.tsx`,
+      `SegmentedField.tsx`, `icons.tsx`
+- [x] Sizing as a native select under each of W and H (Fixed / Hug contents / Fill container),
+      replacing the segmented rows in the Auto layout section. The hug/fill capability rule is
+      written once in `sizingChoices`; `isEditingText` counts a focused select as editing so
+      the global shortcuts stay out of it. `apps/editor/src/ui/PropertiesPanel.tsx`,
+      `apps/editor/src/input/isEditingText.ts`
+- [x] A 3x3 `AlignmentGrid` beside direction/gap/padding in the Auto layout section;
+      space-between lights the cross line and clicks then move only the cross axis.
+      `apps/editor/src/ui/AlignmentGrid.tsx`
+- [x] Appearance holds opacity and corner radius in one row; section hairlines and semibold
+      titles; add/remove as icon buttons in section headers. `PropertiesPanel.module.css`
+- [x] Both side panels resize by dragging their canvas edge: shared `PanelResizer`, clamp
+      240-480, width on `--panel-width-left/right`, guarded localStorage, restore before
+      first paint, double-click reset, keyboard nudge that consumes its arrows. The layers
+      tree keeps a right margin so its scrollbar sits clear of the strip.
+      `apps/editor/src/ui/PanelResizer.tsx`, `LayersPanel.module.css`, `App.module.css`
+- [x] Page background color: a Page section when nothing is selected, the color a real
+      document property on the root `PageNode` (absent means default, no schema bump),
+      carried by `cloneNodeAs` so it survives save/load/undo, cleared to by the renderer,
+      with one `DEFAULT_PAGE_BACKGROUND` constant shared by renderer and panel.
+      `packages/document/src/node.ts`, `serialize.ts`, `WebGPURenderer.ts`
 
 ## Backlog
 
