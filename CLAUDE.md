@@ -800,6 +800,51 @@ scanned one level deep and because a prefix test for `library` also accepts a si
 A refusal is a bare 403 that never echoes the path back, so it cannot be used to ask whether
 a file exists.
 
+### Writing a file, which is mostly about what a save is measured against
+
+`POST /__component-source` carries `{ file, text, mtimeMs }` and passes every check the read
+does plus two of its own.
+
+**The stamp is a precondition, not a record.** It is the `mtimeMs` the read handed over, and
+the file is written only if that is still what is on disk. A mismatch is a 409 rather than a
+write, so an edit made in an ordinary editor while the panel held the file is a refusal instead
+of whichever save landed last silently winning. Nothing is coerced on the way in: a `mtimeMs`
+sent as a string would compare unequal to every number on disk and turn every save into a
+conflict, which is a far more confusing failure than a refusal to parse.
+
+**The write lands through a temporary file and a rename**, because a rename within one
+directory is atomic and a reader therefore sees the old file or the new one and never half of
+one. That matters more here than in an ordinary editor, since this file is watched: a partial
+write is parsed, fails, and takes every instance of the component off the canvas. The temporary
+name deliberately does not end in `.tsx`, so both the library scan and this endpoint's own
+guard ignore it while it exists.
+
+The body is capped at 512 KB and refused **as it arrives** rather than after it lands. The
+request is paused rather than destroyed at that point, because destroying it takes the socket
+and the 413 with it, and the client would see a dropped connection instead of the reason.
+
+**Cmd+S commits, and blur deliberately does not.** Every other field in this editor writes on
+blur, and this one must not: it writes to your repo, and clicking away from a file is not a
+decision to save it.
+
+**An unsaved edit outlives the panel** (`code/drafts.ts`). Selecting anything else leaves the
+file, which is the rule that keeps the panel about the selection with no mode indicator, and
+without a parked draft that rule would also discard whatever had been typed, on an ordinary
+click on the canvas. The base travels with the draft, because it is what the edit was measured
+against: leaving and coming back has to leave a stale save a refusal rather than an overwrite,
+exactly as staying would have. It is a module map rather than store state because nothing else
+reads it and a keystroke should not wake a subscriber, and it is emphatically not in the
+document, because a file is not part of the scene and must not reach a save, a history step or
+a collaborator.
+
+A library change re-reads the file, and that re-read is **skipped while there are unsaved
+edits**. Replacing the field with what is on disk is exactly the loss the precondition exists
+to prevent, and keeping the old base is what makes the next save a refusal.
+
+A file edit is not a document edit, so it touches no history: `isEditingText` already makes
+every window level shortcut stand down while the field has focus, so Cmd+Z inside it is the
+browser's own textarea undo and the scene's undo stack is untouched.
+
 ## Rotation, and the one rule it added
 
 `SelectionBox` is an upright rect plus an angle, not four corner points. Everything asking where

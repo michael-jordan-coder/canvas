@@ -1,14 +1,21 @@
-import { readFileSync, realpathSync, statSync } from 'node:fs'
-import { dirname, extname, resolve } from 'node:path'
+import { readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { dirname, extname, join, resolve } from 'node:path'
 import type { Connect, Plugin } from 'vite'
 
 /**
  * Serving a component's own source to the editor.
  *
- * This is the first thing in the project that lets the browser reach the repo, so the whole
- * design is about what it refuses. It exists only under `vite dev`, because the plugin that
- * installs it declares `apply: 'serve'`, and it answers for exactly one directory: the
- * component library the editor already parses.
+ * This is the first thing in the project that lets the browser reach the repo, and now the
+ * first thing that writes to it, so the whole design is about what it refuses. It exists only
+ * under `vite dev`, because the plugin that installs it declares `apply: 'serve'`, and it
+ * answers for exactly one directory: the component library the editor already parses.
+ *
+ * A write passes every check a read does and two more: it must carry the `mtimeMs` it was
+ * handed, which is what turns an edit made elsewhere in the meantime into a refusal rather
+ * than a silent overwrite, and it lands through a temporary file and a rename, so a crash
+ * midway cannot leave a component half written. That second one matters more here than in an
+ * ordinary editor, because this file is watched: a partial write is parsed, fails, and takes
+ * every instance of the component off the canvas.
  */
 
 /** The route, double underscored like Vite's own internals so an app path cannot collide. */
@@ -60,6 +67,94 @@ export function resolveLibraryFile(dir: string, requested: string): string | nul
   }
 }
 
+/**
+ * The largest write this accepts, which is far beyond any component and far below anything
+ * that could exhaust the dev server's memory. The body is refused as it arrives rather than
+ * after it lands, so an unbounded upload is stopped rather than buffered and then rejected.
+ */
+const MAX_BODY = 512 * 1024
+
+/** What a write has to say for itself. */
+export interface WriteRequest {
+  file: string
+  text: string
+  /** The stamp the client was handed by the read it is editing the result of. */
+  mtimeMs: number
+}
+
+/**
+ * A parsed write body, or null.
+ *
+ * Pure, and exported for its tests, for the same reason the path guard is: this is the shape
+ * check standing between an HTTP body and a file on disk. Nothing is coerced. A `mtimeMs` sent
+ * as a string would compare unequal to the number on disk and turn every save into a conflict,
+ * which is a far more confusing failure than a refusal to parse.
+ */
+export function parseWriteRequest(body: string): WriteRequest | null {
+  let value: unknown
+  try {
+    value = JSON.parse(body)
+  } catch {
+    return null
+  }
+  if (typeof value !== 'object' || value === null) return null
+  const candidate = value as Record<string, unknown>
+  const { file, text, mtimeMs } = candidate
+  if (typeof file !== 'string' || file.length === 0) return null
+  if (typeof text !== 'string') return null
+  // A non-finite stamp would pass a typeof test and never equal anything on disk.
+  if (typeof mtimeMs !== 'number' || !Number.isFinite(mtimeMs)) return null
+  return { file, text, mtimeMs }
+}
+
+/** Collects the body, or gives up the moment it is larger than a component could be. */
+function readBody(request: Parameters<Connect.NextHandleFunction>[0]): Promise<string | null> {
+  return new Promise((resolve_) => {
+    const chunks: Buffer[] = []
+    let size = 0
+    request.on('data', (chunk: Buffer) => {
+      size += chunk.length
+      if (size > MAX_BODY) {
+        /*
+         * Stop reading rather than keep accumulating something already refused. Paused and
+         * not destroyed: destroying the request takes the socket, and with it the 413 that
+         * has not been written yet, so the client would see the connection drop rather than
+         * the reason. The caller answers first and closes after.
+         */
+        request.pause()
+        resolve_(null)
+        return
+      }
+      chunks.push(chunk)
+    })
+    request.on('end', () => resolve_(Buffer.concat(chunks).toString('utf8')))
+    request.on('error', () => resolve_(null))
+  })
+}
+
+/**
+ * Writes a component file, atomically as far as the filesystem allows.
+ *
+ * The text goes to a temporary neighbour and is renamed over the target, because `rename`
+ * within one directory is atomic: a reader sees the old file or the new one and never a
+ * half written one. Writing in place would give a watcher a window in which the component is
+ * syntactically incomplete, and the extractor parsing it in that window fails and takes every
+ * instance off the canvas.
+ *
+ * The temporary name deliberately does not end in `.tsx`, so the library scan and this
+ * endpoint's own guard both ignore it while it exists.
+ */
+function writeAtomically(file: string, text: string): void {
+  const temporary = join(dirname(file), `.${Date.now()}-${process.pid}.tsx.tmp`)
+  try {
+    writeFileSync(temporary, text, 'utf8')
+    renameSync(temporary, file)
+  } catch (cause) {
+    rmSync(temporary, { force: true })
+    throw cause
+  }
+}
+
 function send(response: Parameters<Connect.NextHandleFunction>[1], status: number, body: unknown): void {
   const text = JSON.stringify(body)
   response.statusCode = status
@@ -81,6 +176,10 @@ function send(response: Parameters<Connect.NextHandleFunction>[1], status: numbe
  */
 export function componentSourceMiddleware(dir: string): Connect.NextHandleFunction {
   return (request, response, next) => {
+    if (request.method === 'POST') {
+      void handleWrite(dir, request, response)
+      return
+    }
     if (request.method !== 'GET') {
       next()
       return
@@ -110,6 +209,63 @@ export function componentSourceMiddleware(dir: string): Connect.NextHandleFuncti
     } catch {
       send(response, 500, { error: 'read-failed' })
     }
+  }
+}
+
+/**
+ * Writes one library file.
+ *
+ * `POST /__component-source` with `{ file, text, mtimeMs }`. The stamp has to match the file
+ * on disk: if it does not, the file changed since the editor read it and the answer is a 409
+ * carrying the current stamp, not a write. The panel keeps what was typed, so a conflict costs
+ * a re read rather than the edit.
+ *
+ * There is no way to create a file here and that is deliberate: the guard only resolves paths
+ * that already exist, so this endpoint can change a component and cannot add one.
+ */
+async function handleWrite(
+  dir: string,
+  request: Parameters<Connect.NextHandleFunction>[0],
+  response: Parameters<Connect.NextHandleFunction>[1],
+): Promise<void> {
+  const body = await readBody(request)
+  if (body === null) {
+    /*
+     * The rest of the body is never read, so the connection cannot be reused: it still holds
+     * whatever was not consumed. The answer is written first and the socket dropped once it
+     * has actually gone out, which is what the callback on `end` is for.
+     */
+    response.statusCode = 413
+    response.setHeader('Content-Type', 'application/json')
+    response.setHeader('Connection', 'close')
+    response.end(JSON.stringify({ error: 'too-large' }), () => request.destroy())
+    return
+  }
+
+  const write = parseWriteRequest(body)
+  if (!write) {
+    send(response, 400, { error: 'unreadable-body' })
+    return
+  }
+
+  const file = resolveLibraryFile(dir, write.file)
+  // Says nothing about why, exactly as the read does.
+  if (!file) {
+    send(response, 403, { error: 'outside-library' })
+    return
+  }
+
+  try {
+    const current = statSync(file).mtimeMs
+    if (current !== write.mtimeMs) {
+      send(response, 409, { error: 'stale', mtimeMs: current })
+      return
+    }
+    writeAtomically(file, write.text)
+    // The new stamp, so the panel can save again without reading the file back first.
+    send(response, 200, { file, mtimeMs: statSync(file).mtimeMs })
+  } catch {
+    send(response, 500, { error: 'write-failed' })
   }
 }
 

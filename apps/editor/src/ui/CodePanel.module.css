@@ -92,3 +92,22 @@
   font-size: var(--text-xs);
   border-top: 1px solid var(--line);
 }
+
+/*
+ * A control inside a sentence. The conflict note is the one place the panel has to offer a
+ * choice, and it belongs in the line explaining why there is one rather than as a button
+ * somewhere else with no context attached to it.
+ */
+.inline {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.inline:hover {
+  color: var(--accent-hover);
+}

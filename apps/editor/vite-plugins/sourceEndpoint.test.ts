@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { resolveLibraryFile } from './sourceEndpoint.js'
+import { parseWriteRequest, resolveLibraryFile } from './sourceEndpoint.js'
 
 /**
  * The path guard is the only new code in this feature that can reach outside the app, so it
@@ -108,5 +108,56 @@ describe('what the source endpoint will read', () => {
       return
     }
     expect(resolveLibraryFile(dir, link)).toBeNull()
+  })
+})
+
+/*
+ * The other thing standing between an HTTP body and a file on disk. Nothing is coerced, and
+ * the stamp is the reason: a `mtimeMs` accepted as a string would never equal the number on
+ * disk, so every save would come back as a conflict, which is a far more confusing failure
+ * than a refusal to parse.
+ */
+describe('what the source endpoint will write', () => {
+  it('reads a well formed body', () => {
+    expect(parseWriteRequest('{"file":"/a/B.tsx","text":"x","mtimeMs":12}')).toEqual({
+      file: '/a/B.tsx',
+      text: 'x',
+      mtimeMs: 12,
+    })
+  })
+
+  it('keeps an empty file, which is a real thing to write', () => {
+    expect(parseWriteRequest('{"file":"/a/B.tsx","text":"","mtimeMs":0}')?.text).toBe('')
+  })
+
+  it('refuses a body that is not JSON at all', () => {
+    expect(parseWriteRequest('not json')).toBeNull()
+    expect(parseWriteRequest('')).toBeNull()
+  })
+
+  it('refuses JSON that is not an object', () => {
+    expect(parseWriteRequest('null')).toBeNull()
+    expect(parseWriteRequest('[1,2]')).toBeNull()
+    expect(parseWriteRequest('"a string"')).toBeNull()
+  })
+
+  it('refuses a missing field', () => {
+    expect(parseWriteRequest('{"text":"x","mtimeMs":1}')).toBeNull()
+    expect(parseWriteRequest('{"file":"/a/B.tsx","mtimeMs":1}')).toBeNull()
+    expect(parseWriteRequest('{"file":"/a/B.tsx","text":"x"}')).toBeNull()
+  })
+
+  it('refuses a stamp sent as a string, rather than coercing it', () => {
+    expect(parseWriteRequest('{"file":"/a/B.tsx","text":"x","mtimeMs":"12"}')).toBeNull()
+  })
+
+  // Both pass a typeof test and neither can ever equal a stamp on disk.
+  it('refuses a stamp that is not a finite number', () => {
+    expect(parseWriteRequest('{"file":"/a/B.tsx","text":"x","mtimeMs":null}')).toBeNull()
+    expect(parseWriteRequest('{"file":"/a/B.tsx","text":"x","mtimeMs":1e999}')).toBeNull()
+  })
+
+  it('refuses an empty path', () => {
+    expect(parseWriteRequest('{"file":"","text":"x","mtimeMs":1}')).toBeNull()
   })
 })

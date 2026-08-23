@@ -413,10 +413,15 @@ The code panel, which is where the sync starts becoming two way:
       route and no client code. `resolveLibraryFile` is the guard: 11 tests, including the
       symlink case that caught a real hole in the first version of it.
       `apps/editor/vite-plugins/sourceEndpoint.ts`
-- [ ] Writing the file back: POST with an mtime precondition so a file changed elsewhere is a
-      refusal rather than a silent overwrite, a temp file and a rename so a crash cannot leave
-      a half written component, and Cmd+S to commit. Deliberately not on blur: clicking away
-      from a source file must not write to the repo.
+- [x] Writing the file back: `POST /__component-source` with an mtime precondition so a file
+      changed elsewhere is a 409 rather than a silent overwrite, a temp file and a rename so a
+      crash cannot leave a half written component, and a 512 KB cap refused as the body
+      arrives. Cmd+S commits, deliberately not blur: clicking away from a source file must not
+      write to the repo. 9 more tests on `parseWriteRequest`.
+- [x] An unsaved edit outlives the panel. Selecting anything else leaves the file, which must
+      not throw away what was typed, so the draft is parked by file along with the base it was
+      typed against: coming back restores both, and a stale save is still a refusal.
+      `apps/editor/src/code/drafts.ts`
 - [ ] Editing the call site, which needs a small JSX attribute reader and a
       `replaceComponentProps` that assigns rather than merges, since deleting an attribute has
       to remove the prop and `updateComponentProps` would keep it.

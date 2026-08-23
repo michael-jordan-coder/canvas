@@ -8,6 +8,11 @@ interface CodeAreaProps {
   onChange?: (value: string) => void
   /** Leaving. Handled here because this component stops keys reaching anything above it. */
   onEscape?: () => void
+  /**
+   * Cmd or Ctrl S. Committing is a key rather than a button and deliberately not a blur: this
+   * writes to the repo, and clicking away from a file is not a decision to save it.
+   */
+  onSave?: () => void
 }
 
 /** Two spaces, matching everything else in this repo. */
@@ -27,6 +32,7 @@ export function CodeArea({
   readOnly,
   onChange,
   onEscape,
+  onSave,
 }: CodeAreaProps): ReactElement {
   const field = useRef<HTMLTextAreaElement>(null)
 
@@ -60,6 +66,11 @@ export function CodeArea({
         if (event.key === 'Tab' && !event.shiftKey) {
           event.preventDefault()
           insertIndent()
+        }
+        if ((event.key === 's' || event.key === 'S') && (event.metaKey || event.ctrlKey) && onSave) {
+          // The browser would offer to save the page, which is never what this means.
+          event.preventDefault()
+          onSave()
         }
         if (event.key === 'Escape' && onEscape) {
           event.preventDefault()
