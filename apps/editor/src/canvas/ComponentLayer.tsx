@@ -18,7 +18,7 @@ import {
   type SceneNode,
 } from '@figma-canvas/document'
 import { viewMatrix } from '@figma-canvas/renderer'
-import { componentSpec } from '../components/registry'
+import { componentSpec, useLibrary } from '../components/registry'
 import { attachComponentShadow } from '../components/shadow'
 import { scene } from '../state/scene'
 import { useUI } from '../state/uiStore'
@@ -351,6 +351,9 @@ function Artboard({
  */
 function ComponentMount({ id }: { id: NodeId }): ReactElement | null {
   useAncestry(id)
+  // Editing a component's source re-renders every instance of it. React Fast Refresh handles
+  // the body on its own; this covers the registry handing out a new adapter around it.
+  useLibrary()
   const host = useRef<HTMLDivElement>(null)
   // The element inside the shadow root React portals into. Null for exactly one render,
   // since a shadow root cannot be attached until the host element exists.

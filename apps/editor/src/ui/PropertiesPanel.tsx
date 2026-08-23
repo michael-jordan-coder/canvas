@@ -37,7 +37,7 @@ import {
   updateLayoutChild,
 } from '../state/autoLayout'
 import { setComponentAutoSize, updateComponentProps } from '../state/componentNodes'
-import { componentSpec } from '../components/registry'
+import { componentSpec, useLibrary, type PropKind } from '../components/registry'
 import { flipNodes } from '../state/flip'
 import { updateText } from '../state/font'
 import { setNodesAngle } from '../state/rotate'
@@ -365,6 +365,19 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
   )
 }
 
+/**
+ * What a field shows for a prop the component declares and gives no default to.
+ *
+ * Not a value written to the document: nothing is stored until the field is committed, so the
+ * component keeps doing whatever it does when it is told nothing.
+ */
+const EMPTY_FOR: Record<PropKind, string | number | boolean> = {
+  text: '',
+  number: 0,
+  boolean: false,
+  select: '',
+}
+
 /** The single R field's radius, or the four-corner editor it expands into. */
 const CORNER_LABELS: Record<(typeof CORNER_ORDER)[number], string> = {
   topLeft: 'TL',
@@ -642,6 +655,8 @@ function AutoLayoutSection({
  * in the same transaction, which is what keeps the selection box around a longer label.
  */
 function ComponentSection({ node }: { node: ComponentNode }): ReactElement {
+  // Adding a prop to the component's type adds a field here, on save, with no reload.
+  useLibrary()
   const spec = componentSpec(node.component)
 
   if (!spec) {
@@ -668,7 +683,10 @@ function ComponentSection({ node }: { node: ComponentNode }): ReactElement {
       <p className={styles.source}>{spec.importPath}</p>
 
       {spec.props.map((prop) => {
-        const value = node.props[prop.key] ?? prop.default
+        // A prop the component declares but gives no default to still gets a field: the
+        // component's own fallback is whatever it does with undefined, and the panel has to
+        // show something rather than the word "undefined".
+        const value = node.props[prop.key] ?? prop.default ?? EMPTY_FOR[prop.kind]
         if (prop.kind === 'boolean') {
           return (
             <label key={prop.key} className={styles.toggle}>

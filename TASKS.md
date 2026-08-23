@@ -360,12 +360,62 @@ Editor (`editor`)
       when one is reported: a lost surface presents opaque and would take the whole component
       layer off screen with it. `apps/editor/src/canvas/CanvasHost.tsx`
 
-Next, in rough order of value:
+## Code and design as one artifact
 
-- [ ] Code generation. The registry already records the import path and export name, and the
-      document already holds the props, so a frame of components is a React tree waiting to be
-      printed. Absolutely positioned children need a layout story first; an auto layout frame
-      is a flex container and prints directly.
+The direction chosen after the first milestone: the component source files are the truth, and
+the canvas is a live editor over them. Only component nodes are code backed; shapes, text and
+frames stay as they are.
+
+Read, which has shipped:
+
+- [x] The hand-written registry is gone. A Vite plugin parses the component folder with a real
+      type checker and serves it as `virtual:component-library`; the registry pairs that with
+      the modules from `import.meta.glob`. `apps/editor/vite-plugins/`
+- [x] The properties panel is generated from the props type. A union of string literals is a
+      dropdown, a default comes from the destructuring, and a prop the document cannot store
+      gets no control rather than a broken one.
+- [x] `export const canvasDefaults = { width }` in a component's own file, replacing the
+      table of which components are laid out by their width.
+- [x] TypeScript 5 pinned under an alias, because TypeScript 7 is the native port and ships no
+      JavaScript compiler API. Node and browser are separate compiler programs so neither can
+      reach into the other, sharing only `libraryTypes.ts`, which imports nothing.
+- [x] Editing a component's source updates the canvas, the panel and every instance's measured
+      box, with no reload. A source change leaves no undo step, since nobody performed it.
+- [x] 17 tests on the extractor, including the two cases that justify a checker: a type alias,
+      and a props type imported from a sibling file. `apps/editor/vite-plugins/extract.test.ts`
+
+Known rough edges in what shipped:
+
+- [ ] The remeasure after a hot update runs three times on a timer rather than once on a
+      signal, because Fast Refresh debounces its re-render and offers no completion callback.
+      It converges and each pass is free when nothing changed, but it is a settle rather than a
+      guarantee. `SETTLE_PASSES` in `apps/editor/src/state/measure.ts`
+- [ ] The whole program is rebuilt on every save. Fine for a folder of three components,
+      wrong for a real library: this wants an incremental `LanguageService` rather than a
+      fresh `createProgram`.
+- [ ] Only the top level of the library folder is scanned, and keys are the export name
+      lowercased, so two components with the same name in different folders would collide.
+- [ ] Arrow function components (`export const Button = () => {}`) are not recognised yet, only
+      function declarations.
+
+Write, which is next and is where the sync becomes two way:
+
+- [ ] A code panel showing the source of whatever is selected: the instance's JSX at one
+      level, the component's own source when you descend into it, the way a design tool
+      already moves between an instance and its main component.
+- [ ] A dev-server endpoint that writes a file back, so the code panel is an editor rather than
+      a viewer.
+- [ ] Write-back from canvas edits: move, resize or reorder a component and have the source
+      update in place, formatting preserved, through AST surgery rather than regeneration.
+      This is the hard piece and the one that makes the two directions one artifact.
+- [ ] Dragging a component in writes the import, since nobody manages imports in a design tool.
+
+Then, in rough order of value:
+
+- [ ] Code generation for a whole frame. The registry already records the import path and
+      export name, and the document already holds the props, so a frame of components is a
+      React tree waiting to be printed. Absolutely positioned children need a layout story
+      first; an auto layout frame is a flex container and prints directly.
 - [ ] Components that hold other components. Today a Card is a leaf and an auto layout frame is
       the container, which is honest but means a component cannot own its own slot. Needs a
       children model in the registry and a way for the document's transforms to defer to the

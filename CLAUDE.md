@@ -21,6 +21,7 @@ of transform updates during a drag. So the scene never lives in React state.
 packages/document   the scene. plain TypeScript. no DOM, no GPU, no React.
 packages/renderer   WebGPU. reads the document directly. no React.
 apps/editor         React panels, input handling, the component registry, wiring.
+apps/editor/vite-plugins  dev-time Node code: reads the component library off disk.
 ```
 
 The boundaries are real module boundaries in a pnpm workspace, so crossing one is an import error
@@ -640,16 +641,67 @@ A component that declares a `defaultWidth` in the registry is laid out **by** it
 height follows; one that does not is measured at its natural size on both axes. Asking a button
 to be 400 wide is a resize, not a measurement.
 
-### The registry
+### The registry, which is generated from the source rather than written
 
 `apps/editor/src/components/registry.tsx` is the only place that knows a key names a React
-component. Each entry carries the import path and export name a code generator would need
-(nothing else can recover them later), the editable props with their kinds and defaults, and a
-**render adapter** rather than a component type. The adapter is the boundary where the
-document's scalars become typed props, and it is where a variant a saved file names but this
-build no longer has falls back, rather than inside a component that has no reason to expect
-one. An unknown key is a real answer, not an error: the layer draws a placeholder where the
-node sits, because losing it would silently edit someone's document on load.
+component, and it no longer holds a list. It used to: three components, each with its props,
+their kinds, their options and their defaults, all hand maintained. Every one of those facts
+is already stated in the component's own signature, and two records of one fact drift. A
+variant added to `ButtonVariant` showed up in TypeScript, in autocomplete and in the
+component's behaviour, and nowhere in the panel offering it.
+
+So the library is read off disk. The Vite plugin in `apps/editor/vite-plugins/` parses the
+component folder and serves the result as `virtual:component-library`; the registry pairs that
+description with the modules themselves, which come from `import.meta.glob` so Vite owns
+loading and React Fast Refresh keeps working. **Adding a prop to a component's type adds a
+field to the properties panel, on save, with no reload and no registration anywhere.**
+
+Three things follow from that, and they are the point of it:
+
+- **A union of string literals is a dropdown.** `variant?: 'primary' | 'secondary'` is a closed
+  set, so the panel offers exactly those and a typo cannot reach the component.
+- **A default comes from the destructuring**, `function Button({ label = 'Button' })`, because
+  that is where a React component actually states what it does when it is told nothing. A
+  default written anywhere else is deliberately not chased: the panel would then promise
+  something the signature does not.
+- **A prop the document cannot store is dropped rather than given a control.** The document
+  holds scalars, so a control for a callback or an element would be offering to write a value
+  that could not be saved, loaded or undone. The prop is real and the component keeps doing
+  whatever it does with it.
+
+**The parse uses a real type checker, and that is the whole reason it is a compiler rather than
+a regex.** `variant?: ButtonVariant` says nothing on its own, and a real component writes
+`import type { ButtonProps } from './types'` or intersects with `HTMLAttributes`. Resolving
+those is what a checker is for. Note it is TypeScript 5, pinned separately under an alias:
+TypeScript 7 is the native port and ships no JavaScript compiler API, so there is nothing to
+call. It runs in the dev server and the build, never in the browser, and the Node and browser
+halves are separate compiler programs (`tsconfig.node.json`) so neither can reach into the
+other. What they do share is `libraryTypes.ts`, which has no imports at all, because it is a
+wire format rather than a module.
+
+Two things a component still declares for itself, in its own file:
+
+- `export const canvasDefaults = { width: 220 }`, when the component is laid out by its width.
+  Whether a field fills the room it is given is a fact about the field, so it belongs beside
+  it rather than in a table somewhere else.
+- Everything else about how it looks and behaves, which was always true and is now the only
+  thing left.
+
+The render adapter stays, generated per component: it is the boundary where the document's
+scalars become typed props, and where a variant a saved file names but this build no longer
+has falls back rather than reaching a component that has no reason to expect one. An unknown
+key is still a real answer, not an error: the layer draws a placeholder where the node sits,
+because losing it would silently edit someone's document on load.
+
+**A source change is not an edit anyone performed.** Editing a component resizes every instance
+of it, so the measurements are dropped and taken again, inside a history group that is aborted
+rather than committed: the writes land on the live document and no step reaches the undo
+stack. That is the same primitive a cancelled drag uses. It runs more than once as the update
+settles, because a hot update applies the description of the library and the component's own
+module independently and Fast Refresh debounces its re-render, so the first look can measure
+the component that is being replaced. Looking again is free when nothing changed: a
+measurement equal to what the node already holds produces no patch, no version bump and no
+redraw.
 
 ### Dropping, and why it is a semantic operation
 

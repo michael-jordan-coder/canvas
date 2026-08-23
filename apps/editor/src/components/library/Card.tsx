@@ -1,5 +1,8 @@
 import { useState, type ReactElement } from 'react'
 
+/** Laid out by its width, like any panel: the copy inside it wraps to what it is given. */
+export const canvasDefaults = { width: 280 }
+
 export interface CardProps {
   title?: string
   body?: string

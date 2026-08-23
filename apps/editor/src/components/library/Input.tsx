@@ -1,5 +1,14 @@
 import { useState, type ReactElement } from 'react'
 
+/**
+ * How this component wants to be placed on a canvas, declared where the component is.
+ *
+ * A field fills the room it is given and its height follows, so it is laid out by its width
+ * rather than measured at a natural one. That is a fact about the component, so it belongs in
+ * the component's file rather than in a table beside it.
+ */
+export const canvasDefaults = { width: 220 }
+
 export interface InputProps {
   label?: string
   placeholder?: string

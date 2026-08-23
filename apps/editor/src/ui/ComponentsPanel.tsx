@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import { componentSpecs } from '../components/registry'
+import { componentSpecs, useLibrary } from '../components/registry'
 import { beginComponentDrag, endComponentDrag } from '../input/componentDrop'
 import { ComponentIcon } from './icons'
 import styles from './ComponentsPanel.module.css'
@@ -13,6 +13,9 @@ import styles from './ComponentsPanel.module.css'
  * they agree on.
  */
 export function ComponentsPanel(): ReactElement {
+  // Adding a file to the library folder adds a row here, with no reload and no registration.
+  useLibrary()
+
   return (
     <section className={styles.panel} aria-label="Components">
       <header className={styles.header}>Components</header>
