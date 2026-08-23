@@ -1,0 +1,248 @@
+/* Bottom-right of the viewport, over the canvas. The card and the opener share the spot,
+   so opening reads as the button becoming the panel rather than something new arriving. */
+.opener,
+.panel {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-4);
+}
+
+.opener {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  color: var(--text-secondary);
+  transition:
+    color var(--duration) var(--ease),
+    background var(--duration) var(--ease);
+}
+
+.opener:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+/* Working while closed: the accent is the one color that means active. */
+.opener[data-busy='true'] {
+  color: var(--accent);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  max-height: min(360px, calc(100% - var(--space-4) * 2));
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: none;
+  height: 32px;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.title {
+  flex: 1;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+/* Hollow when there is no server, filled when there is, accent while working. */
+.status {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  transition: background var(--duration) var(--ease);
+}
+
+.status[data-status='idle'] {
+  background: var(--line-strong);
+}
+
+.status[data-status='busy'] {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.iconButton {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  transition:
+    color var(--duration) var(--ease),
+    background var(--duration) var(--ease);
+}
+
+.iconButton:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.list {
+  flex: 1;
+  min-height: 48px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.message {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  color: var(--text);
+}
+
+/* The person's own words, set off as a block the way every chat marks the asking side. */
+.message[data-kind='user'] {
+  align-self: flex-end;
+  max-width: 85%;
+  padding: var(--space-2) var(--space-3);
+  background: var(--panel-sunken);
+  border-radius: var(--radius-md);
+}
+
+.message[data-kind='error'] {
+  color: var(--text-secondary);
+}
+
+/* A folded run of tool calls and thinking: one quiet line until it is asked to open. */
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.stepsToggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  align-self: flex-start;
+  font-size: var(--text-xs);
+  color: var(--text-disabled);
+  transition: color var(--duration) var(--ease);
+}
+
+.stepsToggle:hover {
+  color: var(--text-secondary);
+}
+
+.stepsToggle svg {
+  transition: transform var(--duration) var(--ease);
+}
+
+.stepsToggle[data-open='true'] svg {
+  transform: rotate(90deg);
+}
+
+/* The step in progress reads a shade stronger than a settled count. */
+.stepsToggle[data-live='true'] {
+  color: var(--text-secondary);
+}
+
+/* Indented under the toggle, with a rule standing in for the fold. */
+.stepsBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-left: 5px;
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--line);
+}
+
+.step {
+  font-size: var(--text-xs);
+  color: var(--text-disabled);
+}
+
+.thought {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.offline {
+  color: var(--text-secondary);
+}
+
+.composer {
+  flex: none;
+  padding: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+
+/* The border lives on this wrapper, not the textarea, so the send button sits inside the
+   field. 16px keeps a one line field a pill and a grown one a rounded box. */
+.field {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-1);
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  transition: border-color var(--duration) var(--ease);
+}
+
+.field:focus-within {
+  border-color: var(--accent);
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  max-height: 96px;
+  padding: var(--space-2) 0 var(--space-2) var(--space-3);
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text);
+  resize: none;
+  field-sizing: content;
+}
+
+.input::placeholder {
+  color: var(--text-disabled);
+}
+
+.action {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  transition: background var(--duration) var(--ease);
+}
+
+.action:hover {
+  background: var(--accent-hover);
+}
+
+/* Nothing to send yet: present but quiet, and the field beside it says why. */
+.action:disabled {
+  background: var(--panel-sunken);
+  color: var(--text-disabled);
+}

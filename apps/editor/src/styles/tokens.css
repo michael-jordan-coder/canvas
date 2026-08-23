@@ -50,6 +50,10 @@
   --row-height: 24px;
 
   --radius: 2px;
+  /* The larger pair belongs to surfaces that float over the canvas, like the agent panel.
+     Docked chrome stays on the sharp 2px. */
+  --radius-md: 8px;
+  --radius-lg: 12px;
 
   --duration: 90ms;
   --ease: cubic-bezier(0.2, 0, 0, 1);

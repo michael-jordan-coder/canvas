@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react'
-import type { Rect } from '@figma-canvas/document'
+import type { NodeId, Rect } from '@figma-canvas/document'
 import {
   DEFAULT_CAMERA,
   createWebGPURenderer,
@@ -18,7 +18,11 @@ import { TextEditor } from '../ui/TextEditor'
 import { beginEditing, endEditing } from '../state/textEditing'
 import { createPointerInput } from '../input/pointerInput'
 import { isEditingText } from '../input/isEditingText'
+import { registerCapture, type CaptureOptions, type CapturedImage } from '../agent/capture'
 import styles from './CanvasHost.module.css'
+
+/** Longest edge of an agent screenshot. Enough to judge layout, cheap to send as tokens. */
+const CAPTURE_MAX_EDGE = 1400
 
 /**
  * Owns the canvas element, the GPU device lifecycle and the draw schedule.
@@ -182,6 +186,47 @@ export function CanvasHost(): ReactElement {
       updateText,
     })
 
+    /**
+     * The agent's screenshot. The canvas is drawn on demand, so the capture schedules a
+     * draw and waits two animation frames: the first runs the render, and by the second the
+     * frame has been presented, which is what `drawImage` from a WebGPU canvas reads.
+     * Downscaled through a 2D canvas so a retina viewport does not ship megabytes of PNG.
+     */
+    const captureCanvas = async (options: CaptureOptions): Promise<CapturedImage> => {
+      if (!renderer) throw new Error('The canvas is not ready to capture.')
+
+      let bounds: Rect | null = null
+      if (options.nodeId) {
+        bounds = selectionWorldBounds(scene, [options.nodeId as NodeId])
+      } else if (options.fit === 'all') {
+        bounds = selectionWorldBounds(
+          scene,
+          scene.getChildren(scene.rootId).map((node) => node.id),
+        )
+      } else if (options.fit === 'selection') {
+        bounds = selectionWorldBounds(scene, useUI.getState().selection)
+      }
+      if (bounds) cameraRef.current = fitTo(bounds, viewportOf())
+
+      draw()
+      await new Promise<void>((done) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => done()))
+      })
+
+      const scale = Math.min(1, CAPTURE_MAX_EDGE / Math.max(canvas.width, canvas.height))
+      const shot = document.createElement('canvas')
+      shot.width = Math.max(1, Math.round(canvas.width * scale))
+      shot.height = Math.max(1, Math.round(canvas.height * scale))
+      const context = shot.getContext('2d')
+      if (!context) throw new Error('Could not read the canvas.')
+      context.drawImage(canvas, 0, 0, shot.width, shot.height)
+      const url = shot.toDataURL('image/png')
+      const base64 = url.slice(url.indexOf(',') + 1)
+      if (!base64) throw new Error('The canvas produced an empty image.')
+      return { mimeType: 'image/png', base64 }
+    }
+    const unregisterCapture = registerCapture(captureCanvas)
+
     // devicePixelRatio changes when the window moves to a different display, and no resize
     // event fires for it. This media query is the only notification available.
     let media: MediaQueryList | null = null
@@ -219,6 +264,7 @@ export function CanvasHost(): ReactElement {
     return () => {
       disposed = true
       cancelAnimationFrame(frame)
+      unregisterCapture()
       observer.disconnect()
       unsubscribe()
       unsubscribeSelection()

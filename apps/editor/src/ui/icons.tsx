@@ -274,3 +274,43 @@ export function CornersIcon(props: IconProps): ReactElement {
     </Svg>
   )
 }
+
+export function AssistantIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <path {...stroke} d="M8 2.5 9.4 6.6 13.5 8 9.4 9.4 8 13.5 6.6 9.4 2.5 8 6.6 6.6z" />
+    </Svg>
+  )
+}
+
+export function PlusIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <path {...stroke} d="M8 3.5v9M3.5 8h9" />
+    </Svg>
+  )
+}
+
+export function CloseIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <path {...stroke} d="m4.5 4.5 7 7m0-7-7 7" />
+    </Svg>
+  )
+}
+
+export function SendIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <path {...stroke} d="M8 12.5v-9m0 0L4.5 7M8 3.5 11.5 7" />
+    </Svg>
+  )
+}
+
+export function StopIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <rect {...stroke} x="4.5" y="4.5" width="7" height="7" />
+    </Svg>
+  )
+}
