@@ -202,6 +202,8 @@ export function CanvasHost(): ReactElement {
       },
       requestDraw: draw,
       beginTextEdit: beginEditing,
+      enterComponentSource: (id, component) =>
+        useUI.getState().enterComponentSource(id, component),
       setTextCaret: (caret, anchor) => useUI.getState().setTextCaret(caret, anchor),
       endTextEdit: endEditing,
       getEditing: () => useUI.getState().editing,

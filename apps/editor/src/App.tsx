@@ -14,9 +14,9 @@ import { selectTool } from './state/textEditing'
 import { useUI } from './state/uiStore'
 import { showStatsFromLocation } from './state/stats'
 import { ComponentsPanel } from './ui/ComponentsPanel'
+import { Inspector } from './ui/Inspector'
 import { LayersPanel } from './ui/LayersPanel'
 import { PerfReadout } from './ui/PerfReadout'
-import { PropertiesPanel } from './ui/PropertiesPanel'
 import { Toolbar } from './ui/Toolbar'
 import styles from './App.module.css'
 
@@ -24,6 +24,10 @@ import styles from './App.module.css'
 const showStats = showStatsFromLocation()
 
 export function App(): ReactElement {
+  // The only thing the shell reads from the store: which face the inspector is showing, so the
+  // grid can give that column the room code needs.
+  const inspector = useUI((state) => state.inspector)
+
   // Window level, not canvas level: undo and paste should work with the pointer over a panel.
   useEffect(() => {
     const wiring = {
@@ -32,6 +36,8 @@ export function App(): ReactElement {
       setSelection: (ids: readonly NodeId[]) => useUI.getState().setSelection(ids),
       setTool: selectTool,
       getMode: () => useUI.getState().mode,
+      enterComponentSource: (id: NodeId, component: string) =>
+        useUI.getState().enterComponentSource(id, component),
     }
     const disposeKeyboard = createKeyboardInput(wiring)
     const disposeClipboard = createClipboardInput(wiring)
@@ -44,7 +50,7 @@ export function App(): ReactElement {
   return (
     <div className={styles.app}>
       <Toolbar />
-      <div className={styles.body}>
+      <div className={styles.body} data-inspector={inspector}>
         <div className={styles.sidebar}>
           <ComponentsPanel />
           <LayersPanel />
@@ -53,7 +59,7 @@ export function App(): ReactElement {
           <CanvasHost />
           {showStats && <PerfReadout />}
         </main>
-        <PropertiesPanel />
+        <Inspector />
       </div>
     </div>
   )

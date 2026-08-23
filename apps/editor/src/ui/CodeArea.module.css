@@ -1,0 +1,38 @@
+/*
+ * The code surface.
+ *
+ * A textarea, deliberately. The repo has five runtime dependencies and no editor, parser or
+ * highlighter, and a code editor component is on the order of the whole app's JavaScript for
+ * one panel. What a textarea gives for free is what actually matters here: native undo, native
+ * selection, native IME, and `isEditingText` already returning true for it, so every canvas
+ * shortcut in the app stands down while you are typing in it with no wiring at all.
+ *
+ * What is lost is real and worth naming: syntax highlighting, bracket matching, auto indent and
+ * line numbers. Everything above this component talks to it through value/onChange/onCommit, so
+ * swapping in a real editor later touches this file and no caller.
+ */
+.area {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: var(--space-3) calc(var(--space-3) + var(--space-2) + 1px);
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  tab-size: 2;
+  /* Code does not reflow. Wrapping a line of JSX would make the indentation a lie. */
+  white-space: pre;
+  overflow: auto;
+  resize: none;
+}
+
+.area:focus {
+  outline: none;
+}
+
+.area[readonly] {
+  color: var(--text-secondary);
+}

@@ -1,0 +1,94 @@
+.panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+.header {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: var(--space-3);
+  height: 32px;
+  padding: 0 var(--space-3);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--line);
+}
+
+.name {
+  color: var(--text);
+}
+
+/*
+ * Where the component comes from in the codebase. The same quiet monospaced treatment the
+ * properties panel gives it, because it is the same fact.
+ */
+.source {
+  margin-left: auto;
+  color: var(--text-disabled);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * The way down and the way back. Both are quiet: descending is an offer, not the main action
+ * on the panel, and the back link is chrome rather than a control you aim at.
+ */
+.descend,
+.back {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  height: 20px;
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-xs);
+  transition:
+    background var(--duration) var(--ease),
+    color var(--duration) var(--ease);
+}
+
+.descend {
+  margin-left: auto;
+}
+
+.descend:hover,
+.back:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* Pointing the way each one goes: in on the right, back on the left. */
+.descend svg {
+  transform: rotate(-90deg);
+}
+
+.back svg {
+  transform: rotate(90deg);
+}
+
+.empty {
+  margin: 0;
+  padding: var(--space-4) calc(var(--space-3) + var(--space-2) + 1px);
+  color: var(--text-secondary);
+}
+
+/*
+ * The honest footnote. What is printed above is every prop the document can store, which is
+ * not every prop the component takes: a callback or an element cannot be written into a saved
+ * file, so the panel never sees it. Saying so is the difference between a partial view and a
+ * misleading one.
+ */
+.note {
+  margin: 0;
+  padding: var(--space-3) calc(var(--space-3) + var(--space-2) + 1px);
+  color: var(--text-disabled);
+  font-size: var(--text-xs);
+  border-top: 1px solid var(--line);
+}

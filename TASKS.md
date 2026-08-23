@@ -398,13 +398,28 @@ Known rough edges in what shipped:
 - [ ] Arrow function components (`export const Button = () => {}`) are not recognised yet, only
       function declarations.
 
-Write, which is next and is where the sync becomes two way:
+The code panel, which is where the sync starts becoming two way:
 
-- [ ] A code panel showing the source of whatever is selected: the instance's JSX at one
-      level, the component's own source when you descend into it, the way a design tool
-      already moves between an instance and its main component.
-- [ ] A dev-server endpoint that writes a file back, so the code panel is an editor rather than
-      a viewer.
+- [x] The inspector has two faces, Design and Code, sharing the right column. The column
+      widens to `--code-width` for code, which is a grid column swap rather than a splitter.
+      `apps/editor/src/ui/Inspector.tsx`
+- [x] Level one: the instance's call site, printed from the node's props, so it rewrites
+      itself when a prop changes. Omits values equal to the component's own defaults.
+      `apps/editor/src/code/printJsx.ts`, 13 tests
+- [x] Level two: the component's own source, read from disk. Descend by double clicking on the
+      canvas or pressing Enter, leave with Escape, the same gesture a design tool uses to go
+      from an instance to its main component.
+- [x] `GET /__component-source`, on its own dev-only plugin so the production build has no
+      route and no client code. `resolveLibraryFile` is the guard: 11 tests, including the
+      symlink case that caught a real hole in the first version of it.
+      `apps/editor/vite-plugins/sourceEndpoint.ts`
+- [ ] Writing the file back: POST with an mtime precondition so a file changed elsewhere is a
+      refusal rather than a silent overwrite, a temp file and a rename so a crash cannot leave
+      a half written component, and Cmd+S to commit. Deliberately not on blur: clicking away
+      from a source file must not write to the repo.
+- [ ] Editing the call site, which needs a small JSX attribute reader and a
+      `replaceComponentProps` that assigns rather than merges, since deleting an attribute has
+      to remove the prop and `updateComponentProps` would keep it.
 - [ ] Write-back from canvas edits: move, resize or reorder a component and have the source
       update in place, formatting preserved, through AST surgery rather than regeneration.
       This is the hard piece and the one that makes the two directions one artifact.

@@ -47,6 +47,9 @@
 
   --toolbar-height: 40px;
   --panel-width: 240px;
+  /* The right column while it is showing code. Wide enough for a component file at a
+     comfortable line length, and reached by swapping one column of the shell's grid. */
+  --code-width: 460px;
   --row-height: 24px;
 
   --radius: 2px;

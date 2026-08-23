@@ -1,10 +1,12 @@
+/*
+ * One face of the inspector rather than a column of its own, so the border and the background
+ * belong to `Inspector` and this only has to scroll.
+ */
 .panel {
   display: flex;
   flex-direction: column;
   min-height: 0;
   overflow-y: auto;
-  background: var(--panel);
-  border-left: 1px solid var(--line);
 }
 
 .header {

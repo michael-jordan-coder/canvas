@@ -20,6 +20,8 @@ export interface KeyboardInputOptions {
   setTool: (tool: ToolId) => void
   /** Design or preview. Every shortcut here edits the document, so preview has none of them. */
   getMode: () => EditorMode
+  /** Going inside the selected component, which is the keyboard's half of a double click. */
+  enterComponentSource: (id: NodeId, component: string) => void
 }
 
 const NUDGE_STEP = 1
@@ -142,6 +144,22 @@ export function createKeyboardInput(options: KeyboardInputOptions): () => void {
     if (options.getMode() === 'preview') return
 
     const accel = event.metaKey || event.ctrlKey
+
+    /*
+     * Enter goes inside the selected thing, which for a component means its own source. The
+     * same idea as double clicking it on the canvas, and the layers panel already stops Enter
+     * from reaching here while a row is being renamed.
+     */
+    if (!accel && event.key === 'Enter') {
+      const selection = options.getSelection()
+      const only = selection.length === 1 ? selection[0] : undefined
+      const node = only ? scene.getNode(only) : undefined
+      if (node?.type === 'component') {
+        event.preventDefault()
+        options.enterComponentSource(node.id, node.component)
+      }
+      return
+    }
 
     if (accel && event.key.toLowerCase() === 'z') {
       event.preventDefault()

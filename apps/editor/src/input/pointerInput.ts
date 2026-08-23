@@ -84,6 +84,13 @@ export interface PointerInputOptions {
   requestDraw: () => void
   /** Open the inline editor on a text node, placing the caret at an offset. */
   beginTextEdit: (id: NodeId, caret: number, anchor?: number) => void
+  /**
+   * Open a component's own source, which is what going inside one means.
+   *
+   * The same double click that descends into a text node's characters, because entering a
+   * thing to see what it is made of is one gesture with two answers.
+   */
+  enterComponentSource: (id: NodeId, component: string) => void
   /** Extend the current text selection to an offset, while dragging inside the text. */
   setTextCaret: (caret: number, anchor: number) => void
   /** Commit whatever is being typed, because the pointer went somewhere else. */
@@ -429,6 +436,11 @@ export function createPointerInput(options: PointerInputOptions): () => void {
         event.preventDefault()
         const caret = caretIn(hit.id, world, true) ?? 0
         options.beginTextEdit(hit.id, caret)
+        return
+      }
+      if (hit && hit.type === 'component') {
+        event.preventDefault()
+        options.enterComponentSource(hit.id, hit.component)
         return
       }
     }

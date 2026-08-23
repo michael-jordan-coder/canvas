@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { componentLibrary } from './vite-plugins/componentLibrary.js'
+import { componentSource } from './vite-plugins/sourceEndpoint.js'
 
 const src = fileURLToPath(new URL('./src', import.meta.url))
 
@@ -14,6 +15,11 @@ export default defineConfig({
     componentLibrary({
       dir: fileURLToPath(new URL('./src/components/library', import.meta.url)),
       root: src,
+    }),
+    // Lets the editor read a component's own source. Dev only, by being its own plugin: see
+    // the note on `componentSource`.
+    componentSource({
+      dir: fileURLToPath(new URL('./src/components/library', import.meta.url)),
     }),
   ],
   server: {

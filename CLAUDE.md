@@ -739,6 +739,67 @@ because the two live in different planes and only one of them is a compositing l
 a component to the back of a frame reorders it for auto layout and for the layers panel, and
 does not put it behind a rectangle. Interleaving would need a surface per z-run.
 
+## The code panel
+
+The right hand column has two faces, and they are two renderings of one fact: what the
+selected node is set to. Properties is what it is; Code is what that would be written as. They
+share a column rather than sitting side by side, because otherwise you would have to choose
+which of two panels about the same node to read.
+
+**Code is a property of the selection, not a document you open.** That is the whole premise,
+and it is what decides everything else here. There is no file tree, because a design tool
+navigates by clicking the thing rather than by finding its file.
+
+### Two levels, which are two different kinds of thing
+
+**The call site** is printed from the node's props, so it is a view of the **document**. Change
+a prop in the properties panel and the JSX rewrites itself. **The component's own source** is
+read from disk through the dev server, so it is a view of the **file**. Keeping them visibly
+apart is the job of the panel's chrome, because they are about to have different write paths:
+one edits the document, the other edits the repo.
+
+Descending is the gesture a design tool already has for going from an instance to its main
+component: double click on the canvas, or Enter with it selected, which is the same double
+click that descends into a text node's characters. Escape comes back. Selecting anything else
+leaves the file, because a panel that kept showing a file after you selected a rectangle would
+stop being about the selection, and that is the one thing that makes it readable with no mode
+indicator.
+
+The printer omits a value equal to the component's own default, so a freshly dropped Button
+prints as `<Button />` rather than four attributes restating the signature. Two rules meet on
+booleans and the order matters: turning off a prop the component already defaults to off says
+nothing and is omitted, while turning off one it defaults to on is a real choice with no
+shorthand, so it prints as `collapsible={false}`.
+
+One thing the panel has to admit and does, in a line under the code: **the printed call site is
+not the whole call site.** The document stores scalars, so a prop typed as a callback or an
+element never reaches it and cannot be printed. Without saying so the panel would read as
+complete while quietly being partial.
+
+### Reading a file, and what the endpoint refuses
+
+`GET /__component-source?file=...` is the first thing in the project that lets the browser
+reach the repo, so the design is mostly about what it will not do.
+
+It is **dev only by construction**: it lives on its own Vite plugin carrying `apply: 'serve'`,
+so it does not exist in a build to be reached. Its own plugin rather than a hook on the
+library one, because that plugin also serves `virtual:component-library`, which the production
+build needs. The client half is behind `import.meta.env.DEV`, which is statically false in a
+build, so Rollup drops the whole path and the route string is not in the bundle.
+
+`resolveLibraryFile` is the guard, pure and tested on its own. Every rule has to pass: no null
+byte, resolve before comparing, `.tsx` only, **the file resolved through symlinks**, its real
+directory exactly the library, and it must already exist. The symlink rule is the one that is
+easy to get subtly wrong, and getting it wrong is how this reads any file on the machine:
+resolving only the containing directory lets a link sitting inside the library point anywhere
+at all, because the directory is the library and the link is never followed. The test for
+exactly that caught it here. The match is exact rather than a prefix, because the library is
+scanned one level deep and because a prefix test for `library` also accepts a sibling named
+`library-secrets`.
+
+A refusal is a bare 403 that never echoes the path back, so it cannot be used to ask whether
+a file exists.
+
 ## Rotation, and the one rule it added
 
 `SelectionBox` is an upright rect plus an angle, not four corner points. Everything asking where

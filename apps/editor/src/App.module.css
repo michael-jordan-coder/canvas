@@ -4,10 +4,23 @@
   height: 100%;
 }
 
+/*
+ * Three columns: the sidebar, the canvas, and the inspector.
+ *
+ * The inspector widens to show code. That is a column swap rather than a splitter, because a
+ * panel that grows to fit what it is inspecting is a design tool behaviour and a drag handle
+ * is an IDE one, and because this repo has no resizable panel machinery to reach for. Instant
+ * rather than animated: the middle column is the canvas, so animating this width would animate
+ * the viewport's aspect ratio and redraw the scene all the way through it.
+ */
 .body {
   display: grid;
-  grid-template-columns: var(--panel-width) 1fr var(--panel-width);
+  grid-template-columns: var(--panel-width) 1fr var(--inspector-width, var(--panel-width));
   min-height: 0;
+}
+
+.body[data-inspector='code'] {
+  --inspector-width: var(--code-width);
 }
 
 /*
