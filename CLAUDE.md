@@ -776,6 +776,40 @@ not the whole call site.** The document stores scalars, so a prop typed as a cal
 element never reaches it and cannot be printed. Without saying so the panel would read as
 complete while quietly being partial.
 
+### Editing the call site, which writes the document rather than a file
+
+The call site is editable in the same field, and committing it goes through
+`replaceComponentProps`, which **assigns rather than merges**. That distinction is the whole
+of it: the properties panel says one thing about one prop and nothing about the others, so a
+merge is right there. A tag is the whole statement, so an attribute that is not there is a
+prop that is not set, and a merge would keep it and quietly disagree with the code that was
+just committed.
+
+What follows from that, and is worth expecting: committing drops every prop equal to the
+component's own default, since the printer left those out and the tag therefore does not claim
+them. Nothing moves on screen, because the component falls back to the same value. What
+changes is which one is the source of it, and that is the right way round: the instance now
+follows the component's default if the component's default moves.
+
+`parseInstance` is a small hand written reader rather than a parser dependency, because the
+input is one self closing tag of scalars and the browser bundle has no TypeScript in it. Two
+rules run through it, both about not half applying an edit: it never throws, and it never
+returns partial props, so a tag with four good attributes and one bad one is an error rather
+than four props. Nothing is coerced either: `count="3"` is a refusal, not the number three,
+because the component's type is what the panel exists to respect. A value outside a union is
+the case that pays for the whole approach, since a closed set is only closed if something
+checks.
+
+The round trip is the test that keeps the two halves honest, and it is deliberately **not** an
+identity on props: printing drops a default, so what comes back is what was actually chosen.
+
+A commit is one undo step, because it goes through the same measured transaction the panel's
+own fields do. A call site draft is deliberately **not** parked the way a source file's is: a
+file draft has no other representation anywhere, while a call site is a rendering of props
+that are still in the document and stops meaning anything the moment a different node is
+selected. So it survives a tab switch, which is the same node, and not a selection change,
+which is not.
+
 ### Reading a file, and what the endpoint refuses
 
 `GET /__component-source?file=...` is the first thing in the project that lets the browser

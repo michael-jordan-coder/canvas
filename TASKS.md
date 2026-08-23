@@ -422,9 +422,12 @@ The code panel, which is where the sync starts becoming two way:
       not throw away what was typed, so the draft is parked by file along with the base it was
       typed against: coming back restores both, and a stale save is still a refusal.
       `apps/editor/src/code/drafts.ts`
-- [ ] Editing the call site, which needs a small JSX attribute reader and a
-      `replaceComponentProps` that assigns rather than merges, since deleting an attribute has
-      to remove the prop and `updateComponentProps` would keep it.
+- [x] Editing the call site. `parseInstance` is a hand written reader for one self closing tag
+      of scalars: never throws, never returns partial props, coerces nothing, and checks a
+      union against the component's own options. `replaceComponentProps` assigns rather than
+      merges, so deleting an attribute removes the prop. One undo step, through the same
+      measured transaction the panel's fields use. 29 tests, including the print and read back
+      round trip. `apps/editor/src/code/parseJsx.ts`
 - [ ] Write-back from canvas edits: move, resize or reorder a component and have the source
       update in place, formatting preserved, through AST surgery rather than regeneration.
       This is the hard piece and the one that makes the two directions one artifact.

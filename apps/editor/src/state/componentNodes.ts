@@ -90,6 +90,32 @@ export function updateComponentProps(
 }
 
 /**
+ * Sets a component's props to exactly this bag, rather than merging into what it had.
+ *
+ * The merging version is right for the properties panel, where a field says one thing about
+ * one prop and says nothing about the others. It is wrong for a call site, where the tag is
+ * the whole statement: deleting an attribute has to remove the prop, and a merge would keep
+ * it and quietly disagree with the code that was just committed.
+ *
+ * What that means in practice is that committing a call site drops every prop equal to the
+ * component's own default, since the printer left those out and the tag therefore does not
+ * claim them. Nothing changes on screen, because the component falls back to the same value.
+ * What changes is which one is the source of it, and that is the right way round: from then on
+ * the instance follows the component's default if the component's default moves.
+ */
+export function replaceComponentProps(
+  document: SceneDocument,
+  node: ComponentNode,
+  props: Record<string, ComponentPropValue>,
+): void {
+  const size = measureComponentNode(node, { props })
+  document.transact(() => {
+    document.update<ComponentNode>(node.id, size ? { props, size } : { props })
+    relayout(document, [node.id])
+  })
+}
+
+/**
  * Hands the box back to the component, or takes it away.
  *
  * Turning it on remeasures at once, because the point of the toggle is to undo a resize, and

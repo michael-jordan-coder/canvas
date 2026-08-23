@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react'
 import type { ComponentNode } from '@figma-canvas/document'
+import { parseInstance } from '../code/parseJsx'
 import { printInstance } from '../code/printJsx'
 import { clearDraft, draftFor, parkDraft } from '../code/drafts'
 import { SourceConflictError, readSource, writeSource } from '../code/sourceFile'
 import { componentSpec, useLibrary, type ComponentSpec } from '../components/registry'
-import { useNode } from '../state/scene'
+import { replaceComponentProps } from '../state/componentNodes'
+import { scene, useNode } from '../state/scene'
 import { useUI } from '../state/uiStore'
 import { CodeArea } from './CodeArea'
 import { ChevronIcon } from './icons'
@@ -53,9 +55,20 @@ export function CodePanel(): ReactElement {
   return <InstanceCode node={node} />
 }
 
-/** Level one: what this instance would be written as, from what the document holds. */
+/**
+ * Level one: what this instance would be written as, and a place to write it.
+ *
+ * A view of the **document**, so it rewrites itself when a prop changes in the Design tab, and
+ * committing it writes the document back. That is one undo step, exactly as editing the same
+ * prop in a field would be, because it goes through the same measured transaction.
+ *
+ * The draft is deliberately not parked the way a source file's is. A file draft has no other
+ * representation anywhere, so losing it loses the work; a call site is a rendering of props
+ * that are still in the document, and it stops meaning anything the moment a different node is
+ * selected. So it survives a tab switch, which is the same node, and not a selection change,
+ * which is not.
+ */
 function InstanceCode({ node }: { node: ComponentNode }): ReactElement {
-  const enter = useUI((state) => state.enterComponentSource)
   const spec = componentSpec(node.component)
 
   if (!spec) {
@@ -72,6 +85,40 @@ function InstanceCode({ node }: { node: ComponentNode }): ReactElement {
     )
   }
 
+  // Keyed by the node, so selecting another instance is a remount and the draft does not
+  // follow a call site to a component it was never about.
+  return <CallSite key={node.id} node={node} spec={spec} />
+}
+
+function CallSite({ node, spec }: { node: ComponentNode; spec: ComponentSpec }): ReactElement {
+  const enter = useUI((state) => state.enterComponentSource)
+  const [draft, setDraft] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  const printed = printInstance(spec, node.props)
+
+  const commit = (): void => {
+    if (draft === null) return
+    const result = parseInstance(draft, spec)
+    if (!result.ok) {
+      setError(result.error)
+      return
+    }
+    /*
+     * Assigns rather than merges: the tag is the whole statement, so an attribute that is not
+     * there is a prop that is not set. See `replaceComponentProps`.
+     */
+    replaceComponentProps(scene, node, result.props)
+    // Dropped rather than kept, so the field goes back to being a view of the document. What
+    // it shows next is the reprint, which is not always character for character what was
+    // typed: a default written out is dropped, and the attributes come back in declaration
+    // order. Showing that is the honest answer, since it is what the document now holds.
+    setDraft(null)
+    setError(null)
+    setSaved(true)
+  }
+
   return (
     <div className={styles.panel}>
       <header className={styles.header}>
@@ -85,16 +132,41 @@ function InstanceCode({ node }: { node: ComponentNode }): ReactElement {
           <ChevronIcon />
         </button>
       </header>
-      <CodeArea label={`${spec.name} call site`} value={printInstance(spec, node.props)} readOnly />
-      {/*
-        * The document stores scalars, so a prop typed as a callback or an element never reaches
-        * it and cannot be printed. Without this line the panel would read as the whole call
-        * site while quietly being a part of it.
-        */}
-      <p className={styles.note}>
-        The props this document stores. A prop it cannot hold, such as a callback, keeps the
-        component&rsquo;s own default.
-      </p>
+      <CodeArea
+        label={`${spec.name} call site`}
+        value={draft ?? printed}
+        onChange={(next) => {
+          setDraft(next === printed ? null : next)
+          setError(null)
+          setSaved(false)
+        }}
+        onSave={commit}
+        onEscape={() => {
+          // Nowhere to go from the call site, so Escape means the other thing it means in
+          // this editor: throw the edit away. The printed view comes straight back.
+          setDraft(null)
+          setError(null)
+        }}
+      />
+      {error ? (
+        <p className={styles.note} role="alert">
+          {error} Nothing was changed.
+        </p>
+      ) : draft !== null ? (
+        <p className={styles.note}>Unsaved. Cmd S applies it to the canvas.</p>
+      ) : saved ? (
+        <p className={styles.note}>Applied. One undo step, like any other edit.</p>
+      ) : (
+        /*
+         * The document stores scalars, so a prop typed as a callback or an element never
+         * reaches it and cannot be printed. Without this line the panel would read as the
+         * whole call site while quietly being a part of it.
+         */
+        <p className={styles.note}>
+          The props this document stores. A prop it cannot hold, such as a callback, keeps the
+          component&rsquo;s own default.
+        </p>
+      )}
     </div>
   )
 }
