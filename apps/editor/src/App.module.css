@@ -6,7 +6,10 @@
 
 .body {
   display: grid;
-  grid-template-columns: var(--panel-width) 1fr var(--panel-width);
+  /* The side columns follow their resize handles; without one it is the shared default. */
+  grid-template-columns:
+    var(--panel-width-left, var(--panel-width)) 1fr
+    var(--panel-width-right, var(--panel-width));
   min-height: 0;
 }
 

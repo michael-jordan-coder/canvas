@@ -11,7 +11,9 @@
 
   --panel: #ffffff;
   --panel-sunken: #f5f5f5;
-  --field: #ffffff;
+  /* Fields sit a step below the panel, so an editable slot reads as a slot before it is
+     hovered. Light keeps the panel white and sinks the field; dark raises it instead. */
+  --field: #f0f0f0;
 
   --line: #e2e2e2;
   --line-strong: #c7c7c7;
@@ -50,6 +52,8 @@
   --row-height: 24px;
 
   --radius: 2px;
+  /* Inputs and segmented controls: soft enough to read as a well, still docked chrome. */
+  --radius-field: 4px;
   /* The larger pair belongs to surfaces that float over the canvas, like the agent panel.
      Docked chrome stays on the sharp 2px. */
   --radius-md: 8px;

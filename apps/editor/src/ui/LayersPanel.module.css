@@ -1,4 +1,6 @@
+/* Relative for the resize edge; scrolling stays on .tree so the edge spans full height. */
 .panel {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -20,6 +22,9 @@
   min-height: 0;
   overflow-y: auto;
   padding: var(--space-2) 0;
+  /* Clear of the 6px resize strip on the panel's right edge. Without this the strip sits
+     on top of the scrollbar, and grabbing the thumb resizes the panel instead. */
+  margin-right: 6px;
 }
 
 /* Depth comes from nesting rather than a computed inline style, so the tree stays

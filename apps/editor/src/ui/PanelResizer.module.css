@@ -1,0 +1,51 @@
+/*
+ * The grab edge: a wide invisible strip over the panel's border, showing the accent line
+ * while hovered or grabbed so the motion confirms the drag has hold of it. The host panel
+ * must be position: relative with its scrolling on an inner wrapper, so the strip spans
+ * the full height instead of scrolling away.
+ */
+.resizer {
+  position: absolute;
+  top: 0;
+  z-index: 1;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.onLeft {
+  left: 0;
+}
+
+.onRight {
+  right: 0;
+}
+
+.resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background: transparent;
+  transition: background var(--duration) var(--ease);
+}
+
+.onLeft::after {
+  left: -1px;
+}
+
+.onRight::after {
+  right: -1px;
+}
+
+.resizer:hover::after,
+.resizer[data-active]::after,
+.resizer:focus-visible::after {
+  background: var(--accent);
+}
+
+.resizer:focus-visible {
+  outline: none;
+}

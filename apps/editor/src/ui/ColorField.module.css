@@ -1,11 +1,23 @@
+/* The same filled slot the number fields are, so a paint row reads as one control. */
 .field {
   position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-3);
   height: var(--row-height);
-  /* The panel's shared 5px inset, matching a bordered field's border plus padding. */
-  padding-left: calc(var(--space-2) + 1px);
+  padding: 0 var(--space-2);
+  background: var(--field);
+  border: 1px solid transparent;
+  border-radius: var(--radius-field);
+  transition: border-color var(--duration) var(--ease);
+}
+
+.field:hover {
+  border-color: var(--line-strong);
+}
+
+.field:focus-within {
+  border-color: var(--accent);
 }
 
 /*
@@ -69,11 +81,7 @@
   transition: background var(--duration) var(--ease);
 }
 
-.hex:hover {
-  background: var(--hover);
-}
-
+/* The chip's own border carries hover and focus, so the hex needs no second surface. */
 .hex:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline: none;
 }

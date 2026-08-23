@@ -1,5 +1,5 @@
 import { IDENTITY, type Mat2D, type Size } from './math.js'
-import type { Paint, Stroke } from './paint.js'
+import type { Paint, RGBA, Stroke } from './paint.js'
 import { uniformCornerRadii, type CornerRadii } from './sdf.js'
 
 /** Branded so a plain string cannot be passed where a node id is expected. */
@@ -89,8 +89,21 @@ export interface BaseNode {
   layoutChild?: LayoutChild
 }
 
+/**
+ * What an absent `PageNode.backgroundColor` means. One constant, because three consumers
+ * have to agree on it: the renderer clears to it, the properties panel shows it as the
+ * swatch for an uncoloured page, and "back to the default" is written against it.
+ */
+export const DEFAULT_PAGE_BACKGROUND: RGBA = { r: 138 / 255, g: 138 / 255, b: 138 / 255, a: 1 }
+
 export interface PageNode extends BaseNode {
   readonly type: 'page'
+  /**
+   * What the canvas clears to behind everything drawn. Absent means the default backdrop,
+   * so old files need no field and no schema version. Alpha is carried but drawn as 1:
+   * the surface is opaque and there is nothing behind the page to blend with.
+   */
+  backgroundColor?: RGBA
 }
 
 export interface FrameNode extends BaseNode {
@@ -279,7 +292,12 @@ export function cloneNodeAs(node: SceneNode, id: NodeId): SceneNode {
 
   switch (node.type) {
     case 'page':
-      return { ...shared, id, type: 'page' }
+      return {
+        ...shared,
+        id,
+        type: 'page',
+        ...(node.backgroundColor ? { backgroundColor: { ...node.backgroundColor } } : {}),
+      }
     case 'frame':
       return {
         ...shared,

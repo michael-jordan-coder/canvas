@@ -1,4 +1,4 @@
-import type { SceneDocument, TextLayoutCache } from '@figma-canvas/document'
+import { DEFAULT_PAGE_BACKGROUND, type SceneDocument, type TextLayoutCache } from '@figma-canvas/document'
 import { clipMatrix, pixelsToClip, type Viewport } from '../camera.js'
 import type { Renderer, RendererInit, RendererStats, ViewState } from '../Renderer.js'
 import { createGPUSurface, onDeviceLost, releaseGPUSurface, type GPUSurface } from './device.js'
@@ -15,8 +15,8 @@ import { OverlayInstances } from './OverlayInstances.js'
 import { createShapePipeline } from './pipelines/shape.js'
 import { createOverlayPipeline } from './pipelines/overlay.js'
 
-/** Mid grey, matching --backdrop. Written in the same 0..1 form the GPU stores. */
-const BACKDROP: GPUColor = { r: 138 / 255, g: 138 / 255, b: 138 / 255, a: 1 }
+/** The document owns the default, so the panel's swatch and this clear always agree. */
+const BACKDROP: GPUColor = { ...DEFAULT_PAGE_BACKGROUND }
 
 /**
  * Two passes over the same surface: the document in world space, then the selection overlay
@@ -91,6 +91,17 @@ class WebGPURenderer implements Renderer {
     this.#canvas.height = height
   }
 
+  /**
+   * The page's own colour if it has one, the shared backdrop if not. Read from the
+   * document per frame like everything else drawn: alpha is pinned to 1 because the
+   * surface is opaque and there is nothing behind the page to blend with.
+   */
+  #backgroundColor(): GPUColor {
+    const root = this.#document.getNode(this.#document.rootId)
+    const color = root?.type === 'page' ? root.backgroundColor : undefined
+    return color ? { r: color.r, g: color.g, b: color.b, a: 1 } : BACKDROP
+  }
+
   render(view: ViewState): void {
     if (this.#destroyed) return
     const { device, context } = this.#surface
@@ -121,7 +132,7 @@ class WebGPURenderer implements Renderer {
           // overwritten, and on tiled GPUs that is the expensive kind of waste.
           loadOp: 'clear',
           storeOp: 'store',
-          clearValue: BACKDROP,
+          clearValue: this.#backgroundColor(),
         },
       ],
     })

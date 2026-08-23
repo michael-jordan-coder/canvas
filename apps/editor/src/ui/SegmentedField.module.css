@@ -15,35 +15,44 @@
   font-size: var(--text-xs);
 }
 
+/*
+ * The container is a well in the field tone and the chosen option a chip raised back to
+ * the panel colour, so the state reads by contrast alone and the accent stays reserved
+ * for focus.
+ */
 .segments {
   display: grid;
   grid-auto-columns: 1fr;
   grid-auto-flow: column;
+  gap: var(--space-1);
   flex: 1;
   min-width: 0;
   height: var(--row-height);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  overflow: hidden;
+  padding: var(--space-1);
+  background: var(--field);
+  border-radius: var(--radius-field);
 }
 
 .segment {
+  display: grid;
+  place-items: center;
+  min-width: 0;
   padding: 0;
   border: none;
-  background: var(--field);
+  border-radius: calc(var(--radius-field) - 2px);
+  background: none;
   color: var(--text-secondary);
   font: inherit;
   font-size: var(--text-xs);
   cursor: pointer;
-  transition: background var(--duration) var(--ease);
-}
-
-.segment + .segment {
-  border-left: 1px solid var(--line);
+  transition:
+    background var(--duration) var(--ease),
+    color var(--duration) var(--ease);
 }
 
 .segment:hover {
   background: var(--hover);
+  color: var(--text);
 }
 
 .segment:active {
@@ -51,8 +60,9 @@
 }
 
 .segment[aria-pressed='true'] {
-  background: var(--accent-subtle);
-  color: var(--accent);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 
 .segment:focus-visible {

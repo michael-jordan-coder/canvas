@@ -301,7 +301,15 @@ function parseNode(value: unknown, path: string, version: number): SceneNode {
 
   switch (type as NodeType) {
     case 'page':
-      return { ...shared, type: 'page' }
+      return {
+        ...shared,
+        type: 'page',
+        // Absent means the default backdrop in the model itself, so a file that predates
+        // the field and a page that simply has none read identically: no version check.
+        ...(n['backgroundColor'] !== undefined
+          ? { backgroundColor: parseColor(n['backgroundColor'], `${path}.backgroundColor`) }
+          : {}),
+      }
     case 'frame':
       return {
         ...shared,

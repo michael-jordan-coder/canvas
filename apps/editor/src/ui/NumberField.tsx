@@ -4,6 +4,11 @@ import styles from './NumberField.module.css'
 
 interface NumberFieldProps {
   label: string
+  /**
+   * Drawn in place of the label text. The label still names the field for assistive tech,
+   * and still scrubs: the icon is a picture of the label, not a different control.
+   */
+  icon?: ReactElement
   value: number
   onCommit: (value: number) => void
   /**
@@ -56,6 +61,7 @@ interface Scrub {
  */
 export function NumberField({
   label,
+  icon,
   value,
   onCommit,
   wide,
@@ -119,11 +125,19 @@ export function NumberField({
   const className = [styles.field, wide ? styles.wide : '', readOnly ? styles.readOnly : '']
     .filter(Boolean)
     .join(' ')
+  const labelClassName = [
+    styles.label,
+    icon ? styles.iconLabel : '',
+    readOnly ? '' : styles.scrubbable,
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   return (
     <label className={className}>
       <span
-        className={readOnly ? styles.label : `${styles.label} ${styles.scrubbable}`}
+        className={labelClassName}
+        aria-hidden={icon ? true : undefined}
         onPointerDown={(event) => {
           if (readOnly || event.button !== 0) return
           scrubRef.current = {
@@ -180,10 +194,11 @@ export function NumberField({
           }
         }}
       >
-        {label}
+        {icon ?? label}
       </span>
       <input
         className={styles.input}
+        aria-label={icon ? label : undefined}
         type="text"
         inputMode="decimal"
         spellCheck={false}

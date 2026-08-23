@@ -1,8 +1,9 @@
-import { useState, type ComponentType, type ReactElement } from 'react'
+import { useRef, useState, type ComponentType, type ReactElement } from 'react'
 import {
   angleOf,
   degrees,
   fromHex,
+  DEFAULT_PAGE_BACKGROUND,
   isAutoLayoutFrame,
   isPainted,
   isPaintVisible,
@@ -16,6 +17,7 @@ import {
   type LayoutAlign,
   type LayoutDirection,
   type NodeId,
+  type PageNode,
   type Paint,
   type PaintedNode,
   type RectangleNode,
@@ -49,16 +51,30 @@ import {
   AlignLeftIcon,
   AlignRightIcon,
   AlignTopIcon,
+  AngleIcon,
+  ChevronIcon,
+  ArrowDownIcon,
+  ArrowRightIcon,
   CornersIcon,
   DistributeHorizontalIcon,
   DistributeVerticalIcon,
   FlipHorizontalIcon,
   FlipVerticalIcon,
+  GapIcon,
   HiddenIcon,
+  MinusIcon,
+  OpacityIcon,
+  PaddingXIcon,
+  PaddingYIcon,
+  PlusIcon,
+  RadiusIcon,
+  SpaceBetweenIcon,
   VisibleIcon,
   type IconProps,
 } from './icons'
+import { AlignmentGrid } from './AlignmentGrid'
 import { NumberField } from './NumberField'
+import { PanelResizer } from './PanelResizer'
 import { SegmentedField } from './SegmentedField'
 import styles from './PropertiesPanel.module.css'
 
@@ -73,8 +89,15 @@ export function PropertiesPanel(): ReactElement {
 
   return (
     <aside className={styles.panel}>
-      <header className={styles.header}>{title}</header>
-      <div className={styles.sections}>
+      <PanelResizer
+        side="right"
+        cssVar="--panel-width-right"
+        storageKey="figma-canvas:properties-width"
+        label="Resize properties panel"
+      />
+      <div className={styles.scroll}>
+        <header className={styles.header}>{title}</header>
+        <div className={styles.sections}>
         {selection.length > 1 && <MultiSelectionProperties selection={selection} />}
         {node && <NodeProperties node={node} />}
         {/*
@@ -82,8 +105,9 @@ export function PropertiesPanel(): ReactElement {
           * whole subtree, not just the one fill/stroke row above already edits directly.
           */}
         {selection.length > 0 && <SelectionColorsSection selection={selection} />}
+        {selection.length === 0 && <PageSection />}
+        </div>
       </div>
-      {selection.length === 0 && <p className={styles.empty}>Nothing selected</p>}
     </aside>
   )
 }
@@ -137,27 +161,8 @@ const DISTRIBUTE_BUTTONS: ReadonlyArray<{
 
 function AlignRow({ selection }: { selection: readonly NodeId[] }): ReactElement {
   return (
-    <div className={styles.iconRow} role="group" aria-label="Align">
+    <div className={styles.alignRow} role="group" aria-label="Align">
       {ALIGN_BUTTONS.map(({ command, label, Icon }) => (
-        <button
-          key={command}
-          type="button"
-          className={styles.iconButton}
-          aria-label={label}
-          onClick={() => alignSelection(scene, selection, command)}
-        >
-          <Icon size={16} />
-        </button>
-      ))}
-    </div>
-  )
-}
-
-/** Distributing needs a first, a last and something between them to space out. */
-function DistributeRow({ selection }: { selection: readonly NodeId[] }): ReactElement {
-  return (
-    <div className={styles.iconRow} role="group" aria-label="Distribute">
-      {DISTRIBUTE_BUTTONS.map(({ command, label, Icon }) => (
         <button
           key={command}
           type="button"
@@ -203,15 +208,31 @@ function FlipButtons({ selection }: { selection: readonly NodeId[] }): ReactElem
  */
 function MultiSelectionProperties({ selection }: { selection: readonly NodeId[] }): ReactElement {
   return (
-    <section className={styles.section}>
-      <h3 className={styles.title}>Position</h3>
-      <AlignRow selection={selection} />
-      {/* A no-op below three nodes: two boxes have one gap, and equalising one gap changes nothing. */}
-      {selection.length >= 3 && <DistributeRow selection={selection} />}
-      <div className={styles.iconRow} role="group" aria-label="Flip">
-        <FlipButtons selection={selection} />
-      </div>
-    </section>
+    <>
+      <section className={styles.section}>
+        <AlignRow selection={selection} />
+      </section>
+      <section className={styles.section}>
+        <h3 className={styles.title}>Arrange</h3>
+        <div className={styles.iconRow} role="group" aria-label="Distribute and flip">
+          {/* Distributing is a no-op below three nodes: two boxes have one gap, and equalising
+              one gap changes nothing. */}
+          {selection.length >= 3 &&
+            DISTRIBUTE_BUTTONS.map(({ command, label, Icon }) => (
+              <button
+                key={command}
+                type="button"
+                className={styles.iconButton}
+                aria-label={label}
+                onClick={() => alignSelection(scene, selection, command)}
+              >
+                <Icon size={16} />
+              </button>
+            ))}
+          <FlipButtons selection={selection} />
+        </div>
+      </section>
+    </>
   )
 }
 
@@ -236,6 +257,10 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
   return (
     <>
       <section className={styles.section}>
+        <AlignRow selection={selection} />
+      </section>
+
+      <section className={styles.section}>
         <h3 className={styles.title}>Position</h3>
         <div className={styles.grid}>
           {/* Inside an auto layout frame position belongs to the layout, so both report. */}
@@ -255,7 +280,8 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
         <div className={styles.headed}>
           <div className={styles.suffixed}>
             <NumberField
-              label="A"
+              label="Rotation"
+              icon={<AngleIcon size={14} />}
               value={normalizeDegrees(degrees(angleOf(scene.worldTransform(node.id))))}
               onCommit={(value) => setNodesAngle(scene, [node.id], radians(normalizeDegrees(value)))}
             />
@@ -265,11 +291,6 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
           </div>
           <FlipButtons selection={selection} />
         </div>
-        <AlignRow selection={selection} />
-      </section>
-
-      <section className={styles.section}>
-        <h3 className={styles.title}>Size</h3>
         <div className={styles.grid}>
           {/*
             * On text, W is editable only once the box is fixed width, where it is the width
@@ -295,6 +316,19 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
               setSize({ ...node.size, height: Math.max(MIN_NODE_SIZE, height) })
             }
           />
+          {/* The sizing mode sits under the number it explains, the way Figma hangs it.
+              Both cells render whenever either has a choice, so the columns stay aligned. */}
+          {(hasSizingChoice(node, inAutoLayout, 'width') ||
+            hasSizingChoice(node, inAutoLayout, 'height')) && (
+            <>
+              <div>
+                <SizingSelect node={node} inAutoLayout={inAutoLayout} axis="width" />
+              </div>
+              <div>
+                <SizingSelect node={node} inAutoLayout={inAutoLayout} axis="height" />
+              </div>
+            </>
+          )}
         </div>
       </section>
 
@@ -303,7 +337,8 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
         <div className={styles.grid}>
           <div className={styles.suffixed}>
             <NumberField
-              label="O"
+              label="Opacity"
+              icon={<OpacityIcon size={14} />}
               value={Math.round(node.opacity * 100)}
               onCommit={(percent) =>
                 scene.update(node.id, { opacity: Math.min(1, Math.max(0, percent / 100)) })
@@ -313,10 +348,11 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
               %
             </span>
           </div>
+          {/* Opacity and corner radius share the row, the way Figma pairs them. */}
+          {(node.type === 'rectangle' || node.type === 'frame') && (
+            <CornerRadiiField key={node.id} node={node} />
+          )}
         </div>
-        {(node.type === 'rectangle' || node.type === 'frame') && (
-          <CornerRadiiField key={node.id} node={node} />
-        )}
         {node.type === 'frame' && (
           <label className={styles.toggle}>
             <input
@@ -332,9 +368,7 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
         )}
       </section>
 
-      {(node.type === 'frame' || inAutoLayout) && (
-        <AutoLayoutSection node={node} inAutoLayout={inAutoLayout} />
-      )}
+      {node.type === 'frame' && <AutoLayoutSection node={node} />}
       {node.type === 'text' && <TextSection node={node} />}
       {isPainted(node) && <FillSection node={node} />}
       {/*
@@ -368,20 +402,19 @@ function CornerRadiiField({ node }: { node: RectangleNode | FrameNode }): ReactE
 
   return (
     <>
-      <div className={styles.headed}>
-        {expanded ? (
-          <span className={styles.title}>Corners</span>
-        ) : (
-          <NumberField
-            label="R"
-            value={node.cornerRadii.topLeft}
-            onCommit={(radius) =>
-              scene.update<RectangleNode>(node.id, {
-                cornerRadii: uniformCornerRadii(Math.max(0, radius)),
-              })
-            }
-          />
-        )}
+      {/* One cell of the Appearance grid, beside opacity; the R field always means all
+          four corners, whether or not the per-corner editor below is open. */}
+      <div className={styles.radiusCell}>
+        <NumberField
+          label="Corner radius"
+          icon={<RadiusIcon size={14} />}
+          value={node.cornerRadii.topLeft}
+          onCommit={(radius) =>
+            scene.update<RectangleNode>(node.id, {
+              cornerRadii: uniformCornerRadii(Math.max(0, radius)),
+            })
+          }
+        />
         <button
           type="button"
           className={styles.iconButton}
@@ -393,7 +426,7 @@ function CornerRadiiField({ node }: { node: RectangleNode | FrameNode }): ReactE
         </button>
       </div>
       {expanded && (
-        <div className={styles.grid}>
+        <div className={styles.corners}>
           {CORNER_ORDER.map((corner) => (
             <NumberField
               key={corner}
@@ -412,203 +445,235 @@ function CornerRadiiField({ node }: { node: RectangleNode | FrameNode }): ReactE
   )
 }
 
-const DIRECTIONS = [
-  { value: 'horizontal', label: 'Row' },
-  { value: 'vertical', label: 'Column' },
-] as const satisfies readonly { value: LayoutDirection; label: string }[]
-
-const MAIN_ALIGNS = [
-  { value: 'start', label: 'Start' },
-  { value: 'center', label: 'Center' },
-  { value: 'end', label: 'End' },
-  { value: 'space-between', label: 'Space' },
-] as const satisfies readonly { value: LayoutAlign; label: string }[]
-
-const CROSS_ALIGNS = [
-  { value: 'start', label: 'Start' },
-  { value: 'center', label: 'Center' },
-  { value: 'end', label: 'End' },
-] as const satisfies readonly { value: LayoutAlign; label: string }[]
+const DIRECTIONS: readonly { value: LayoutDirection; label: string; icon: ReactElement }[] = [
+  { value: 'horizontal', label: 'Horizontal', icon: <ArrowRightIcon size={14} /> },
+  { value: 'vertical', label: 'Vertical', icon: <ArrowDownIcon size={14} /> },
+]
 
 type SizingValue = 'fixed' | 'hug' | 'fill'
 
+const modeKey = (axis: keyof Size): 'widthMode' | 'heightMode' =>
+  axis === 'width' ? 'widthMode' : 'heightMode'
+
 /**
- * Auto layout, and now also the per-axis sizing control that used to be four checkboxes
- * split between Size and here (`Hug width/height` in one section, `Fill width/height` in the
- * other). `AxisSizing` (this node's own hug/fixed) and `ChildSizing` (fill/fixed from its
- * parent) are disjoint types on two different objects, so this is where they get unified into
- * one control per axis.
- *
- * Rendered for a plain node too, not just a frame, whenever its parent is an auto layout
- * frame: that node has nothing of its own to configure here beyond Fill, but Fill is exactly
- * the setting this section exists to host.
+ * What the axis can offer beyond a plain number. The one writing of the rule: the render
+ * guard asks whether either flag is up, the select turns each into an option.
  */
-function AutoLayoutSection({
+function sizingChoices(
+  node: SceneNode,
+  inAutoLayout: boolean,
+  axis: keyof Size,
+): { canHug: boolean; canFill: boolean } {
+  const canHug = node.type === 'frame' && node.layout !== undefined
+  // Text height is measured from the text, so it is never anyone's to fill.
+  const canFill = inAutoLayout && !(axis === 'height' && node.type === 'text')
+  return { canHug, canFill }
+}
+
+function hasSizingChoice(node: SceneNode, inAutoLayout: boolean, axis: keyof Size): boolean {
+  const { canHug, canFill } = sizingChoices(node, inAutoLayout, axis)
+  return canHug || canFill
+}
+
+function setSizing(
+  node: SceneNode,
+  inAutoLayout: boolean,
+  axis: keyof Size,
+  value: SizingValue,
+): void {
+  const layout = node.type === 'frame' ? node.layout : undefined
+  scene.transact(() => {
+    if (value === 'hug') {
+      if (layout) updateFrameLayout(scene, node.id, { [sizingKey(layout, axis)]: 'hug' })
+      // A fill inherited from the parent would otherwise still win at layout time (the
+      // parent forces this axis's size regardless of what this node's own hug would have
+      // computed), so picking Hug here has to clear it rather than leave a silent no-op.
+      if (isFilling(node, inAutoLayout, axis)) {
+        updateLayoutChild(scene, node, { [modeKey(axis)]: 'fixed' })
+      }
+    } else if (value === 'fill') {
+      // updateLayoutChild already flips a hugging axis of this same frame to fixed; that
+      // fill-beats-hug resolution lives there and is not repeated here.
+      updateLayoutChild(scene, node, { [modeKey(axis)]: 'fill' })
+    } else {
+      if (layout && isHugging(layout, axis)) {
+        updateFrameLayout(scene, node.id, { [sizingKey(layout, axis)]: 'fixed' })
+      }
+      if (isFilling(node, inAutoLayout, axis)) {
+        updateLayoutChild(scene, node, { [modeKey(axis)]: 'fixed' })
+      }
+    }
+  })
+}
+
+/**
+ * The per-axis sizing mode, as the dropdown Figma hangs under each size field: Fixed, Hug
+ * contents, Fill container. It used to be a segmented row in the Auto layout section, but
+ * the mode answers "what is this number", so it belongs directly under the number it
+ * explains. `AxisSizing` (this node's own hug/fixed) and `ChildSizing` (fill/fixed from
+ * its parent) are disjoint types on two different objects, unified here into one control.
+ */
+function SizingSelect({
   node,
   inAutoLayout,
+  axis,
 }: {
   node: SceneNode
   inAutoLayout: boolean
-}): ReactElement {
+  axis: keyof Size
+}): ReactElement | null {
+  const { canHug, canFill } = sizingChoices(node, inAutoLayout, axis)
+  if (!canHug && !canFill) return null
+
   const layout = node.type === 'frame' ? node.layout : undefined
 
-  const modeKey = (axis: keyof Size): 'widthMode' | 'heightMode' =>
-    axis === 'width' ? 'widthMode' : 'heightMode'
+  // Fill is read before hug because that is the order the engine resolves them in: a parent
+  // forces this axis's size, and `#resolveSize` hands that forced value straight through as
+  // the frame's own, so the hug never runs. `setSizing` clears one when the other is picked,
+  // so the panel cannot produce a node with both, but a loaded file can, and in that file the
+  // canvas would be filling. Reporting hug there would be the control disagreeing with what
+  // is on screen.
+  const value: SizingValue = isFilling(node, inAutoLayout, axis)
+    ? 'fill'
+    : isHugging(layout, axis)
+      ? 'hug'
+      : 'fixed'
 
-  const setSizing = (axis: keyof Size, value: SizingValue): void => {
-    scene.transact(() => {
-      if (value === 'hug') {
-        if (layout) updateFrameLayout(scene, node.id, { [sizingKey(layout, axis)]: 'hug' })
-        // A fill inherited from the parent would otherwise still win at layout time (the
-        // parent forces this axis's size regardless of what this node's own hug would have
-        // computed), so picking Hug here has to clear it rather than leave a silent no-op.
-        if (isFilling(node, inAutoLayout, axis)) {
-          updateLayoutChild(scene, node, { [modeKey(axis)]: 'fixed' })
-        }
-      } else if (value === 'fill') {
-        // updateLayoutChild already flips a hugging axis of this same frame to fixed; that
-        // fill-beats-hug resolution lives there and is not repeated here.
-        updateLayoutChild(scene, node, { [modeKey(axis)]: 'fill' })
-      } else {
-        if (layout && isHugging(layout, axis)) {
-          updateFrameLayout(scene, node.id, { [sizingKey(layout, axis)]: 'fixed' })
-        }
-        if (isFilling(node, inAutoLayout, axis)) {
-          updateLayoutChild(scene, node, { [modeKey(axis)]: 'fixed' })
-        }
-      }
-    })
-  }
-
-  const sizingRow = (axis: keyof Size, label: string): ReactElement | null => {
-    const canHug = node.type === 'frame' && layout !== undefined
-    // Text height is measured from the text, so it is never anyone's to fill.
-    const canFill = inAutoLayout && !(axis === 'height' && node.type === 'text')
-    if (!canHug && !canFill) return null
-
-    const options: { value: SizingValue; label: string }[] = [{ value: 'fixed', label: 'Fixed' }]
-    if (canHug) options.push({ value: 'hug', label: 'Hug' })
-    if (canFill) options.push({ value: 'fill', label: 'Fill' })
-
-    // Fill is read before hug because that is the order the engine resolves them in: a parent
-    // forces this axis's size, and `#resolveSize` hands that forced value straight through as
-    // the frame's own, so the hug never runs. `setSizing` clears one when the other is picked,
-    // so the panel cannot produce a node with both, but a loaded file can, and in that file the
-    // canvas would be filling. Reporting hug there would be the control disagreeing with what
-    // is on screen.
-    const value: SizingValue = isFilling(node, inAutoLayout, axis)
-      ? 'fill'
-      : isHugging(layout, axis)
-        ? 'hug'
-        : 'fixed'
-
-    return (
-      <SegmentedField
-        key={axis}
-        label={label}
+  return (
+    <div className={styles.selectWrap}>
+      <select
+        className={styles.select}
+        aria-label={axis === 'width' ? 'Width sizing' : 'Height sizing'}
         value={value}
-        options={options}
-        onChange={(next: SizingValue) => setSizing(axis, next)}
-      />
-    )
-  }
-
-  const sizingGrid = (
-    <div className={styles.grid}>
-      {sizingRow('width', 'W')}
-      {sizingRow('height', 'H')}
+        onChange={(event) => setSizing(node, inAutoLayout, axis, event.target.value as SizingValue)}
+      >
+        <option value="fixed">{axis === 'width' ? 'Fixed width' : 'Fixed height'}</option>
+        {canHug && <option value="hug">Hug contents</option>}
+        {canFill && <option value="fill">Fill container</option>}
+      </select>
+      <span className={styles.selectChevron} aria-hidden="true">
+        <ChevronIcon size={12} />
+      </span>
     </div>
   )
+}
 
-  if (node.type !== 'frame') {
-    return (
-      <section className={styles.section}>
-        <h3 className={styles.title}>Auto layout</h3>
-        {sizingGrid}
-      </section>
-    )
-  }
+/** The frame's own layout: direction, spacing and alignment. Sizing lives under W and H. */
+function AutoLayoutSection({ node }: { node: FrameNode }): ReactElement {
+  const layout = node.layout
+  // What mainAlign was before space-between switched on, so toggling it off is a true
+  // revert rather than a jump to some third alignment. 'start' covers a frame that was
+  // already spaced when it arrived here, matching the layout default.
+  const packedAlign = useRef<LayoutAlign>('start')
 
   if (!layout) {
     return (
       <section className={styles.section}>
-        <h3 className={styles.title}>Auto layout</h3>
-        <button
-          type="button"
-          className={styles.add}
-          onClick={() => addAutoLayout(scene, node.id)}
-        >
-          Add auto layout
-        </button>
-        {inAutoLayout && sizingGrid}
+        <div className={styles.sectionHeader}>
+          <h3 className={styles.title}>Auto layout</h3>
+          <button
+            type="button"
+            className={styles.iconButton}
+            aria-label="Add auto layout"
+            onClick={() => addAutoLayout(scene, node.id)}
+          >
+            <PlusIcon size={14} />
+          </button>
+        </div>
       </section>
     )
   }
 
   const set = (changes: Partial<FrameLayout>): void =>
     updateFrameLayout(scene, node.id, changes)
+  const spaced = layout.mainAlign === 'space-between'
 
   return (
     <section className={styles.section}>
-      <h3 className={styles.title}>Auto layout</h3>
-      <div className={styles.headed}>
-        <SegmentedField
-          label="Flow"
-          value={layout.direction}
-          options={DIRECTIONS}
-          onChange={(direction: LayoutDirection) => set({ direction })}
-        />
+      <div className={styles.sectionHeader}>
+        <h3 className={styles.title}>Auto layout</h3>
         <button
           type="button"
-          className={styles.remove}
+          className={styles.iconButton}
           aria-label="Remove auto layout"
           onClick={() => removeAutoLayout(scene, node.id)}
         >
-          &minus;
+          <MinusIcon size={14} />
         </button>
       </div>
-      <NumberField
-        wide
-        label="Gap"
-        value={layout.gap}
-        onCommit={(gap) => set({ gap: Math.max(0, gap) })}
-      />
       {/*
-        * The panel edits padding as a horizontal and a vertical pair, which is Figma's own
-        * resting shape for it. The model keeps all four sides, so a per side editor can land
-        * later without touching the file format.
+        * Direction and spacing stack beside the alignment grid, the way the two halves of
+        * the question sit in Figma: how the children flow on the left, where they sit on
+        * the right.
         */}
-      <NumberField
-        wide
-        label="Pad X"
-        value={layout.padding.left}
-        onCommit={(value) => {
-          const side = Math.max(0, value)
-          set({ padding: { ...layout.padding, left: side, right: side } })
-        }}
-      />
-      <NumberField
-        wide
-        label="Pad Y"
-        value={layout.padding.top}
-        onCommit={(value) => {
-          const side = Math.max(0, value)
-          set({ padding: { ...layout.padding, top: side, bottom: side } })
-        }}
-      />
-      <SegmentedField
-        label="Align"
-        value={layout.mainAlign}
-        options={MAIN_ALIGNS}
-        onChange={(mainAlign: LayoutAlign) => set({ mainAlign })}
-      />
-      <SegmentedField
-        label="Cross"
-        value={layout.crossAlign}
-        options={CROSS_ALIGNS}
-        onChange={(crossAlign: LayoutAlign) => set({ crossAlign })}
-      />
-      {sizingGrid}
+      <div className={styles.autoRow}>
+        <div className={styles.autoControls}>
+          <SegmentedField
+            hideLabel
+            label="Direction"
+            value={layout.direction}
+            options={DIRECTIONS}
+            onChange={(direction: LayoutDirection) => set({ direction })}
+          />
+          <div className={styles.gapRow}>
+            <NumberField
+              label="Gap"
+              icon={<GapIcon size={14} />}
+              value={layout.gap}
+              onCommit={(gap) => set({ gap: Math.max(0, gap) })}
+            />
+            {/* Space between overrides the gap, so it lives beside the number it silences. */}
+            <button
+              type="button"
+              className={styles.iconButton}
+              aria-label="Space between"
+              aria-pressed={spaced}
+              title="Space between"
+              onClick={() => {
+                if (spaced) {
+                  set({ mainAlign: packedAlign.current })
+                } else {
+                  packedAlign.current = layout.mainAlign
+                  set({ mainAlign: 'space-between' })
+                }
+              }}
+            >
+              <SpaceBetweenIcon size={14} />
+            </button>
+          </div>
+          {/*
+            * The panel edits padding as a horizontal and a vertical pair, which is Figma's
+            * own resting shape for it. The model keeps all four sides, so a per side editor
+            * can land later without touching the file format.
+            */}
+          <div className={styles.grid}>
+            <NumberField
+              label="Horizontal padding"
+              icon={<PaddingXIcon size={14} />}
+              value={layout.padding.left}
+              onCommit={(value) => {
+                const side = Math.max(0, value)
+                set({ padding: { ...layout.padding, left: side, right: side } })
+              }}
+            />
+            <NumberField
+              label="Vertical padding"
+              icon={<PaddingYIcon size={14} />}
+              value={layout.padding.top}
+              onCommit={(value) => {
+                const side = Math.max(0, value)
+                set({ padding: { ...layout.padding, top: side, bottom: side } })
+              }}
+            />
+          </div>
+        </div>
+        <AlignmentGrid
+          direction={layout.direction}
+          mainAlign={layout.mainAlign}
+          crossAlign={layout.crossAlign}
+          onChange={(align) => set(align)}
+        />
+      </div>
     </section>
   )
 }
@@ -705,11 +770,11 @@ function PaintRow({
       </button>
       <button
         type="button"
-        className={styles.remove}
+        className={styles.iconButton}
         aria-label={`Remove ${label}`}
         onClick={onRemove}
       >
-        &minus;
+        <MinusIcon size={14} />
       </button>
     </div>
   )
@@ -722,7 +787,24 @@ function FillSection({ node }: { node: PaintedNode }): ReactElement {
 
   return (
     <section className={styles.section}>
-      <h3 className={styles.title}>Fill</h3>
+      {/*
+        * A node without a fill still gets the section, offering one from the header. The
+        * wrap frame Shift+A creates is deliberately transparent, and without this it could
+        * never stop being so. The new paint goes on top of the stack, which is where Figma
+        * puts it and the only end where adding one is visible rather than hidden under what
+        * is already there.
+        */}
+      <div className={styles.sectionHeader}>
+        <h3 className={styles.title}>Fill</h3>
+        <button
+          type="button"
+          className={styles.iconButton}
+          aria-label="Add fill"
+          onClick={() => setFills([defaultFillFor(node), ...node.fills])}
+        >
+          <PlusIcon size={14} />
+        </button>
+      </div>
       {node.fills.map((fill, index) => (
         <PaintRow
           // A paint has no identity of its own, and its place in the stack is exactly what
@@ -734,19 +816,6 @@ function FillSection({ node }: { node: PaintedNode }): ReactElement {
           onRemove={() => setFills(node.fills.filter((_, i) => i !== index))}
         />
       ))}
-      {/*
-        * A node without a fill still gets the section, offering one. The wrap frame Shift+A
-        * creates is deliberately transparent, and without this it could never stop being so.
-        * The new paint goes on top of the stack, which is where Figma puts it and the only
-        * end where adding one is visible rather than hidden under what is already there.
-        */}
-      <button
-        type="button"
-        className={styles.add}
-        onClick={() => setFills([defaultFillFor(node), ...node.fills])}
-      >
-        Add fill
-      </button>
     </section>
   )
 }
@@ -777,7 +846,17 @@ function StrokeSection({ node }: { node: PaintedNode }): ReactElement {
 
   return (
     <section className={styles.section}>
-      <h3 className={styles.title}>Stroke</h3>
+      <div className={styles.sectionHeader}>
+        <h3 className={styles.title}>Stroke</h3>
+        <button
+          type="button"
+          className={styles.iconButton}
+          aria-label="Add stroke"
+          onClick={() => setStrokes([defaultStroke(), ...node.strokes])}
+        >
+          <PlusIcon size={14} />
+        </button>
+      </div>
       {node.strokes.length > 0 && (
         <div className={styles.paintGroups}>
           {node.strokes.map((stroke, index) => (
@@ -804,13 +883,32 @@ function StrokeSection({ node }: { node: PaintedNode }): ReactElement {
           ))}
         </div>
       )}
-      <button
-        type="button"
-        className={styles.add}
-        onClick={() => setStrokes([defaultStroke(), ...node.strokes])}
-      >
-        Add stroke
-      </button>
+    </section>
+  )
+}
+
+/**
+ * Shown when nothing is selected: the page itself is what the panel describes, and its one
+ * property is the colour the canvas clears to. Editing it is a real document edit, in the
+ * file and in history, which is why it lives on the root node rather than in UI state.
+ */
+function PageSection(): ReactElement {
+  const page = useNode(scene.rootId)
+  const color =
+    (page?.type === 'page' ? page.backgroundColor : undefined) ?? DEFAULT_PAGE_BACKGROUND
+
+  return (
+    <section className={styles.section}>
+      <h3 className={styles.title}>Page</h3>
+      <div className={styles.headed}>
+        <ColorField
+          label="Page"
+          color={color}
+          onChange={(next: RGBA) =>
+            scene.update<PageNode>(scene.rootId, { backgroundColor: next })
+          }
+        />
+      </div>
     </section>
   )
 }
