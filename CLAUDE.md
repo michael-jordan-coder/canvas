@@ -570,6 +570,81 @@ fill, and the wrapped nodes keep their world positions, so the padding infers to
 that margin and the wrap is a regrouping rather than a rearrangement. One undo removes it
 entirely, old selection included.
 
+## The code node
+
+Live code on the canvas: a `code` node is a frame that carries JSX source, and running the
+source is what writes its children. **Code generates scene nodes, never DOM.** The output is
+real nodes in the live document, so hit testing, clipping, paint order and auto layout apply
+to it with no case of their own, and the renderer needed a two line widen (the clip push and
+the hit tests go through `clipsChildren` in `node.ts`, one predicate three consumers share).
+A DOM overlay was rejected outright: DOM sits above or below the canvas element and can never
+interleave with paint order, so a code node built that way would be the one thing in the app
+a frame cannot clip and a rectangle cannot cover.
+
+**The code is the truth, and the generated children are locked.** A click anywhere in the
+output selects the code node, the way a component instance behaves in Figma. `hit.ts` gives
+most of that for free, since locked children are click transparent, but the policy is stated
+outright in `selectionTarget.ts` (`codeOwner`), so the layers panel, Cmd click, hover and
+descent all give the same answer. The layers panel shows generated rows dimmed with their
+edit affordances gone, and `acceptsManualChildren` in `node.ts` is why nothing can drop,
+draw or paste into a code node: it holds children but owns them, which is exactly the split
+from `canHaveChildren` that the document level `insert` still needs to accept.
+
+**Execution is a Web Worker, and structured clone is the contract.** The runner in
+`apps/editor/src/code/runtime/` is React's model without React: `__jsx` builds plain
+objects, hooks are index ordered cells keyed by the component's key path, and a re-run
+renders the whole tree and diffs later. No reconciler, because at this scale a full re-run
+is cheaper than the machinery that avoids one, and the instantiator is idempotent anyway.
+sucrase strips TS and compiles the JSX in the worker; everything user code can name arrives
+as a `new Function` parameter, so there is no module system at all and `import` throws with
+its own explanation. An infinite loop is a 2s timeout, `terminate()` and a fresh worker; on
+the main thread it would be a dead tab and the last 600ms of autosave with it.
+
+**The worker's output is untrusted input**, the second door after `serialize.ts` and held to
+its exact standard: hand validation in `packages/document/src/code/validate.ts` with dotted
+path errors, an element budget and a depth cap, because user code holds the worker's
+`postMessage` and can send anything. What survives goes to `applyCodeTree`
+(`code/instantiate.ts`): keyed reconciliation matching element key paths against `sourceKey`
+on the node, so ids are stable where keys match, a settled re-run writes nothing, and one
+transact is one undo step. Layout runs through the real auto layout engine after
+instantiation rather than being precomputed in the worker, which would be a second layout
+implementation waiting to drift.
+
+**Only `source` and `props` persist.** `serializeDocument` and `serializeSubtree` walk
+through `persistedClones`, which stops at a code node and writes it with empty children:
+saving the output would put two copies of one fact in the file and let them disagree. Load,
+paste and duplicate re-run the code (`rerunAllCodeNodes` on load is not an edit and clears
+history, the `remeasureAll` rule). A source edit is an edit: `state/code.ts` is the one
+door, and it awaits the worker outside any transaction, then commits source, children,
+relayout and the measured `size` in one synchronous transact. A failed run still commits the
+source, keeps the previous output on canvas, and surfaces the failure in the panel; the
+node's `size` is a cache of the output bounds, under the text node's rule.
+
+**Play mode is the second half.** `play` in the UI store names the one running code node;
+`beginPlay` opens a history group, runs the code `live` (effects run there and only there,
+edit mode renders are deliberately effect free, the way a server render mounts nothing), and
+pointer events inside the node route to the worker: `playHitAt` walks the generated subtree
+seeing through the lock, bubbling is a walk up the key path, and handlers never cross the
+thread, only `{elementId, kind, point}` does. State changes come back as `update` messages,
+validated and applied like any run, and ignored the moment play ends. Exit re-runs fresh,
+which deterministically restores the pre play tree, then `abortHistoryGroup` discards the
+whole session: the undo stack never learns play happened. Undo and redo are refused while
+playing, the CodeSection swaps its editor for a notice, and a click outside the node or
+Escape is the exit.
+
+The panel is CodeMirror 6 in `CodeSection.tsx`, uncontrolled like the text editor's textarea
+and for the same reason, committing on 400ms idle, on blur and on Cmd+Enter through the same
+door. The agent has `create_code_node`, `get_code_source` and `set_code_source`; the run's
+failure text travels back in the tool result so the model can fix and retry, and
+`get_document` deliberately reports only that source exists, because three code nodes would
+otherwise ship kilobytes of TSX on every turn.
+
+The prop names are the web's (`direction: "row"`, `gap`, `padding`, `background`,
+`borderRadius`, `onClick`), not the canvas's, and that is a requirement rather than a taste:
+Daniel's condition for the whole feature is that code written here translates to real React
+later, so every prop is chosen to have a direct CSS equivalent and the instantiator owns the
+mapping into canvas vocabulary.
+
 ## Rotation, and the one rule it added
 
 `SelectionBox` is an upright rect plus an angle, not four corner points. Everything asking where

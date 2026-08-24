@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import type { NodeId } from '@canvas/document'
+import { acceptsManualChildren, type NodeId } from '@canvas/document'
 import { relayout } from '../state/autoLayout'
 import { scene } from '../state/scene'
 import { useUI } from '../state/uiStore'
@@ -36,7 +36,11 @@ function targetUnder(clientX: number, clientY: number, dragged: NodeId): DropTar
   const box = row.getBoundingClientRect()
   const offset = (clientY - box.top) / box.height
   const node = scene.getNode(id)
-  const container = node ? node.type === 'frame' || node.type === 'page' : false
+  if (!node) return null
+  // No drop anywhere among a code node's output: "into" would hand it a child it does not
+  // own, and "before"/"after" a generated row is the same insert wearing a different name.
+  if (node.sourceKey !== undefined) return null
+  const container = acceptsManualChildren(node)
 
   if (offset < EDGE) return { id, position: 'before' }
   if (offset > 1 - EDGE) return { id, position: 'after' }
@@ -56,6 +60,8 @@ export function useLayerDrag(): LayerDrag {
 
   const start = useCallback((id: NodeId, event: React.PointerEvent) => {
     if (event.button !== 0) return
+    // A generated row is not the user's to move; the order it sits in is the code's output.
+    if (scene.getNode(id)?.sourceKey !== undefined) return
     pending.current = { id, x: event.clientX, y: event.clientY }
 
     const onMove = (move: PointerEvent): void => {

@@ -228,6 +228,7 @@ export function CanvasHost(): ReactElement {
       getMetrics: fontMetrics,
       layouts: textLayouts,
       updateText,
+      getPlay: () => useUI.getState().play,
     })
 
     /**

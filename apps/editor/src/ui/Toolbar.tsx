@@ -1,7 +1,9 @@
 import type { ComponentType, ReactElement } from 'react'
 import { useUI, type ToolId } from '../state/uiStore'
+import { insertCodeNode } from '../state/code'
 import { selectTool } from '../state/textEditing'
 import {
+  CodeIcon,
   EllipseIcon,
   FrameIcon,
   HandIcon,
@@ -39,6 +41,18 @@ export function Toolbar(): ReactElement {
           <Icon />
         </button>
       ))}
+      {/*
+        * An insert, not a tool: a code node arrives with a working starter rather than
+        * being dragged out empty, because an empty code node is a box that draws nothing.
+        */}
+      <button
+        type="button"
+        className={styles.tool}
+        aria-label="Insert code node"
+        onClick={insertCodeNode}
+      >
+        <CodeIcon />
+      </button>
       <FileActions />
     </div>
   )

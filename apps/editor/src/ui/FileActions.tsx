@@ -1,6 +1,7 @@
 import { useRef, useState, type ReactElement } from 'react'
 import { InvalidDocumentError } from '@canvas/document'
 import { scene } from '../state/scene'
+import { rerunAllCodeNodes } from '../state/code'
 import { fromJSON, toJSON } from '../state/persistence'
 import { useUI } from '../state/uiStore'
 import { DownloadIcon, UploadIcon } from './icons'
@@ -25,6 +26,9 @@ export function FileActions(): ReactElement {
     try {
       const parsed = fromJSON(await file.text())
       scene.load(parsed.root, parsed.nodes)
+      // The file carries no generated children, only sources; running them is part of
+      // opening it, and not an edit, which rerunAllCodeNodes itself accounts for.
+      rerunAllCodeNodes()
       useUI.getState().clearSelection()
       setError(null)
     } catch (cause) {

@@ -39,6 +39,13 @@ import {
   type Viewport,
 } from '@canvas/renderer'
 import { relayout } from '../state/autoLayout'
+import {
+  endPlay,
+  playHitAt,
+  playTargetAt,
+  rerunCodeNodesIn,
+  sendPlayEvent,
+} from '../state/code'
 import { duplicateNodes } from '../state/duplicate'
 import {
   applyRotation,
@@ -99,6 +106,8 @@ export interface PointerInputOptions {
   layouts: TextLayoutCache
   /** Changes a text node and rewrites its cached bounds with it, in one step. */
   updateText: (node: TextNode, changes: Partial<TextNode>) => void
+  /** The code node whose prototype is running, or null. Pointer events go to it first. */
+  getPlay: () => NodeId | null
 }
 
 /** Drawn when a shape tool is clicked rather than dragged. */
@@ -239,10 +248,37 @@ export function createPointerInput(options: PointerInputOptions): () => void {
   // Kept so a Space press or release can update the pan cursor immediately, without waiting
   // for the pointer to move first.
   let lastPointerScreen: Vec2 | null = null
+  // Play mode's pointer bookkeeping: the element the press landed on, so the release can
+  // decide whether the pair was a click, and the element under the pointer, so a crossing
+  // sends one leave and one enter rather than a stream of either.
+  let playPress: { element: string | null } | null = null
+  let playHover: string | null = null
 
   const viewportOf = (): Viewport => {
     const rect = canvas.getBoundingClientRect()
     return { width: rect.width, height: rect.height }
+  }
+
+  /** Enter and leave, from diffing the element under the pointer against the last move. */
+  const routePlayHover = (playing: NodeId, world: Vec2): void => {
+    const hit = playHitAt(playing, world)
+    const element = hit?.elementId ?? null
+    if (element !== playHover) {
+      const point = hit?.point ?? { x: 0, y: 0 }
+      if (playHover !== null) {
+        const leaveTarget = playTargetAt(playing, playHover, 'pointerLeave')
+        if (leaveTarget) sendPlayEvent(playing, leaveTarget, 'pointerLeave', point)
+      }
+      if (element !== null) {
+        const enterTarget = playTargetAt(playing, element, 'pointerEnter')
+        if (enterTarget && hit) sendPlayEvent(playing, enterTarget, 'pointerEnter', hit.point)
+      }
+      playHover = element
+    }
+    // The editor's own affordances stand down while the prototype has the pointer.
+    options.setHover(null)
+    delete canvas.dataset['handle']
+    delete canvas.dataset['pan']
   }
 
   const screenOf = (event: PointerEvent): Vec2 => {
@@ -377,6 +413,26 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     }
 
     if (event.button !== 0) return
+
+    /*
+     * A running prototype owns the clicks inside it: the press goes to the code, not to
+     * selection, which is exactly the difference between play and edit. A press outside the
+     * playing node is the exit gesture, and it stays a click, so whatever it landed on gets
+     * selected the moment play ends.
+     */
+    const playing = options.getPlay()
+    if (playing !== null) {
+      const playHit = playHitAt(playing, world)
+      if (playHit) {
+        playPress = { element: playHit.elementId }
+        const target = playHit.elementId
+          ? playTargetAt(playing, playHit.elementId, 'pointerDown')
+          : null
+        if (target) sendPlayEvent(playing, target, 'pointerDown', playHit.point)
+        return
+      }
+      endPlay()
+    }
 
     const tool = options.getTool()
 
@@ -738,6 +794,11 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     lastPointerScreen = screen
 
     if (!drag) {
+      const playing = options.getPlay()
+      if (playing !== null && !spaceHeld && options.getTool() !== 'hand') {
+        routePlayHover(playing, worldOf(screen))
+        return
+      }
       updateIdleCursor(screen, event.metaKey || event.ctrlKey)
       return
     }
@@ -827,6 +888,7 @@ export function createPointerInput(options: PointerInputOptions): () => void {
         const copies = duplicateNodes(document, originals, { x: 0, y: 0 })
         if (copies.length > 0) {
           const copyIds = copies.map((copy) => copy.id)
+          rerunCodeNodesIn(copyIds)
           options.setSelection(copyIds)
           current.duplicatedFrom = originals
           // Rebuilt rather than remapped, because a selection containing a frame and one of
@@ -1134,6 +1196,30 @@ export function createPointerInput(options: PointerInputOptions): () => void {
   }
 
   const onPointerUp = (event: PointerEvent): void => {
+    /*
+     * The other half of a play press. `click` fires only when the release lands on the
+     * element the press did, which is the browser's own reading of what a click is; a drag
+     * off the button and back out is two pointer events and no click.
+     */
+    if (playPress !== null && !drag) {
+      const playing = options.getPlay()
+      const pressed = playPress
+      playPress = null
+      if (playing !== null) {
+        const hit = playHitAt(playing, worldOf(screenOf(event)))
+        if (hit) {
+          const upTarget = hit.elementId
+            ? playTargetAt(playing, hit.elementId, 'pointerUp')
+            : null
+          if (upTarget) sendPlayEvent(playing, upTarget, 'pointerUp', hit.point)
+          if (hit.elementId !== null && hit.elementId === pressed.element) {
+            const clickTarget = playTargetAt(playing, hit.elementId, 'click')
+            if (clickTarget) sendPlayEvent(playing, clickTarget, 'click', hit.point)
+          }
+        }
+      }
+      return
+    }
     if (!drag || event.pointerId !== drag.pointerId) return
     if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId)
 
@@ -1313,6 +1399,16 @@ export function createPointerInput(options: PointerInputOptions): () => void {
   }
 
   const onKeyDown = (event: KeyboardEvent): void => {
+    // Escape leaves the prototype before it means anything else, and stops there: exiting
+    // play and clearing the selection on one press would be two answers to one question.
+    if (event.key === 'Escape' && !drag && options.getPlay() !== null) {
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      playPress = null
+      playHover = null
+      endPlay()
+      return
+    }
     if (event.key === 'Escape' && drag) {
       // Runs before keyboardInput.ts's own Escape handler (which clears the selection): this
       // listener is registered inside CanvasHost, a descendant of App, and React commits

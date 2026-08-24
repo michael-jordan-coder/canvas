@@ -1,5 +1,6 @@
 import {
-  canHaveChildren,
+  acceptsManualChildren,
+  createCode,
   createEllipse,
   createFrame,
   createRectangle,
@@ -14,6 +15,7 @@ import {
   paintOpacity,
   type CornerRadii,
   type FrameNode,
+  type JsonValue,
   type NodeId,
   type Paint,
   type PaintedNode,
@@ -46,6 +48,7 @@ import { reorderSelection } from '../state/order'
 import { setNodesAngle } from '../state/rotate'
 import { flipNodes } from '../state/flip'
 import { duplicateNodes } from '../state/duplicate'
+import { rerunCodeNodesIn, runCodeNodeNow, setCodeSourceNow } from '../state/code'
 import { updateText } from '../state/font'
 import { capture } from './capture'
 
@@ -72,14 +75,25 @@ function resolve(id: string): SceneNode {
 
 function resolveParent(id: string | undefined): SceneNode {
   const parent = id === undefined ? scene.expectNode(scene.rootId) : resolve(id)
-  if (!canHaveChildren(parent)) {
-    throw new Error(`${parent.id} is a ${parent.type} and cannot hold children.`)
+  if (!acceptsManualChildren(parent)) {
+    // A code node holds children but writes them itself; the agent edits it through its
+    // source, the same door the panel uses.
+    throw new Error(`${parent.id} is a ${parent.type} and cannot take children directly.`)
   }
   return parent
 }
 
 function resolveIds(ids: readonly string[]): NodeId[] {
   return ids.map((id) => resolve(id).id)
+}
+
+/**
+ * Props arrive over MCP as JSON already; the round trip is what proves it, and it strips
+ * anything a structured clone would carry that JSON cannot.
+ */
+function jsonProps(props: Record<string, unknown> | undefined): Record<string, JsonValue> {
+  if (!props) return {}
+  return JSON.parse(JSON.stringify(props)) as Record<string, JsonValue>
 }
 
 // Paints ---------------------------------------------------------------------------------
@@ -160,7 +174,7 @@ function snapshotNode(node: SceneNode): AgentNode {
     if (node.fills.length > 0) snapshot.fills = node.fills.map(fromPaint)
     if (node.strokes.length > 0) snapshot.strokes = node.strokes.map(fromStroke)
   }
-  if (node.type === 'frame' || node.type === 'rectangle') {
+  if (node.type === 'frame' || node.type === 'rectangle' || node.type === 'code') {
     const radii = radiiOf(node.cornerRadii)
     if (radii) snapshot.cornerRadii = radii
   }
@@ -168,6 +182,10 @@ function snapshotNode(node: SceneNode): AgentNode {
     snapshot.clipsContent = node.clipsContent
     const layout = layoutOf(node)
     if (layout) snapshot.layout = layout
+  }
+  if (node.type === 'code') {
+    snapshot.clipsContent = node.clipsContent
+    snapshot.code = { props: node.props, sourceLength: node.source.length }
   }
   if (node.layoutChild) snapshot.layoutChild = { ...node.layoutChild }
   if (node.type === 'text') {
@@ -422,7 +440,40 @@ const handlers: Handlers = {
   duplicate_nodes: ({ nodeIds, dx, dy }) => {
     const ids = resolveIds(nodeIds)
     const created = duplicateNodes(scene, ids, { x: dx ?? 10, y: dy ?? 10 })
+    rerunCodeNodesIn(created.map((node) => node.id))
     return { ids: created.map((node) => node.id) }
+  },
+
+  create_code_node: async ({ parentId, x, y, name, source, props }) => {
+    const parent = resolveParent(parentId)
+    const node = createCode({
+      ...(name ? { name } : {}),
+      source,
+      props: jsonProps(props),
+      transform: { a: 1, b: 0, c: 0, d: 1, tx: x, ty: y },
+    })
+    scene.transact(() => {
+      scene.insert(node, parent.id)
+      relayout(scene, [node.id])
+    })
+    const error = await runCodeNodeNow(node.id)
+    return error ? { id: node.id, error } : { id: node.id }
+  },
+
+  get_code_source: ({ nodeId }) => {
+    const node = resolve(nodeId)
+    if (node.type !== 'code') throw new Error(`${node.id} is a ${node.type}, not a code node.`)
+    return { source: node.source, props: node.props }
+  },
+
+  set_code_source: async ({ nodeId, source, props }) => {
+    const node = resolve(nodeId)
+    if (node.type !== 'code') throw new Error(`${node.id} is a ${node.type}, not a code node.`)
+    const error = await setCodeSourceNow(node.id, {
+      ...(source !== undefined ? { source } : {}),
+      ...(props !== undefined ? { props: jsonProps(props) } : {}),
+    })
+    return error ? { id: node.id, error } : { id: node.id }
   },
 
   reparent_node: ({ nodeId, parentId, index }) => {

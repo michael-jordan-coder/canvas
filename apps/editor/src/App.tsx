@@ -7,6 +7,7 @@ import { createKeyboardInput } from './input/keyboardInput'
 import { scene } from './state/scene'
 // Measures every text node once the font arrives. Imported for that effect.
 import './state/font'
+import { rerunAllCodeNodes } from './state/code'
 import { selectTool } from './state/textEditing'
 import { useUI } from './state/uiStore'
 import { showStatsFromLocation } from './state/stats'
@@ -19,6 +20,11 @@ import styles from './App.module.css'
 
 /** Read once: it comes from the URL and cannot change without a reload. */
 const showStats = showStatsFromLocation()
+
+// The loaded document's code nodes run once at startup. Here rather than in `state/scene`,
+// because the scene module runs its load at import time and the code door imports the scene:
+// calling back into it mid-initialisation would be a cycle with a half-built module in it.
+rerunAllCodeNodes()
 
 export function App(): ReactElement {
   // Window level, not canvas level: undo and paste should work with the pointer over a panel.

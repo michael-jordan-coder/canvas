@@ -68,6 +68,14 @@ export function TextIcon(props: IconProps): ReactElement {
   )
 }
 
+export function CodeIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <path {...stroke} d="M5.5 5 3 8l2.5 3M10.5 5 13 8l-2.5 3M9 4.5l-2 7" />
+    </Svg>
+  )
+}
+
 export function DownloadIcon(props: IconProps): ReactElement {
   return (
     <Svg {...props}>
@@ -426,6 +434,14 @@ export function SendIcon(props: IconProps): ReactElement {
   return (
     <Svg {...props}>
       <path {...stroke} d="M8 12.5v-9m0 0L4.5 7M8 3.5 11.5 7" />
+    </Svg>
+  )
+}
+
+export function PlayIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <path {...stroke} d="M5.5 4 11.5 8 5.5 12z" />
     </Svg>
   )
 }

@@ -12,6 +12,7 @@ import {
   radians,
   uniformCornerRadii,
   CORNER_ORDER,
+  type CodeNode,
   type FrameLayout,
   type FrameNode,
   type LayoutAlign,
@@ -43,6 +44,7 @@ import { setNodesAngle } from '../state/rotate'
 import { tallySelectionColors } from '../state/selectionColors'
 import { useUI } from '../state/uiStore'
 import { MIN_NODE_SIZE } from '../input/resize'
+import { CodeSection } from './CodeSection'
 import { ColorField } from './ColorField'
 import {
   AlignBottomIcon,
@@ -300,7 +302,13 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
             */}
           <NumberField
             label="W"
-            readOnly={(node.type === 'text' && node.autoWidth) || hugs('width') || fills('width')}
+            readOnly={
+              (node.type === 'text' && node.autoWidth) ||
+              // A code node's size is the measured bounds of its output, text's rule again.
+              node.type === 'code' ||
+              hugs('width') ||
+              fills('width')
+            }
             value={node.size.width}
             onCommit={(width) =>
               node.type === 'text'
@@ -310,7 +318,9 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
           />
           <NumberField
             label="H"
-            readOnly={node.type === 'text' || hugs('height') || fills('height')}
+            readOnly={
+              node.type === 'text' || node.type === 'code' || hugs('height') || fills('height')
+            }
             value={node.size.height}
             onCommit={(height) =>
               setSize({ ...node.size, height: Math.max(MIN_NODE_SIZE, height) })
@@ -349,11 +359,11 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
             </span>
           </div>
           {/* Opacity and corner radius share the row, the way Figma pairs them. */}
-          {(node.type === 'rectangle' || node.type === 'frame') && (
+          {(node.type === 'rectangle' || node.type === 'frame' || node.type === 'code') && (
             <CornerRadiiField key={node.id} node={node} />
           )}
         </div>
-        {node.type === 'frame' && (
+        {(node.type === 'frame' || node.type === 'code') && (
           <label className={styles.toggle}>
             <input
               type="checkbox"
@@ -369,6 +379,7 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
       </section>
 
       {node.type === 'frame' && <AutoLayoutSection node={node} />}
+      {node.type === 'code' && <CodeSection node={node} />}
       {node.type === 'text' && <TextSection node={node} />}
       {isPainted(node) && <FillSection node={node} />}
       {/*
@@ -388,7 +399,7 @@ const CORNER_LABELS: Record<(typeof CORNER_ORDER)[number], string> = {
   bottomLeft: 'BL',
 }
 
-function CornerRadiiField({ node }: { node: RectangleNode | FrameNode }): ReactElement {
+function CornerRadiiField({ node }: { node: RectangleNode | FrameNode | CodeNode }): ReactElement {
   const [expanded, setExpanded] = useState(false)
 
   const collapse = (): void => {

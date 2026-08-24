@@ -10,7 +10,7 @@ import {
 import { alignSelection, type AlignCommand } from '../state/align'
 import { relayout, toggleAutoLayout, wrapInAutoLayout } from '../state/autoLayout'
 import { reorderSelection } from '../state/order'
-import type { ToolId } from '../state/uiStore'
+import { useUI, type ToolId } from '../state/uiStore'
 import { isEditingText } from './isEditingText'
 
 export interface KeyboardInputOptions {
@@ -140,6 +140,11 @@ export function createKeyboardInput(options: KeyboardInputOptions): () => void {
       // Held keys repeat around 30 times a second, which would empty a 200 step history in
       // about seven. One press, one step. Flip this if holding to rewind is wanted instead.
       if (event.repeat) return
+      // While a prototype plays, its whole session sits in one open history group waiting
+      // to be discarded on exit. An undo now would apply a pre-play step underneath that
+      // uncommitted group, and the abort would then discard a record of a document that no
+      // longer exists. Refused rather than deferred; play is a mode, not a queue.
+      if (useUI.getState().play !== null) return
       if (event.shiftKey) scene.redo()
       else scene.undo()
       return
@@ -149,6 +154,7 @@ export function createKeyboardInput(options: KeyboardInputOptions): () => void {
     if (accel && event.key.toLowerCase() === 'y') {
       event.preventDefault()
       if (event.repeat) return
+      if (useUI.getState().play !== null) return
       scene.redo()
       return
     }

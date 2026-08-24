@@ -1,6 +1,7 @@
 import {
   IDENTITY,
   applyToPoint,
+  clipsChildren,
   drawnPaints,
   drawnStrokes,
   invert,
@@ -201,10 +202,9 @@ export class ShapeInstances {
       }
     }
 
-    const inner =
-      node.type === 'frame' && node.clipsContent
-        ? this.#clips.push(world, node.size, node.cornerRadii, clip)
-        : clip
+    const inner = clipsChildren(node)
+      ? this.#clips.push(world, node.size, node.cornerRadii, clip)
+      : clip
 
     for (const child of document.getChildren(node.id)) {
       this.#collect(document, child, world, alpha, inner)

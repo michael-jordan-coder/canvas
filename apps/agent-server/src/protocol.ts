@@ -56,7 +56,7 @@ export interface AgentLayout {
  */
 export interface AgentNode {
   id: string
-  type: 'page' | 'frame' | 'rectangle' | 'ellipse' | 'text'
+  type: 'page' | 'frame' | 'rectangle' | 'ellipse' | 'text' | 'code'
   name: string
   x: number
   y: number
@@ -73,6 +73,13 @@ export interface AgentNode {
   layout?: AgentLayout
   layoutChild?: { widthMode: 'fixed' | 'fill'; heightMode: 'fixed' | 'fill' }
   text?: { characters: string; fontSize: number; autoWidth: boolean }
+  /**
+   * The source body deliberately stays out of the snapshot: a document with a few code nodes
+   * would otherwise ship kilobytes of TSX on every `get_document`. `get_code_source` is the
+   * read. Generated children still appear under `children`, locked, so the model sees what
+   * the code produced without owning it.
+   */
+  code?: { props: Record<string, unknown>; sourceLength: number }
   children?: AgentNode[]
 }
 
@@ -192,6 +199,27 @@ export interface CommandMap {
     result: { id: string }
   }
   wrap_in_auto_layout: { args: { nodeIds: string[] }; result: { frameId: string } }
+  create_code_node: {
+    args: {
+      /** Absent means the page. */
+      parentId?: string
+      x: number
+      y: number
+      name?: string
+      source: string
+      props?: Record<string, unknown>
+    }
+    /** `error` carries the compile or run failure so the model can fix and retry. */
+    result: { id: string; error?: string }
+  }
+  get_code_source: {
+    args: { nodeId: string }
+    result: { source: string; props: Record<string, unknown> }
+  }
+  set_code_source: {
+    args: { nodeId: string; source?: string; props?: Record<string, unknown> }
+    result: { id: string; error?: string }
+  }
 }
 
 export type CommandName = keyof CommandMap
