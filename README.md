@@ -1,5 +1,9 @@
 # canvas
 
+[![CI](https://github.com/michael-jordan-coder/canvas/actions/workflows/ci.yml/badge.svg)](https://github.com/michael-jordan-coder/canvas/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-black)](LICENSE)
+[![Live demo](https://img.shields.io/badge/demo-live-blue)](https://canvas-editor-eight-rust.vercel.app/)
+
 A Figma-style design editor built from scratch. The canvas is drawn with WebGPU, everything
 around it is React, and the line between the two never blurs: React never draws a shape, and
 the renderer never knows a component exists.
@@ -85,6 +89,13 @@ shape in the wrong place.
 
 `?stress=10000` seeds a grid of that many nodes, and `?perf` shows instances drawn, culled,
 build time and frame time. Autosave is off in stress mode.
+
+## Contributing
+
+Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) has the short version, the
+[good first issue](https://github.com/michael-jordan-coder/canvas/labels/good%20first%20issue)
+label has contained starting points with file pointers, and the deferred lists in
+[TASKS.md](TASKS.md) are full of designed-but-unbuilt features looking for an owner.
 
 ## License
 
