@@ -4,7 +4,9 @@ A Figma-style design editor built from scratch. The canvas is drawn with WebGPU,
 around it is React, and the line between the two never blurs: React never draws a shape, and
 the renderer never knows a component exists.
 
-<!-- TODO: screenshot. Drop an image in docs/ and reference it here. -->
+**Try it live: [canvas-editor-eight-rust.vercel.app](https://canvas-editor-eight-rust.vercel.app/)**
+
+![The canvas editor: a button design system built by the AI agent, with the layers tree, the WebGPU canvas and the assistant panel](docs/screenshot.png)
 
 ## What it does
 
