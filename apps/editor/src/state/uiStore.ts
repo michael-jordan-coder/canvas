@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { NodeId } from '@canvas/document'
 import type { TextEditing } from '@canvas/renderer'
+import type { SelectionContext } from './selectionTarget'
 
 export type ToolId = 'move' | 'hand' | 'frame' | 'rectangle' | 'ellipse' | 'text'
 
@@ -14,12 +15,19 @@ interface UIState {
   /** Layer rows folded shut in the panel. Session only, never persisted with the file. */
   collapsed: ReadonlySet<NodeId>
   /**
+   * The container clicks resolve inside, or null for the page. Set by whatever stepped in,
+   * read by the next click, and view state in the purest sense: how deep someone is working
+   * is theirs, not the file's. `selectionTarget` owns what it means.
+   */
+  context: SelectionContext
+  /**
    * The text node being typed into, or null. Emphatically not part of the document: where
    * someone's caret is, is theirs, the same way their selection and their tool are.
    */
   editing: TextEditing | null
   setTool: (tool: ToolId) => void
   setSelection: (ids: readonly NodeId[]) => void
+  setContext: (context: SelectionContext) => void
   toggleInSelection: (id: NodeId) => void
   clearSelection: () => void
   setCollapsed: (id: NodeId, collapsed: boolean) => void
@@ -33,18 +41,22 @@ export const useUI = create<UIState>()((set) => ({
   tool: 'move',
   selection: [],
   collapsed: new Set<NodeId>(),
+  context: null,
   editing: null,
   // Only the tool. Ending an editing session has rules that live in `state/textEditing.ts`,
   // and clearing the field here would skip them: `selectTool` there is the way in.
   setTool: (tool) => set({ tool }),
   setSelection: (ids) => set({ selection: ids }),
+  setContext: (context) => set((state) => (state.context === context ? state : { context })),
   toggleInSelection: (id) =>
     set((state) => ({
       selection: state.selection.includes(id)
         ? state.selection.filter((other) => other !== id)
         : [...state.selection, id],
     })),
-  clearSelection: () => set({ selection: [] }),
+  // Also steps back out to the page. Clearing the selection is how someone says they are done
+  // with what they were in, and a context left behind would silently keep the next click deep.
+  clearSelection: () => set({ selection: [], context: null }),
   beginTextEdit: (id, caret, anchor = caret) =>
     set({ editing: { id, caret, anchor, caretVisible: true }, selection: [id] }),
   setTextCaret: (caret, anchor) =>

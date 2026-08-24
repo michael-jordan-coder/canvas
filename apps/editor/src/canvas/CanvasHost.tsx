@@ -173,6 +173,8 @@ export function CanvasHost(): ReactElement {
       getSelection: () => useUI.getState().selection,
       setSelection: (ids) => useUI.getState().setSelection(ids),
       toggleInSelection: (id) => useUI.getState().toggleInSelection(id),
+      getContext: () => useUI.getState().context,
+      setContext: (context) => useUI.getState().setContext(context),
       setMarquee: (rect) => {
         marqueeRef.current = rect
       },

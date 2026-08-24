@@ -57,6 +57,12 @@ import {
   type ResizeTarget,
 } from './resize'
 import type { ToolId } from '../state/uiStore'
+import {
+  deepSelectionTarget,
+  descendSelectionTarget,
+  selectionTarget,
+  type SelectionContext,
+} from '../state/selectionTarget'
 import { isEditingText } from './isEditingText'
 
 export interface PointerInputOptions {
@@ -69,6 +75,8 @@ export interface PointerInputOptions {
   getSelection: () => readonly NodeId[]
   setSelection: (ids: readonly NodeId[]) => void
   toggleInSelection: (id: NodeId) => void
+  getContext: () => SelectionContext
+  setContext: (context: SelectionContext) => void
   /** The rubber band rectangle in CSS pixels, or null when there is not one. */
   setMarquee: (rect: Rect | null) => void
   /** Ask for a redraw. Document edits redraw on their own, camera moves do not. */
@@ -256,6 +264,34 @@ export function createPointerInput(options: PointerInputOptions): () => void {
   let lastClickAt = 0
   let lastClickScreen: Vec2 | null = null
 
+  /**
+   * How far the pointer has to travel before a press counts as a drag, in CSS pixels.
+   *
+   * Without it any press is a drag, because the test for "has this moved" can only be exact:
+   * half a pixel of tremor between pointer down and the first move is a real difference. What
+   * that costs is not one wasted history step. A gesture that has begun pulls its node out of
+   * the auto layout flow so it can float, which is right once the node has visibly detached
+   * and wrong while it is still sitting where it was: the siblings close up over it and stay
+   * that way for as long as the button is held. Clearing the slop is what makes the reflow
+   * follow a movement the eye has already seen.
+   *
+   * The same number as the double click slop, and for the same underlying reason: below a few
+   * pixels a pointer has not gone anywhere on purpose. They stay separate constants because
+   * they answer different questions and either could move without the other.
+   */
+  const DRAG_SLOP = 4
+
+  /**
+   * Whether a gesture has earned the right to act yet.
+   *
+   * `grouped` latches it: once past the slop a drag stays one, so coming back inside it does
+   * not suspend the gesture halfway through.
+   */
+  const clearedSlop = (current: Drag, screen: Vec2): boolean =>
+    current.grouped ||
+    Math.abs(screen.x - current.startScreen.x) > DRAG_SLOP ||
+    Math.abs(screen.y - current.startScreen.y) > DRAG_SLOP
+
   const isDoubleClick = (screen: Vec2, now: number): boolean => {
     if (!lastClickScreen || now - lastClickAt > DOUBLE_CLICK_MS) return false
     return (
@@ -406,11 +442,22 @@ export function createPointerInput(options: PointerInputOptions): () => void {
 
     if (tool === 'move' && doubled) {
       const hit = hitTest(document, world)
-      if (hit && hit.type === 'text') {
-        event.preventDefault()
-        const caret = caretIn(hit.id, world, true) ?? 0
-        options.beginTextEdit(hit.id, caret)
-        return
+      if (hit) {
+        // One level in per double click. Only when there is nothing left to descend into
+        // does a double click mean the other thing it means, which is opening text to type.
+        const deeper = descendSelectionTarget(document, hit.id, options.getContext())
+        if (deeper) {
+          event.preventDefault()
+          options.setSelection([deeper.id])
+          options.setContext(deeper.context)
+          return
+        }
+        if (hit.type === 'text') {
+          event.preventDefault()
+          const caret = caretIn(hit.id, world, true) ?? 0
+          options.beginTextEdit(hit.id, caret)
+          return
+        }
       }
     }
 
@@ -483,7 +530,11 @@ export function createPointerInput(options: PointerInputOptions): () => void {
       // Empty canvas: clear, then rubber band. Clearing up front rather than on release is
       // what makes a click on nothing feel immediate.
       const base = event.shiftKey ? options.getSelection() : []
-      if (!event.shiftKey) options.setSelection([])
+      if (!event.shiftKey) {
+        options.setSelection([])
+        // Clicking past everything is how someone leaves the frame they were working in.
+        options.setContext(null)
+      }
       drag = {
         pointerId: event.pointerId,
         kind: 'marquee',
@@ -499,16 +550,25 @@ export function createPointerInput(options: PointerInputOptions): () => void {
       return
     }
 
+    // What the pointer landed on is a geometry answer; what it selects is a policy, and the
+    // policy is the hierarchy. Cmd is the way past it, straight to the deepest node, and it
+    // takes the context down with it so the clicks after it stay at that level.
+    const resolved = event.metaKey || event.ctrlKey
+      ? deepSelectionTarget(document, hit.id)
+      : selectionTarget(document, hit.id, options.getContext())
+
     if (event.shiftKey) {
-      options.toggleInSelection(hit.id)
+      options.toggleInSelection(resolved.id)
       return
     }
+
+    options.setContext(resolved.context)
 
     // Clicking inside an existing multi selection keeps it, so a group can be dragged
     // without collapsing to the one node under the cursor.
     const selection = options.getSelection()
-    const ids = selection.includes(hit.id) ? selection : [hit.id]
-    if (!selection.includes(hit.id)) options.setSelection(ids)
+    const ids = selection.includes(resolved.id) ? selection : [resolved.id]
+    if (!selection.includes(resolved.id)) options.setSelection(ids)
 
     drag = {
       pointerId: event.pointerId,
@@ -652,11 +712,15 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     if (event.pointerId !== drag.pointerId) return
 
     if (drag.kind === 'resize') {
+      // Same slop, same reason: a press on a handle that never went anywhere must not flip a
+      // hug axis to fixed, which is a claim the gesture makes on its first applied frame.
+      if (!clearedSlop(drag, screen)) return
       applyResize(drag, screen, { fromCentre: event.altKey, constrain: event.shiftKey })
       return
     }
 
     if (drag.kind === 'rotate') {
+      if (!clearedSlop(drag, screen)) return
       applyRotate(drag, screen, { fromCentre: event.altKey, constrain: event.shiftKey })
       return
     }
@@ -712,13 +776,11 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     const world = worldOf(screen)
     const current = drag
 
-    // Nothing to record until the pointer has actually moved. Opening the group here rather
-    // than on pointer down means a click that never moves leaves the history untouched.
-    const moved = current.nodes.some((dragged) => {
-      const local = applyToPoint(dragged.parentInverse, world)
-      return local.x !== dragged.startLocal.x || local.y !== dragged.startLocal.y
-    })
-    if (!moved) return
+    // Nothing to record until the press has become a drag. Opening the group here rather than
+    // on pointer down means a click leaves the history untouched, and the slop is what decides
+    // when a press has become one.
+    if (current.nodes.length === 0) return
+    if (!clearedSlop(current, screen)) return
     if (!current.grouped) {
       current.grouped = true
       // Opened before the duplicate, so the copy and every frame of the drag that follows

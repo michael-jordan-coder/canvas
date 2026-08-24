@@ -70,9 +70,16 @@ Three rules the code depends on, all of which have already caused a bug or would
   let the next edit rewrite the past.
 
 A drag is many transactions, one per frame, so `beginHistoryGroup` / `endHistoryGroup` merge them
-into one step: oldest before, newest after. The input layer opens the group on the first move that
-actually changes something rather than on pointer down, so a click that never moves leaves nothing
-behind.
+into one step: oldest before, newest after. The input layer opens the group on the first move past a
+few pixels of slop rather than on pointer down, so a click leaves nothing behind.
+
+**The slop is not only about history.** The test it replaced was an exact comparison, which is the
+only kind available: half a pixel of tremor between pointer down and the first move is a real
+difference, so every press was a drag. A drag that has begun pulls its node out of the auto layout
+flow so it can float, which is right once the node has visibly detached and wrong while it is
+still sitting where it was, because the siblings close up over it and stay there for as long as
+the button is held. Resize and rotate wait on the same slop, since a press on a handle that never
+moved must not flip a hug axis to fixed or turn a node by a fraction of a degree.
 
 Selection travels with each step through `setSideState`, which takes an opaque capture and restore
 pair. The document never learns what selection is. **An edit and the selection change that goes
@@ -497,8 +504,14 @@ layout the walk is one or two steps to nothing, which is what keeps `?stress` fr
 
 The reorder drag (`applyFlow` in `pointerInput.ts`): a single dragged child of an auto frame
 **floats with the pointer and is excluded from every layout pass**, so the siblings shift
-around an open slot; entering a frame reparents live, leaving hands the node to whatever is
-under the pointer, and the release runs one pass without the exclusion, which is what snaps
+around an open slot. A hug axis holds the size it already has for as long as the frame has a
+child out of the flow, because hug derives the frame from its children and dropping one would
+otherwise shrink the frame itself, collapsing it the moment a drag began and springing it back
+on release. It is scoped to the frame's own children rather than to the pass, so the frame a
+node has just been dragged out of still shrinks live, and it is deliberately kept out of
+`knownMain`/`knownCross`, which also decide whether a fill child stretches: fill against a hug
+axis has to keep degenerating to fixed however the frame is sized. Entering a frame
+reparents live, leaving hands the node to whatever is under the pointer, and the release runs one pass without the exclusion, which is what snaps
 the node in. A live reparent rebases the drag against the new parent, but each dragged node
 keeps an untouched `origin` (parent, index, transform), because Escape has to reach past
 every rebase: it restores parent, then index, then transform, then relayouts, and
@@ -550,10 +563,27 @@ and a group about the centre of its bounds, so a group swings together. The pane
 turns every node about its own centre, because typing 30 into a row means each in place rather
 than sweeping them into an arc.
 
-Clicking selects the deepest node under the cursor, so a rectangle inside a frame selects the
-rectangle. Figma selects the outermost frame and makes you double click to descend. That is a UI
-policy rather than a geometry question and it lives above `hitTest`, which is why the function
-returns the deepest hit and lets the caller decide.
+Clicking selects by hierarchy, not by depth. `hitTest` still returns the deepest node under the
+cursor, because that is the geometry answer; what gets selected from it is a UI policy and lives
+in `apps/editor/src/state/selectionTarget.ts`, above the document entirely.
+
+The policy is Figma's. A click selects the outermost container the hit sits in, so a button made
+of a frame, a rectangle and a label is one thing to click and drag. **A top-level frame is the
+exception, and it is the whole reason this is not a walk to the root**: frames directly under the
+page are artboards holding everything on the canvas, so one that swallowed its own clicks would
+mean every selection started with a modifier. Selection stops one level inside them.
+
+Two ways in, both in `pointerInput`: Cmd (or Ctrl) reaches the deepest node in one click, and a
+double click descends one level. Descending is tried before text editing, so a double click opens
+text only once there is nothing left to descend into, which is what lets the two share the gesture.
+
+The level someone stepped into is remembered, as `context` in `uiStore`: clicking a sibling stays
+at that depth instead of springing back out. It is view state in the purest sense, and it is
+cleared by a click on empty canvas and by anything else that clears the selection. A context that
+no longer contains the hit is stale, whether the node was deleted or the click simply landed
+elsewhere, and resolving falls back to the default as if nothing had been entered. Picking a row
+in the layers panel sets it too, since naming a node outright is the same statement Cmd clicking
+it makes.
 
 ## Planned work lives in TASKS.md, not here
 

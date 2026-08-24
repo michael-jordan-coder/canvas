@@ -3,6 +3,7 @@ import type { NodeId, NodeType, SceneNode } from '@canvas/document'
 import { relayout } from '../state/autoLayout'
 import { scene, useChildren, useNode } from '../state/scene'
 import { useUI } from '../state/uiStore'
+import { deepSelectionTarget } from '../state/selectionTarget'
 import {
   ChevronIcon,
   EllipseIcon,
@@ -77,6 +78,7 @@ function LayerRow({ id, drag }: { id: NodeId; drag: LayerDrag }): ReactElement |
   const children = useChildren(id)
   const selection = useUI((state) => state.selection)
   const setSelection = useUI((state) => state.setSelection)
+  const setContext = useUI((state) => state.setContext)
   const toggleInSelection = useUI((state) => state.toggleInSelection)
   const collapsed = useUI((state) => state.collapsed.has(id))
   const setCollapsed = useUI((state) => state.setCollapsed)
@@ -126,7 +128,13 @@ function LayerRow({ id, drag }: { id: NodeId; drag: LayerDrag }): ReactElement |
               // Same toggle canvas shift-click already uses, so a selection built on the
               // canvas can be extended from here and vice versa.
               if (event.shiftKey || event.metaKey || event.ctrlKey) toggleInSelection(id)
-              else setSelection([id])
+              else {
+                setSelection([id])
+                // The tree names a node outright, so picking one here is the same statement
+                // Cmd clicking it on the canvas makes: work at that depth. Without this the
+                // next canvas click would spring back out to the frame above it.
+                setContext(deepSelectionTarget(scene, id).context)
+              }
             }}
             onDoubleClick={() => setRenaming(true)}
             onPointerDown={(event) => drag.start(id, event)}

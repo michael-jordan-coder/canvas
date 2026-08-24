@@ -342,6 +342,38 @@ hardened by a ten-finding code review applied in full.
       with one `DEFAULT_PAGE_BACKGROUND` constant shared by renderer and panel.
       `packages/document/src/node.ts`, `serialize.ts`, `WebGPURenderer.ts`
 
+## Selection hierarchy
+
+Figma's selection model, replacing the deepest-node-wins policy the editor started with.
+
+- [x] `selectionTarget`, the policy itself: a click selects the outermost container the hit
+      sits in, except that a top-level frame is an artboard and does not swallow its own
+      clicks, so selection stops one level inside it. Pure and tested, and above `hitTest`
+      rather than in it. `apps/editor/src/state/selectionTarget.ts`
+- [x] Cmd (or Ctrl) click reaches the deepest node in one go, taking the context down with it.
+- [x] Double click descends one level. Tried before text editing, so a double click opens text
+      only once there is nothing left to descend into and the two share the gesture cleanly.
+      `apps/editor/src/input/pointerInput.ts`
+- [x] The entered level is remembered as `context` in `uiStore`, so clicking a sibling stays at
+      that depth. Cleared by a click on empty canvas and by everything else that clears the
+      selection. A stale context resolves as if nothing had been entered.
+- [x] A layer row click sets the context too, so picking a deep node in the tree and then
+      clicking it on the canvas does not spring back out. `apps/editor/src/ui/LayersPanel.tsx`
+
+- [ ] Marquee selection still takes the deepest nodes, so dragging a box over a frame selects
+      its children one by one while a click on the same frame selects the frame. `nodesIn`
+      answers geometry the same way `hitTest` does, so the fix is the same shape: resolve each
+      result through `selectionTarget` and dedupe. Left out because it was not what was asked
+      for, but the two now disagree and that is visible.
+
+## Drag slop
+
+- [x] A press becomes a drag only past a few pixels, in `pointerInput.ts`. The exact-comparison
+      test it replaced made every press a drag, which pulled the pressed node out of the auto
+      layout flow and let its siblings close up over it for as long as the button was held.
+      Resize and rotate wait on the same slop, so a press on a handle cannot flip a hug axis to
+      fixed or turn a node by a fraction of a degree.
+
 ## Backlog
 
 Deferred from the panel polish pass:

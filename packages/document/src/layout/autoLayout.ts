@@ -352,10 +352,23 @@ class Solver {
     const knownMain = forcedMain ?? (layout.mainSizing === 'fixed' ? mainOf(frame.size) : undefined)
     const knownCross = forcedCross ?? (layout.crossSizing === 'fixed' ? crossOf(frame.size) : undefined)
 
-    const children = this.#doc
-      .getChildren(frame.id)
-      .filter((child) => child.visible && !this.#exclude.has(child.id))
+    const all = this.#doc.getChildren(frame.id)
+    const children = all.filter((child) => child.visible && !this.#exclude.has(child.id))
     const gaps = layout.gap * Math.max(0, children.length - 1)
+
+    // A hug axis holds the size it already has while one of this frame's own children is out
+    // of the flow for a drag. Hug derives the frame from its children, so dropping one shrinks
+    // the frame itself, and a frame that collapsed the moment a drag began and sprang back on
+    // release read as a flicker on every click: the pointer barely has to move for the drag to
+    // open. Only the siblings should shift around the open slot; the frame is not what changed.
+    //
+    // Scoped to this frame's own children rather than to the pass, so the frame a node has
+    // just been dragged out of is free to shrink live, and deliberately kept out of
+    // `knownMain`/`knownCross` above: those also decide whether a fill child stretches, and a
+    // fill against a hug axis has to keep degenerating to fixed however the frame is sized.
+    const holding = all.some((child) => this.#exclude.has(child.id))
+    const heldMain = holding && layout.mainSizing === 'hug' ? mainOf(frame.size) : undefined
+    const heldCross = holding && layout.crossSizing === 'hug' ? crossOf(frame.size) : undefined
 
     const entries: Entry[] = children.map((node) => {
       const t = node.transform
@@ -397,7 +410,7 @@ class Solver {
       resolve(entry, undefined, entry.fillCross ? crossExtent : undefined)
     }
 
-    const frameMain = knownMain ?? padMainStart + padMainEnd + gaps
+    const frameMain = knownMain ?? heldMain ?? padMainStart + padMainEnd + gaps
       + entries.reduce((sum, entry) => sum + mainOf(entry.flow), 0)
 
     const fillers = entries.filter((entry) => entry.fillMain)
@@ -415,7 +428,7 @@ class Solver {
       }
     }
 
-    const frameCross = knownCross ?? padCrossStart + padCrossEnd
+    const frameCross = knownCross ?? heldCross ?? padCrossStart + padCrossEnd
       + entries.reduce((max, entry) => Math.max(max, crossOf(entry.flow)), 0)
 
     // Alignment only has room to work when no fill child absorbed the slack.

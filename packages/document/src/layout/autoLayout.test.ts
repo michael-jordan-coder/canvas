@@ -382,6 +382,100 @@ describe('computeLayout', () => {
     expect(placed(document, dragged)).toEqual({ x: 500, y: 500 })
   })
 
+  it('holds a hug frame at its size while a child is out of the flow', () => {
+    const document = new SceneDocument()
+    const frame = document.insert(
+      createFrame({ size: { width: 0, height: 0 }, layout: layout({ mainSizing: 'hug', crossSizing: 'hug' }) }),
+    )
+    const dragged = document.insert(
+      createRectangle({ size: { width: 110, height: 20 } }),
+      frame.id,
+    )
+    const other = document.insert(createRectangle({ size: { width: 50, height: 50 } }), frame.id)
+    settle(document, frame.id)
+    const before = { ...document.expectNode(frame.id).size }
+    expect(before).toEqual({ width: 190, height: 70 })
+
+    // The first move of a drag: the node floats, so it leaves the flow.
+    const exclude = new Set([dragged.id])
+    applyLayout(document, computeLayout(document, frame.id, measurer, exclude))
+
+    // The sibling closes up, but the frame is not what changed and must not collapse onto it.
+    expect(document.expectNode(frame.id).size).toEqual(before)
+    expect(placed(document, other).x).toBe(10)
+  })
+
+  it('lets a hug frame settle onto what is left once the drag releases', () => {
+    const document = new SceneDocument()
+    const frame = document.insert(
+      createFrame({ size: { width: 0, height: 0 }, layout: layout({ mainSizing: 'hug', crossSizing: 'hug' }) }),
+    )
+    const dragged = document.insert(
+      createRectangle({ size: { width: 110, height: 20 } }),
+      frame.id,
+    )
+    document.insert(createRectangle({ size: { width: 50, height: 50 } }), frame.id)
+    settle(document, frame.id)
+
+    applyLayout(document, computeLayout(document, frame.id, measurer, new Set([dragged.id])))
+    document.remove(dragged.id)
+    // The release pass runs without the exclusion, which is what lets the size catch up.
+    settle(document, frame.id)
+    expect(document.expectNode(frame.id).size).toEqual({ width: 70, height: 70 })
+  })
+
+  it('holds the axes that hug and leaves a fixed one alone', () => {
+    const document = new SceneDocument()
+    const frame = document.insert(
+      createFrame({
+        size: { width: 300, height: 0 },
+        layout: layout({ mainSizing: 'fixed', crossSizing: 'hug' }),
+      }),
+    )
+    const dragged = document.insert(
+      createRectangle({ size: { width: 50, height: 80 } }),
+      frame.id,
+    )
+    document.insert(createRectangle({ size: { width: 50, height: 30 } }), frame.id)
+    settle(document, frame.id)
+    expect(document.expectNode(frame.id).size).toEqual({ width: 300, height: 100 })
+
+    applyLayout(document, computeLayout(document, frame.id, measurer, new Set([dragged.id])))
+    expect(document.expectNode(frame.id).size).toEqual({ width: 300, height: 100 })
+  })
+
+  it('holds a hug frame around a text child, which is where it reads worst', () => {
+    const document = new SceneDocument()
+    const frame = document.insert(
+      createFrame({ size: { width: 0, height: 0 }, layout: layout({ mainSizing: 'hug', crossSizing: 'hug' }) }),
+    )
+    const text = document.insert(
+      createText({ characters: 'hello world', size: { width: 110, height: 20 } }),
+      frame.id,
+    )
+    settle(document, frame.id)
+    const before = { ...document.expectNode(frame.id).size }
+
+    applyLayout(document, computeLayout(document, frame.id, measurer, new Set([text.id])))
+    // The only child, so without the hold the frame would collapse to its padding.
+    expect(document.expectNode(frame.id).size).toEqual(before)
+  })
+
+  it('frees the frame a node has been dragged out of, since it holds nothing', () => {
+    const document = new SceneDocument()
+    const from = document.insert(
+      createFrame({ size: { width: 0, height: 0 }, layout: layout({ mainSizing: 'hug', crossSizing: 'hug' }) }),
+    )
+    const moved = document.insert(createRectangle({ size: { width: 110, height: 20 } }), from.id)
+    document.insert(createRectangle({ size: { width: 50, height: 50 } }), from.id)
+    settle(document, from.id)
+
+    // Live reparent out: the node is no longer this frame's child, so the hold lifts.
+    document.reparent(moved.id, document.rootId)
+    applyLayout(document, computeLayout(document, from.id, measurer, new Set([moved.id])))
+    expect(document.expectNode(from.id).size).toEqual({ width: 70, height: 70 })
+  })
+
   it('returns nothing for a frame without auto layout', () => {
     const document = new SceneDocument()
     const frame = document.insert(createFrame({ size: { width: 300, height: 100 } }))
