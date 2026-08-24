@@ -35,6 +35,12 @@ const ALL_HANDLES: readonly HandleId[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw',
 export const HANDLE_SIZE = 8
 /** Grab area, a little larger than the drawn handle so the corners are not fiddly. */
 export const HANDLE_GRAB = 11
+/**
+ * Band around each side within which a resize can start, so the whole edge is a target rather
+ * than just its midpoint handle, which is how Figma behaves. Narrower than a handle's grab so
+ * the bands take as little as possible from the interior, which is where a move starts.
+ */
+export const EDGE_GRAB = 8
 export const OUTLINE_WIDTH = 1
 /** Below this, the edge handles would collide with the corner ones, so they are dropped. */
 export const EDGE_HANDLE_MINIMUM = 24
@@ -241,6 +247,11 @@ export function handlePoints(bounds: Rect, allowed: readonly HandleId[] = ALL_HA
  * The point is mapped into the box's own frame first, so the axis aligned test below is the
  * only one that ever has to exist. Corners are tested before edges, because their grab areas
  * overlap on a small box and the corner is almost always what was meant.
+ *
+ * After the handle points, the sides themselves: anywhere along an edge is a resize target,
+ * not just its midpoint handle. The bands come from the same set as the drawn handles, so an
+ * edge the crowding rule or `allowed` removed cannot be grabbed through its side either: a box
+ * too small for edge handles keeps its interior for moving, and text offers only its sides.
  */
 export function handleAt(
   box: SelectionBox,
@@ -257,6 +268,24 @@ export function handleAt(
     if (Math.abs(local.x - handle.x) <= reach && Math.abs(local.y - handle.y) <= reach) {
       return handle.id
     }
+  }
+
+  const band = EDGE_GRAB / 2
+  const bounds = box.rect
+  const right = bounds.x + bounds.width
+  const bottom = bounds.y + bounds.height
+  for (const handle of edges) {
+    const horizontal = handle.id === 'n' || handle.id === 's'
+    const line =
+      handle.id === 'n' ? bounds.y
+      : handle.id === 's' ? bottom
+      : handle.id === 'w' ? bounds.x
+      : right
+    const offset = horizontal ? Math.abs(local.y - line) : Math.abs(local.x - line)
+    const along = horizontal
+      ? local.x >= bounds.x && local.x <= right
+      : local.y >= bounds.y && local.y <= bottom
+    if (offset <= band && along) return handle.id
   }
   return null
 }

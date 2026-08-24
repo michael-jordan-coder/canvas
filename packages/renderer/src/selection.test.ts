@@ -122,6 +122,39 @@ describe('handleAt', () => {
     const short = { rect: { x: 0, y: 0, width: 30, height: 100 }, angle: 0 }
     expect(handleAt(short, { x: 0, y: 0 })).toBe('nw')
   })
+
+  it('grabs an edge anywhere along the side, not just at its midpoint handle', () => {
+    expect(handleAt(box, { x: 150, y: 100 })).toBe('n')
+    expect(handleAt(box, { x: 300, y: 180 })).toBe('e')
+  })
+
+  it('keeps the edge band narrow, inside and outside alike', () => {
+    expect(handleAt(box, { x: 150, y: 104 })).toBe('n')
+    expect(handleAt(box, { x: 150, y: 96 })).toBe('n')
+    expect(handleAt(box, { x: 150, y: 105 })).toBeNull()
+  })
+
+  it('ends the edge band at the corners rather than running past them', () => {
+    expect(handleAt(box, { x: 90, y: 100 })).toBeNull()
+  })
+
+  it('drops the edge bands with the edge handles on a box too small for them', () => {
+    // 20x20 is below the crowding minimum, so the sides must stay grabbable for a move.
+    const small = { rect: { x: 0, y: 0, width: 20, height: 20 }, angle: 0 }
+    expect(handleAt(small, { x: 10, y: 0 })).toBeNull()
+  })
+
+  it('offers no band for an edge outside the allowed set', () => {
+    // Text allows east and west only, so its top edge must not start a resize.
+    expect(handleAt(box, { x: 150, y: 100 }, ['e', 'w'])).toBeNull()
+    expect(handleAt(box, { x: 300, y: 120 }, ['e', 'w'])).toBe('e')
+  })
+
+  it('follows the box round, so a turned edge is grabbed where it is drawn', () => {
+    const turned = { rect: { x: 0, y: 0, width: 100, height: 50 }, angle: radians(90) }
+    const onEdge = fromBoxSpace(turned, { x: 30, y: 0 })
+    expect(handleAt(turned, onEdge)).toBe('n')
+  })
 })
 
 describe('selectionBox on a rotated node', () => {

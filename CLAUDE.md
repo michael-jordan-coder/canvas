@@ -308,6 +308,14 @@ would have returned had it been callable there.
   at 10% zoom and at 3000%, and a one pixel outline stays one pixel. Both pipelines share
   `MatrixUniform`; they differ only in which matrix they are bound to.
 
+  A resize starts anywhere along a side, not only on the midpoint handle, so the target is the
+  whole perimeter the way it is in Figma. `handleAt` tests the handle points first and the edge
+  bands after, which is what keeps a corner winning where the two overlap. The bands are derived
+  from the same set the overlay draws, so both existing rules about that set carry over with no
+  case of their own: a box too short for edge handles loses its bands with them and keeps its
+  interior for dragging, and text, offering east and west alone, is grabbable along those two
+  sides only.
+
 - Text, as a node type, a pure layout, an MSDF atlas and an inline editor. It draws in the
   same instanced call as everything else. See the text section below.
 
