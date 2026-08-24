@@ -90,6 +90,7 @@ export class OverlayInstances {
     viewport: Viewport,
     marquee?: Rect | null,
     editing?: TextEditing | null,
+    hover?: NodeId | null,
   ): void {
     this.#count = 0
 
@@ -124,6 +125,26 @@ export class OverlayInstances {
       }
       this.#upload()
       return
+    }
+
+    /*
+     * The hover outline: the four edges of what a click would select, and nothing else.
+     *
+     * The same `selectionBox` and the same single `#push` the selection outline below is
+     * built from, deliberately rather than by a parallel path, so a hovered box and a
+     * selected one cannot end up drawn in two different places under rotation or a scaled
+     * parent. What it leaves out is everything a handle does: the corner squares, the edge
+     * squares and the rotate stem are affordances for a gesture, and offering them to a
+     * pointer that has not selected anything yet would say the shape can be resized when
+     * clicking it would only select it.
+     *
+     * Drawn before the selection so a node that is both stays outlined by the selection's
+     * pass, and skipped outright when it is already selected, since a second outline exactly
+     * on top of the first is invisible work that only shows up as a seam.
+     */
+    if (hover && !selection.includes(hover)) {
+      const hovered = selectionBox(document, [hover], camera, viewport)
+      if (hovered) this.#push(hovered.rect, TRANSPARENT, ACCENT, OUTLINE_WIDTH, 0, hovered.angle)
     }
 
     // The same box the input layer hit tests against, so what you can grab is what you see.

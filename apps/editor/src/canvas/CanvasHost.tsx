@@ -4,6 +4,7 @@ import {
   DEFAULT_CAMERA,
   createWebGPURenderer,
   fitTo,
+  keepAnchored,
   selectionWorldBounds,
   zoomAt,
   type Camera,
@@ -37,6 +38,9 @@ export function CanvasHost(): ReactElement {
   const cameraRef = useRef<Camera>(DEFAULT_CAMERA)
   // Also a ref: it changes on every frame of a rubber band and no component renders from it.
   const marqueeRef = useRef<Rect | null>(null)
+  // And again for the hover outline, which would otherwise put a React render between the
+  // pointer and the pixels on every move across a boundary.
+  const hoverRef = useRef<NodeId | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -52,33 +56,63 @@ export function CanvasHost(): ReactElement {
     // produce identical pixels.
     let lastFrameAt = 0
 
+    const render = (): void => {
+      if (!renderer) return
+      const startedAt = performance.now()
+      renderer.render({
+        camera: cameraRef.current,
+        selection: useUI.getState().selection,
+        marquee: marqueeRef.current,
+        hover: hoverRef.current,
+        editing: useUI.getState().editing,
+      })
+      const finishedAt = performance.now()
+
+      frameStats.frameMs = finishedAt - startedAt
+      frameStats.intervalMs = lastFrameAt === 0 ? 0 : startedAt - lastFrameAt
+      lastFrameAt = startedAt
+      const { instances, culled } = renderer.stats
+      frameStats.instances = instances
+      frameStats.culled = culled
+    }
+
     const draw = (): void => {
       cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(() => {
-        if (!renderer) return
-        const startedAt = performance.now()
-        renderer.render({
-          camera: cameraRef.current,
-          selection: useUI.getState().selection,
-          marquee: marqueeRef.current,
-          editing: useUI.getState().editing,
-        })
-        const finishedAt = performance.now()
-
-        frameStats.frameMs = finishedAt - startedAt
-        frameStats.intervalMs = lastFrameAt === 0 ? 0 : startedAt - lastFrameAt
-        lastFrameAt = startedAt
-        const { instances, culled } = renderer.stats
-        frameStats.instances = instances
-        frameStats.culled = culled
-      })
+      frame = requestAnimationFrame(render)
     }
+
+    /**
+     * A new size, drawn into in the same frame it arrives.
+     *
+     * Deliberately not through `draw`. A `ResizeObserver` callback runs after layout and
+     * before paint, so by the time this is called the canvas element already has its new
+     * box; scheduling the redraw would present one frame of the old texture stretched into
+     * it. A window resize shows that as a flicker at the edges, but the side panels are grid
+     * columns rather than an overlay, so dragging one resizes the canvas on every pointer
+     * move and the stretch is every frame of the gesture: the drawing appears to squash and
+     * spring as the panel moves. Reconfiguring the surface also clears it, which is the
+     * other half of why the redraw cannot wait.
+     */
+    /*
+     * The canvas as it last sat on the page, so the next change can be measured against it.
+     * Null until the first resize, which has nothing to hold still and only records.
+     */
+    let lastRect: Rect | null = null
 
     const resize = (): void => {
       if (!renderer) return
-      const rect = canvas.getBoundingClientRect()
+      const box = canvas.getBoundingClientRect()
+      const rect = { x: box.left, y: box.top, width: box.width, height: box.height }
+
+      // A new shape or place for the canvas is not a change of view, so the drawing must not
+      // appear to move. It would otherwise: the camera names the world point at the centre,
+      // and narrowing the canvas moves the centre.
+      if (lastRect) cameraRef.current = keepAnchored(cameraRef.current, lastRect, rect)
+      lastRect = rect
+
       renderer.resize({ width: rect.width, height: rect.height }, window.devicePixelRatio)
-      draw()
+      cancelAnimationFrame(frame)
+      render()
     }
 
     const onWheel = (event: WheelEvent): void => {
@@ -177,6 +211,14 @@ export function CanvasHost(): ReactElement {
       setContext: (context) => useUI.getState().setContext(context),
       setMarquee: (rect) => {
         marqueeRef.current = rect
+      },
+      // Only a change is worth a frame. The pointer crosses a node's edge far less often
+      // than it moves, so comparing here is what keeps a slow sweep across empty canvas
+      // from scheduling a redraw per event.
+      setHover: (id) => {
+        if (hoverRef.current === id) return
+        hoverRef.current = id
+        draw()
       },
       requestDraw: draw,
       beginTextEdit: beginEditing,

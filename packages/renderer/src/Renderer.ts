@@ -45,6 +45,16 @@ export interface ViewState {
   selection: readonly NodeId[]
   /** The rubber band rectangle while one is being dragged, in CSS pixels. */
   marquee?: Rect | null
+  /**
+   * The node the pointer is over, outlined so a click's target is legible before the click.
+   *
+   * An id rather than a rect, for the same reason selection is: the renderer already knows
+   * how to place a node's box, and handing it geometry would be a second answer that could
+   * disagree with the first. It is also the resolved target rather than whatever is under
+   * the cursor, because the hierarchy decides what a click selects and an outline around
+   * something else would be worse than none at all.
+   */
+  hover?: NodeId | null
   /** The text node being edited, or null when nothing is. */
   editing?: TextEditing | null
 }

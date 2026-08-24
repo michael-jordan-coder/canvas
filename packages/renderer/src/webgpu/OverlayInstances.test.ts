@@ -104,6 +104,43 @@ describe('OverlayInstances', () => {
     expect(field(FIRST_HANDLE, FIELD.x)).toBe(265 - 4)
   })
 
+  it('draws one instance for a hover, and no handles with it', () => {
+    overlay.sync(world.document, [], origin, viewport, null, null, world.rectangle.id)
+    expect(overlay.count).toBe(1)
+  })
+
+  it('outlines a hover exactly where it would outline the same node selected', () => {
+    overlay.sync(world.document, [], origin, viewport, null, null, world.rectangle.id)
+    const hovered = [FIELD.x, FIELD.y, FIELD.width, FIELD.height].map((slot) =>
+      field(OUTLINE, slot),
+    )
+    overlay.sync(world.document, [world.rectangle.id], origin, viewport)
+    const selected = [FIELD.x, FIELD.y, FIELD.width, FIELD.height].map((slot) =>
+      field(OUTLINE, slot),
+    )
+    // The point of building both from `selectionBox`: two paths could not stay this equal
+    // under rotation or a scaled parent, and a hover that sat a pixel off would read as jitter.
+    expect(hovered).toEqual(selected)
+  })
+
+  it('gives a hover the same hairline stroke and no fill', () => {
+    overlay.sync(world.document, [], origin, viewport, null, null, world.rectangle.id)
+    expect(field(OUTLINE, FIELD.strokeWidth)).toBe(1)
+    expect(field(OUTLINE, FIELD.fillAlpha)).toBe(0)
+  })
+
+  it('says nothing about a node that is already selected', () => {
+    overlay.sync(world.document, [world.rectangle.id], origin, viewport, null, null, world.rectangle.id)
+    // A second outline exactly on top of the first is invisible work and a seam waiting to
+    // happen, so the selection's own pass is left to draw it.
+    expect(overlay.count).toBe(FULL_COUNT)
+  })
+
+  it("draws a hover alongside a different node's selection", () => {
+    overlay.sync(world.document, [world.rectangle.id], origin, viewport, null, null, world.tiny.id)
+    expect(overlay.count).toBe(FULL_COUNT + 1)
+  })
+
   it('drops the edge handles when the box is too small for them', () => {
     overlay.sync(world.document, [world.tiny.id], origin, viewport)
     expect(overlay.count).toBe(CORNERS_ONLY)

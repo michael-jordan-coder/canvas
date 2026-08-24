@@ -77,6 +77,7 @@ export interface PointerInputOptions {
   toggleInSelection: (id: NodeId) => void
   getContext: () => SelectionContext
   setContext: (context: SelectionContext) => void
+  setHover: (id: NodeId | null) => void
   /** The rubber band rectangle in CSS pixels, or null when there is not one. */
   setMarquee: (rect: Rect | null) => void
   /** Ask for a redraw. Document edits redraw on their own, camera moves do not. */
@@ -350,6 +351,11 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     const screen = screenOf(event)
     const world = worldOf(screen)
     lastPointerScreen = screen
+
+    // The press is the answer to the question the outline was asking, so it stops asking.
+    // Whatever this turns into, the release ends by recomputing the cursor and with it the
+    // outline, which is what brings it back around a node that is still under the pointer.
+    options.setHover(null)
 
     // Middle button and held space both mean pan, whatever tool is active. Every canvas
     // application agrees on this and muscle memory is stronger than the toolbar.
@@ -682,22 +688,49 @@ export function createPointerInput(options: PointerInputOptions): () => void {
   }
 
   /**
-   * Not dragging, so this is only about what the cursor should look like. The value goes on a
+   * What a click at this point would select, or null for nothing.
+   *
+   * Resolved through the same policy the click itself uses, Cmd included, because the whole
+   * job of the outline is to say what is about to happen. One that named the deepest node
+   * while the click selected its frame would be worse than no outline at all.
+   */
+  const hoverTargetAt = (screen: Vec2, deep: boolean): NodeId | null => {
+    const hit = hitTest(document, worldOf(screen))
+    if (!hit) return null
+    return deep
+      ? deepSelectionTarget(document, hit.id).id
+      : selectionTarget(document, hit.id, options.getContext()).id
+  }
+
+  /**
+   * Not dragging, so this is only about what the pointer is telling you. The cursor goes on a
    * data attribute rather than into style, so the cursors stay in the stylesheet. A pan cursor
    * takes priority over a resize/rotate handle: holding space to pan means exactly that,
    * whatever happens to be under the pointer.
+   *
+   * The hover outline is decided here too, and it is off whenever the cursor is not the move
+   * tool's arrow: a hand about to pan and a tool about to draw are both saying the next press
+   * is not a selection, so outlining what it would have selected would contradict them.
    */
-  const updateIdleCursor = (screen: Vec2): void => {
+  const updateIdleCursor = (screen: Vec2, deep = false): void => {
     const wantsPan = options.getTool() === 'hand' || spaceHeld
     if (wantsPan) {
       canvas.dataset['pan'] = 'grab'
       delete canvas.dataset['handle']
+      options.setHover(null)
       return
     }
     delete canvas.dataset['pan']
-    const hovered = options.getTool() === 'move' ? grabUnder(screen) : null
-    if (hovered) canvas.dataset['handle'] = hovered
+    const grabbed = options.getTool() === 'move' ? grabUnder(screen) : null
+    if (grabbed) canvas.dataset['handle'] = grabbed
     else delete canvas.dataset['handle']
+
+    // A handle under the pointer means the next press resizes or rotates what is already
+    // selected, so there is nothing to preview and the outline would sit on top of the
+    // selection's own.
+    options.setHover(
+      options.getTool() === 'move' && !grabbed ? hoverTargetAt(screen, deep) : null,
+    )
   }
 
   const onPointerMove = (event: PointerEvent): void => {
@@ -705,7 +738,7 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     lastPointerScreen = screen
 
     if (!drag) {
-      updateIdleCursor(screen)
+      updateIdleCursor(screen, event.metaKey || event.ctrlKey)
       return
     }
 
@@ -1169,6 +1202,18 @@ export function createPointerInput(options: PointerInputOptions): () => void {
   }
 
   /**
+   * The pointer left the canvas, so there is nothing under it to preview.
+   *
+   * Only when no gesture is running: a drag holds pointer capture and keeps going past the
+   * edge, and clearing the outline there would be answering an event the gesture owns.
+   */
+  const onPointerLeave = (): void => {
+    if (drag) return
+    lastPointerScreen = null
+    options.setHover(null)
+  }
+
+  /**
    * A modifier pressed or released mid resize has to take effect at once.
    *
    * Without this, holding shift changes nothing until the pointer moves again, which reads
@@ -1306,6 +1351,7 @@ export function createPointerInput(options: PointerInputOptions): () => void {
 
   canvas.addEventListener('pointerdown', onPointerDown)
   canvas.addEventListener('pointermove', onPointerMove)
+  canvas.addEventListener('pointerleave', onPointerLeave)
   canvas.addEventListener('pointerup', onPointerUp)
   canvas.addEventListener('pointercancel', onPointerUp)
   window.addEventListener('keydown', onKeyDown)
@@ -1314,6 +1360,7 @@ export function createPointerInput(options: PointerInputOptions): () => void {
   return () => {
     canvas.removeEventListener('pointerdown', onPointerDown)
     canvas.removeEventListener('pointermove', onPointerMove)
+    canvas.removeEventListener('pointerleave', onPointerLeave)
     canvas.removeEventListener('pointerup', onPointerUp)
     canvas.removeEventListener('pointercancel', onPointerUp)
     window.removeEventListener('keydown', onKeyDown)

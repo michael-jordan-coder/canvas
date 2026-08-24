@@ -366,6 +366,29 @@ Figma's selection model, replacing the deepest-node-wins policy the editor start
       result through `selectionTarget` and dedupe. Left out because it was not what was asked
       for, but the two now disagree and that is visible.
 
+## Hover outline
+
+- [x] The four edges of what a click would select, drawn on hover with no handles. Built from
+      the same `selectionBox` and the same push as the selection outline, so the two cannot
+      disagree under rotation. Resolved through `selectionTarget`, Cmd included, so it names
+      what the click will actually take. `packages/renderer/src/webgpu/OverlayInstances.ts`,
+      `apps/editor/src/input/pointerInput.ts`
+- [x] `hover` on `ViewState` as an id, held in a `CanvasHost` ref and compared before it is
+      written, so a sweep across empty canvas schedules no redraws.
+
+## Panel drag no longer squashes the canvas
+
+- [x] `resize` draws synchronously instead of through `draw`. The `ResizeObserver` callback
+      runs after layout and before paint, so a scheduled redraw showed one frame of the old
+      texture stretched into the new box, which during a panel drag was every frame.
+      `apps/editor/src/canvas/CanvasHost.tsx`
+- [x] `keepAnchored` in `camera.ts`, so a resize moves the camera by exactly what it takes to
+      leave the drawing where it is. Takes page rects, not sizes, since a left panel drag moves
+      the canvas and narrows it and the two pull opposite ways. Pure, with tests holding several
+      world points still across four kinds of resize at three zooms.
+- [x] Selecting reveals the node in the layers panel: folded ancestors open and the row
+      scrolls into view. `apps/editor/src/ui/LayersPanel.tsx`
+
 ## Drag slop
 
 - [x] A press becomes a drag only past a few pixels, in `pointerInput.ts`. The exact-comparison

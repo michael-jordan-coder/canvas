@@ -274,7 +274,25 @@ Built:
   edge.
 
 Drawing is on demand, not a permanent `requestAnimationFrame` loop. `CanvasHost` redraws on
-resize and on document change, coalesced into one frame. An editor is static most of the time and
+resize and on document change, coalesced into one frame. **A resize is the exception that draws
+synchronously.** A `ResizeObserver` callback runs after layout and before paint, so the element
+already has its new box by the time it fires, and scheduling the redraw would present one frame
+of the old texture stretched into it. The side panels are grid columns rather than an overlay, so
+dragging one resizes the canvas on every pointer move and that stretch is every frame of the
+gesture: the drawing appears to squash and spring as the panel moves. Reconfiguring the surface
+also clears it, which is the other half of why the redraw cannot wait.
+
+**A resize also moves the camera, so that the drawing does not move.** `camera.x` is the world
+point at the *centre* of the viewport, so narrowing the canvas moves the centre and the same
+camera puts the same world point somewhere else on the display: nothing about the view changed
+and everything in it slides. `keepAnchored` in `camera.ts` corrects for it, and takes the
+canvas's page rect rather than its size because where the canvas sits counts too. Widening the
+left panel moves the canvas right and narrows it by the same amount, and those pull opposite
+ways; correcting for the width alone would cancel half the slide and double the other half. It
+falls out of holding a world point's page position across the change, and the world point drops
+out of the algebra, which is the point: every point is held rather than a chosen one. A window
+resize goes through the same rule and gets what a canvas should do, the drawing anchored where
+it was and the new room appearing at the edge that grew. An editor is static most of the time and
 a loop running at 120Hz over a still document burns battery producing identical pixels.
 
 The instance buffer rebuilds only when `document.version` changes, so it is untouched by panning.
@@ -314,6 +332,26 @@ would have returned had it been callable there.
   whole trick. Its geometry is built in CSS pixels and never sees the camera, so a handle is 8px
   at 10% zoom and at 3000%, and a one pixel outline stays one pixel. Both pipelines share
   `MatrixUniform`; they differ only in which matrix they are bound to.
+
+  Hovering outlines what a click would select: the same four edges, from the same
+  `selectionBox` and the same single push, with none of the handles. That last part is the
+  decision rather than an omission. A corner square, an edge square and the rotate stem are
+  affordances for a gesture, and offering them to a pointer that has not selected anything
+  yet would promise a resize where a click only selects. What it outlines is the **resolved**
+  target, Cmd included, since an outline that named the deepest node while the click took its
+  frame would be worse than no outline at all. It is off over a handle, off under the hand
+  tool and while space is held, off from pointer down until the release recomputes it, and
+  skipped for a node already selected, whose own outline is exactly on top of it. The id
+  travels in `ViewState` beside the marquee and lives in a `CanvasHost` ref rather than in
+  the store, compared before it is written, so crossing a boundary costs one frame and moving
+  within a node costs nothing.
+
+  Selecting also **reveals the node in the layers panel**: every folded ancestor opens and the
+  row scrolls into view. It matters more since clicks resolve up the hierarchy, because what a
+  click lands on is often a frame's child rather than anything the pointer was literally over,
+  and the tree is where you go to see which. Two effects rather than one, since the row the
+  first unfolds does not exist until the render that unfolding causes. It only ever opens: a
+  fold is the user's own state and closing it back afterwards would be taking it away.
 
   A resize starts anywhere along a side, not only on the midpoint handle, so the target is the
   whole perimeter the way it is in Figma. `handleAt` tests the handle points first and the edge

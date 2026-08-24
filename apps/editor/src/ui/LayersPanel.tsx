@@ -50,6 +50,44 @@ function labelOf(node: SceneNode): string {
 export function LayersPanel(): ReactElement {
   const roots = useChildren(scene.rootId)
   const drag = useLayerDrag()
+  const selection = useUI((state) => state.selection)
+  const collapsed = useUI((state) => state.collapsed)
+  const setCollapsed = useUI((state) => state.setCollapsed)
+  const treeRef = useRef<HTMLDivElement>(null)
+
+  /*
+   * Opens every folded ancestor of the selection.
+   *
+   * Selecting on the canvas and finding nothing in the tree is the panel disagreeing with
+   * the canvas about what is selected. It matters more now than it did: a click resolves up
+   * the hierarchy, so what it lands on is often a frame's child rather than anything the
+   * pointer was literally over, and the tree is where you go to see which. Folding is the
+   * user's own state, so this only ever opens, never folds back afterwards.
+   */
+  useEffect(() => {
+    for (const id of selection) {
+      let parent = scene.getNode(id)?.parent
+      while (parent && parent !== scene.rootId) {
+        setCollapsed(parent, false)
+        parent = scene.getNode(parent)?.parent
+      }
+    }
+  }, [selection, setCollapsed])
+
+  /*
+   * And scrolls to it, once the rows the effect above unfolded actually exist.
+   *
+   * Keyed on the folded set as well as the selection, so this runs again on the render that
+   * unfolding causes: on the first pass the row is still unmounted and there is nothing to
+   * scroll to. `nearest` is what keeps it from moving anything already in view, which is
+   * most selections, including every one made by clicking a row in this panel.
+   */
+  useEffect(() => {
+    const target = selection[selection.length - 1]
+    if (!target) return
+    const row = treeRef.current?.querySelector(`[data-layer-id="${CSS.escape(target)}"]`)
+    row?.scrollIntoView({ block: 'nearest' })
+  }, [selection, collapsed])
 
   return (
     <aside className={styles.panel}>
@@ -60,7 +98,7 @@ export function LayersPanel(): ReactElement {
         label="Resize layers panel"
       />
       <header className={styles.header}>Layers</header>
-      <div className={styles.tree}>
+      <div className={styles.tree} ref={treeRef}>
         {roots.length === 0 ? (
           <div className={styles.empty}>No layers</div>
         ) : (

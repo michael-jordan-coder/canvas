@@ -120,6 +120,7 @@ class WebGPURenderer implements Renderer {
       this.#viewport,
       view.marquee,
       view.editing,
+      view.hover,
     )
 
     const encoder = device.createCommandEncoder()

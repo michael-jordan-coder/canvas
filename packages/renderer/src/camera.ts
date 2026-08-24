@@ -69,6 +69,37 @@ export function worldToScreen(camera: Camera, viewport: Viewport, point: Vec2): 
   return applyToPoint(viewMatrix(camera, viewport), point)
 }
 
+/**
+ * The camera that leaves the drawing where it is after the canvas changes shape or place.
+ *
+ * `camera.x` is the world point at the **centre** of the viewport, which is what makes this
+ * necessary: narrow the canvas and its centre moves, so the same camera puts the same world
+ * point somewhere else on the display. Nothing about the view changed, but everything in it
+ * appears to slide, which is what dragging a side panel looks like, since the panels are grid
+ * columns and the canvas is the column between them.
+ *
+ * Both rects are in page coordinates, so where the canvas sits counts as well as how big it
+ * is. Widening the left panel moves the canvas right and narrows it by the same amount, and
+ * those two pull the drawing opposite ways: without the origin term, correcting for the width
+ * alone would cancel half the slide and double the other half. `getBoundingClientRect` gives
+ * both in one call.
+ *
+ * Falls out of holding a world point's page position still across the change:
+ *
+ *     origin' + (W - x') * zoom + width' / 2  =  origin + (W - x) * zoom + width / 2
+ *
+ * `W` drops out, which is the point: every world point is held, not a chosen one. A window
+ * resize goes through the same rule and gets the behaviour a canvas should have, the drawing
+ * anchored where it was with the new room appearing at the edge that grew.
+ */
+export function keepAnchored(camera: Camera, before: Rect, after: Rect): Camera {
+  return {
+    ...camera,
+    x: camera.x + (after.x - before.x + (after.width - before.width) / 2) / camera.zoom,
+    y: camera.y + (after.y - before.y + (after.height - before.height) / 2) / camera.zoom,
+  }
+}
+
 /** Zooms around a fixed screen point, which is what a trackpad pinch and a wheel both want. */
 export function zoomAt(camera: Camera, viewport: Viewport, point: Vec2, factor: number): Camera {
   const zoom = clampZoom(camera.zoom * factor)
