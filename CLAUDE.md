@@ -150,7 +150,7 @@ pnpm test:watch
 pnpm check       typecheck and test together
 ```
 
-Tests sit next to what they cover as `*.test.ts`. Vitest resolves the `@figma-canvas/*` imports
+Tests sit next to what they cover as `*.test.ts`. Vitest resolves the `@canvas/*` imports
 through the pnpm links, so tests import the packages exactly as the app does, with no build step.
 
 The renderer is testable without a GPU: `createStubDevice` in

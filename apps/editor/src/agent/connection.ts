@@ -1,5 +1,5 @@
-import { AGENT_PORT } from '@figma-canvas/agent-server/protocol'
-import type { ClientMessage, ServerMessage } from '@figma-canvas/agent-server/protocol'
+import { AGENT_PORT } from '@canvas/agent-server/protocol'
+import type { ClientMessage, ServerMessage } from '@canvas/agent-server/protocol'
 import { scene } from '../state/scene'
 import { useAgent } from './agentStore'
 import { executeCommand } from './executor'

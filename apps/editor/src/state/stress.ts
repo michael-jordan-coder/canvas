@@ -5,7 +5,7 @@ import {
   translation,
   uniformCornerRadii,
   type SceneDocument,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 
 /** Spread out enough that most of them are off screen at 100%, which is the point. */
 const SPACING = 120

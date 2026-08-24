@@ -42,13 +42,13 @@ importers:
 
   apps/editor:
     dependencies:
-      '@figma-canvas/agent-server':
+      '@canvas/agent-server':
         specifier: workspace:*
         version: link:../agent-server
-      '@figma-canvas/document':
+      '@canvas/document':
         specifier: workspace:*
         version: link:../../packages/document
-      '@figma-canvas/renderer':
+      '@canvas/renderer':
         specifier: workspace:*
         version: link:../../packages/renderer
       react:
@@ -94,7 +94,7 @@ importers:
 
   packages/renderer:
     dependencies:
-      '@figma-canvas/document':
+      '@canvas/document':
         specifier: workspace:*
         version: link:../document
     devDependencies:

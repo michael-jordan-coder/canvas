@@ -7,7 +7,7 @@ import {
   defaultFrameLayout,
   translation,
   type FrameLayout,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 import {
   addAutoLayout,
   relayout,

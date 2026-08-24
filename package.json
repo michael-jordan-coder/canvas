@@ -1,14 +1,14 @@
 {
-  "name": "figma-canvas",
+  "name": "canvas",
   "version": "0.0.0",
   "private": true,
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@10.15.1",
   "scripts": {
-    "dev": "pnpm --parallel --filter @figma-canvas/editor --filter @figma-canvas/agent-server dev",
-    "build": "pnpm --filter @figma-canvas/editor build",
-    "preview": "pnpm --filter @figma-canvas/editor preview",
+    "dev": "pnpm --parallel --filter @canvas/editor --filter @canvas/agent-server dev",
+    "build": "pnpm --filter @canvas/editor build",
+    "preview": "pnpm --filter @canvas/editor preview",
     "typecheck": "pnpm -r typecheck",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -8,7 +8,7 @@ import {
   radians,
   rotateAbout,
   translation,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 import type { Camera, Viewport } from './camera.js'
 import {
   boxCentre,

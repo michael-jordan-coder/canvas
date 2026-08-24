@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SceneDocument, createRectangle } from '@figma-canvas/document'
+import { SceneDocument, createRectangle } from '@canvas/document'
 import { reorderSelection } from './order'
 
 function stack() {

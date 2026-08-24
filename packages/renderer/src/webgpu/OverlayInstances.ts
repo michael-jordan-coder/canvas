@@ -4,7 +4,7 @@ import type {
   Rect,
   SceneDocument,
   TextLayoutCache,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 import type { Camera, Viewport } from '../camera.js'
 import type { TextEditing } from '../Renderer.js'
 import {
@@ -18,7 +18,7 @@ import {
   OUTLINE_WIDTH,
   ROTATE_HANDLE_SIZE,
 } from '../selection.js'
-import type { Size, Vec2 } from '@figma-canvas/document'
+import type { Size, Vec2 } from '@canvas/document'
 
 /** A rect of the given size around a centre point. */
 function centredAt(centre: Vec2, size: Size): Rect {

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, type ReactElement } from 'react'
-import type { NodeId } from '@figma-canvas/document'
+import type { NodeId } from '@canvas/document'
 import { updateText } from '../state/font'
 import { closeBurst, endEditing, openBurst } from '../state/textEditing'
 import { useNode } from '../state/scene'

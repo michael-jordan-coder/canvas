@@ -1,4 +1,4 @@
-import type { NodeId } from '@figma-canvas/document'
+import type { NodeId } from '@canvas/document'
 import { scene } from './scene'
 import { useUI, type ToolId } from './uiStore'
 

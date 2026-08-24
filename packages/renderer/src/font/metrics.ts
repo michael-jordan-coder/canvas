@@ -1,4 +1,4 @@
-import type { FontMetrics, GlyphMetrics, GlyphQuad } from '@figma-canvas/document'
+import type { FontMetrics, GlyphMetrics, GlyphQuad } from '@canvas/document'
 
 /**
  * Adapts the atlas generator's JSON into the table `packages/document` lays text out with.

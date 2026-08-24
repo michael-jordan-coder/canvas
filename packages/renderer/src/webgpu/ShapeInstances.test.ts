@@ -16,7 +16,7 @@ import {
   type Size,
   type StrokeAlign,
   TextLayoutCache,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 import type { Camera, Viewport } from '../camera.js'
 import { ClipRegions, createClipBindGroupLayout } from './ClipRegions.js'
 import { FLOATS_PER_INSTANCE } from './instanceLayout.js'

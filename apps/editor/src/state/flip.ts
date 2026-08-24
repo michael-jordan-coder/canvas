@@ -6,8 +6,8 @@ import {
   type NodeId,
   type SceneDocument,
   type Vec2,
-} from '@figma-canvas/document'
-import { selectionWorldBounds } from '@figma-canvas/renderer'
+} from '@canvas/document'
+import { selectionWorldBounds } from '@canvas/renderer'
 import { relayout } from './autoLayout'
 
 /**

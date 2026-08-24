@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactElement } from 'react'
-import { InvalidDocumentError } from '@figma-canvas/document'
+import { InvalidDocumentError } from '@canvas/document'
 import { scene } from '../state/scene'
 import { fromJSON, toJSON } from '../state/persistence'
 import { useUI } from '../state/uiStore'
@@ -15,7 +15,7 @@ export function FileActions(): ReactElement {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = 'figma-canvas.json'
+    link.download = 'canvas.json'
     link.click()
     // The object URL pins the blob in memory until it is released.
     URL.revokeObjectURL(url)

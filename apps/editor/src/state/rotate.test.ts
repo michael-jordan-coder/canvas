@@ -11,7 +11,7 @@ import {
   scaling,
   translation,
   type NodeId,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 import {
   applyRotation,
   rotateNodes,

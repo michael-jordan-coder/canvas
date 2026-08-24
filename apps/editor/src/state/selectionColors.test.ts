@@ -5,7 +5,7 @@ import {
   createRectangle,
   fromHex,
   type Stroke,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 import { tallySelectionColors } from './selectionColors'
 
 describe('tallySelectionColors', () => {

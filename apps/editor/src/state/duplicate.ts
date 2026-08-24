@@ -5,7 +5,7 @@ import {
   type SceneDocument,
   type SceneNode,
   type Vec2,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 import { relayout } from './autoLayout'
 
 /**

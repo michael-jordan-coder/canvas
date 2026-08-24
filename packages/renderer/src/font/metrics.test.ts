@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { glyphFor } from '@figma-canvas/document'
+import { glyphFor } from '@canvas/document'
 
 import atlas from './inter-regular.json'
 import { InvalidAtlasError, parseAtlasMetrics } from './metrics.js'

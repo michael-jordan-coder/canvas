@@ -16,7 +16,7 @@ import {
   type SceneDocument,
   type SceneNode,
   type TextMeasurer,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 
 /**
  * Where auto layout meets the document, in the same spot z-order commands live: the scene

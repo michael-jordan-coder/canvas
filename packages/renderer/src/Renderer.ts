@@ -1,4 +1,4 @@
-import type { NodeId, Rect, SceneDocument, TextLayoutCache } from '@figma-canvas/document'
+import type { NodeId, Rect, SceneDocument, TextLayoutCache } from '@canvas/document'
 import type { Camera, Viewport } from './camera.js'
 
 export interface RendererInit {

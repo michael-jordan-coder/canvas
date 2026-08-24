@@ -1,6 +1,6 @@
 # Tasks
 
-Planned and in progress work for figma-canvas. `CLAUDE.md` owns architecture, this file owns
+Planned and in progress work for canvas. `CLAUDE.md` owns architecture, this file owns
 status: two records that both claim to say what is left will drift within a week, so they are
 split by job. When something ships, describe it in CLAUDE.md if it's worth knowing later, and
 check it off here with a one-line note (`file:line`, what landed).

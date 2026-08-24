@@ -1,4 +1,4 @@
-# figma-canvas
+# canvas
 
 A Figma-style design editor built from scratch. The canvas is drawn with WebGPU, everything
 around it is React, and the line between the two never blurs: React never draws a shape, and

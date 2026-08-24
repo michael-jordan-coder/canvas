@@ -11,7 +11,7 @@ import {
   translation,
   type NodeId,
   type Rect,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 import { flipNodes } from './flip'
 
 const worldBox = (document: SceneDocument, id: NodeId): Rect => {

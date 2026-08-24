@@ -23,7 +23,7 @@ import {
   type Stroke,
   type TextLayoutCache,
   type TextNode,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 import { viewMatrix, type Camera, type Viewport } from '../camera.js'
 import { NO_CLIP, type ClipRegions } from './ClipRegions.js'
 import { BYTES_PER_INSTANCE, FLOATS_PER_INSTANCE } from './instanceLayout.js'

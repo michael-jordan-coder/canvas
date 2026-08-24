@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react'
-import type { NodeId, Rect } from '@figma-canvas/document'
+import type { NodeId, Rect } from '@canvas/document'
 import {
   DEFAULT_CAMERA,
   createWebGPURenderer,
@@ -9,7 +9,7 @@ import {
   type Camera,
   type Renderer,
   type Viewport,
-} from '@figma-canvas/renderer'
+} from '@canvas/renderer'
 import { scene } from '../state/scene'
 import { frameStats } from '../state/stats'
 import { useUI } from '../state/uiStore'

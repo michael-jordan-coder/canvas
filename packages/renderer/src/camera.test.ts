@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyToPoint, type Vec2 } from '@figma-canvas/document'
+import { applyToPoint, type Vec2 } from '@canvas/document'
 import {
   clipMatrix,
   fitTo,

@@ -1,5 +1,5 @@
 import { useEffect, type ReactElement } from 'react'
-import type { NodeId } from '@figma-canvas/document'
+import type { NodeId } from '@canvas/document'
 import { createAgentConnection } from './agent/connection'
 import { CanvasHost } from './canvas/CanvasHost'
 import { createClipboardInput } from './input/clipboardInput'

@@ -6,7 +6,7 @@ import {
   type NodeId,
   type SceneDocument,
   type SerializedSubtree,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 import { relayout } from '../state/autoLayout'
 import { duplicateNodes } from '../state/duplicate'
 import { isEditingText } from './isEditingText'

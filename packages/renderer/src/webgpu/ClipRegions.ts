@@ -4,7 +4,7 @@ import {
   type CornerRadii,
   type Mat2D,
   type Size,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 
 /**
  * Four `vec4f`, laid out to mirror a shape instance so one mental model covers both: the

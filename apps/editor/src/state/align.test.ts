@@ -7,7 +7,7 @@ import {
   translation,
   type NodeId,
   type Rect,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 import { alignSelection } from './align'
 import { relayout } from './autoLayout'
 

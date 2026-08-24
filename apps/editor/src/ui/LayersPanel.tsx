@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactElement } from 'react'
-import type { NodeId, NodeType, SceneNode } from '@figma-canvas/document'
+import type { NodeId, NodeType, SceneNode } from '@canvas/document'
 import { relayout } from '../state/autoLayout'
 import { scene, useChildren, useNode } from '../state/scene'
 import { useUI } from '../state/uiStore'

@@ -3,7 +3,7 @@ import {
   serializeDocument,
   type SceneDocument,
   type SerializedDocument,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 
 const KEY = 'figma-canvas:document'
 /** Where a save that will not parse gets moved, rather than being overwritten and lost. */

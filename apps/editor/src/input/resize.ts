@@ -1,5 +1,5 @@
-import { applyToVector, type Mat2D, type Rect, type Size, type Vec2 } from '@figma-canvas/document'
-import type { HandleId } from '@figma-canvas/renderer'
+import { applyToVector, type Mat2D, type Rect, type Size, type Vec2 } from '@canvas/document'
+import type { HandleId } from '@canvas/renderer'
 
 export interface ResizeAxes {
   x: boolean

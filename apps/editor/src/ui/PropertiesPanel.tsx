@@ -27,7 +27,7 @@ import {
   type Stroke,
   type StrokeAlign,
   type TextNode,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 import { scene, useNode } from '../state/scene'
 import { alignSelection, type AlignCommand } from '../state/align'
 import {

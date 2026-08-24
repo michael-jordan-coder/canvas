@@ -5,7 +5,7 @@ import {
   translation,
   type FontMetrics,
   TextLayoutCache,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 import type { Camera, Viewport } from '../camera.js'
 import { OverlayInstances } from './OverlayInstances.js'
 import { createStubDevice, instanceAt } from './testing/stubDevice.js'

@@ -1,5 +1,5 @@
 {
-  "name": "@figma-canvas/editor",
+  "name": "@canvas/editor",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,9 +10,9 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@figma-canvas/agent-server": "workspace:*",
-    "@figma-canvas/document": "workspace:*",
-    "@figma-canvas/renderer": "workspace:*",
+    "@canvas/agent-server": "workspace:*",
+    "@canvas/document": "workspace:*",
+    "@canvas/renderer": "workspace:*",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "zustand": "^5.0.14"

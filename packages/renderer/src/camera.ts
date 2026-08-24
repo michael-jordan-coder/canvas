@@ -7,7 +7,7 @@ import {
   type Mat2D,
   type Rect,
   type Vec2,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 
 /**
  * View state. Lives with the renderer rather than the document because panning is not an

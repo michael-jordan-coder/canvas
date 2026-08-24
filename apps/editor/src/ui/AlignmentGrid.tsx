@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import type { LayoutAlign, LayoutDirection } from '@figma-canvas/document'
+import type { LayoutAlign, LayoutDirection } from '@canvas/document'
 import styles from './AlignmentGrid.module.css'
 
 const PACKED = ['start', 'center', 'end'] as const

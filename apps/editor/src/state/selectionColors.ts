@@ -5,7 +5,7 @@ import {
   toHex,
   type NodeId,
   type SceneDocument,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 
 /** One colour found somewhere in the selection, and how many paints drew it. */
 export interface ColorTally {

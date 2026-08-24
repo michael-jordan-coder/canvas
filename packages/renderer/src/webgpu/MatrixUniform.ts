@@ -1,4 +1,4 @@
-import type { Mat2D } from '@figma-canvas/document'
+import type { Mat2D } from '@canvas/document'
 
 /**
  * 3 columns of 4 floats. A mat3x3f is 3 vec3f columns, but a vec3f is aligned to 16 bytes

@@ -20,7 +20,7 @@ import {
   type SceneNode,
   type Stroke,
   type TextNode,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 import type {
   AgentCornerRadii,
   AgentLayout,
@@ -30,7 +30,7 @@ import type {
   CommandMap,
   CommandName,
   DocumentSnapshot,
-} from '@figma-canvas/agent-server/protocol'
+} from '@canvas/agent-server/protocol'
 import { scene } from '../state/scene'
 import { useUI } from '../state/uiStore'
 import {

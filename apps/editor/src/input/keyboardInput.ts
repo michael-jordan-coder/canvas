@@ -6,7 +6,7 @@ import {
   type NodeId,
   type SceneDocument,
   type Vec2,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 import { alignSelection, type AlignCommand } from '../state/align'
 import { relayout, toggleAutoLayout, wrapInAutoLayout } from '../state/autoLayout'
 import { reorderSelection } from '../state/order'

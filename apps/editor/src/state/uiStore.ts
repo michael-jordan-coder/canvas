@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import type { NodeId } from '@figma-canvas/document'
-import type { TextEditing } from '@figma-canvas/renderer'
+import type { NodeId } from '@canvas/document'
+import type { TextEditing } from '@canvas/renderer'
 
 export type ToolId = 'move' | 'hand' | 'frame' | 'rectangle' | 'ellipse' | 'text'
 

@@ -13,7 +13,7 @@ import {
   type SceneDocument,
   type TextLayoutCache,
   type Vec2,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 import { viewMatrix, type Camera, type Viewport } from './camera.js'
 import type { TextEditing } from './Renderer.js'
 

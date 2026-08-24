@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { FontMetrics } from '@figma-canvas/document'
+import type { FontMetrics } from '@canvas/document'
 
 import { GlyphAtlas, createAtlasBindGroupLayout } from './GlyphAtlas.js'
 import { createStubDevice } from './testing/stubDevice.js'

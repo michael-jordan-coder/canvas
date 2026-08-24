@@ -1,4 +1,4 @@
-import type { FontMetrics } from '@figma-canvas/document'
+import type { FontMetrics } from '@canvas/document'
 
 import atlasImage from '../font/inter-regular.png?url'
 import atlasData from '../font/inter-regular.json?url'

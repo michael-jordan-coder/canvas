@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SceneDocument, createFrame, createRectangle, translation } from '@figma-canvas/document'
+import { SceneDocument, createFrame, createRectangle, translation } from '@canvas/document'
 import { duplicateNodes } from './duplicate'
 
 function scene() {

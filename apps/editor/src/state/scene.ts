@@ -10,7 +10,7 @@ import {
   uniformCornerRadii,
   type NodeId,
   type SceneNode,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 import { relayoutAll } from './autoLayout'
 import { useUI } from './uiStore'
 import { readSaved, startAutosave } from './persistence'

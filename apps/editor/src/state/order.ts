@@ -1,4 +1,4 @@
-import type { NodeId, SceneDocument } from '@figma-canvas/document'
+import type { NodeId, SceneDocument } from '@canvas/document'
 import { relayout } from './autoLayout'
 
 /**

@@ -1,4 +1,4 @@
-import { DEFAULT_PAGE_BACKGROUND, type SceneDocument, type TextLayoutCache } from '@figma-canvas/document'
+import { DEFAULT_PAGE_BACKGROUND, type SceneDocument, type TextLayoutCache } from '@canvas/document'
 import { clipMatrix, pixelsToClip, type Viewport } from '../camera.js'
 import type { Renderer, RendererInit, RendererStats, ViewState } from '../Renderer.js'
 import { createGPUSurface, onDeviceLost, releaseGPUSurface, type GPUSurface } from './device.js'

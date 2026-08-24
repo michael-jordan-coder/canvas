@@ -8,7 +8,7 @@ import {
   scaling,
   translation,
   type Rect,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 import {
   anchorFor,
   axesFor,

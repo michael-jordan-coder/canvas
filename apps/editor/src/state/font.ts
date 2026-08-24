@@ -1,5 +1,5 @@
-import { TextLayoutCache, type FontMetrics, type Size, type TextNode } from '@figma-canvas/document'
-import { loadFontMetrics } from '@figma-canvas/renderer'
+import { TextLayoutCache, type FontMetrics, type Size, type TextNode } from '@canvas/document'
+import { loadFontMetrics } from '@canvas/renderer'
 import { relayout, relayoutAll, setTextMeasurer } from './autoLayout'
 import { scene } from './scene'
 

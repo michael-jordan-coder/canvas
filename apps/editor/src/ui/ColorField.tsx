@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react'
-import { fromHex, parseHex, toHex, type RGBA } from '@figma-canvas/document'
+import { fromHex, parseHex, toHex, type RGBA } from '@canvas/document'
 import { scene } from '../state/scene'
 import styles from './ColorField.module.css'
 

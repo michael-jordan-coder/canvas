@@ -26,7 +26,7 @@ import {
   type TextLayoutCache,
   type TextNode,
   type Vec2,
-} from '@figma-canvas/document'
+} from '@canvas/document'
 import {
   grabAt,
   resizeHandlesFor,
@@ -37,7 +37,7 @@ import {
   type GrabId,
   type HandleId,
   type Viewport,
-} from '@figma-canvas/renderer'
+} from '@canvas/renderer'
 import { relayout } from '../state/autoLayout'
 import { duplicateNodes } from '../state/duplicate'
 import {
