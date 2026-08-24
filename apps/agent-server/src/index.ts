@@ -18,7 +18,9 @@ import { SYSTEM_PROMPT } from './prompt.ts'
 /** The screenshot waits on two animation frames in the browser, so it gets headroom. */
 const COMMAND_TIMEOUT_MS = 30_000
 
-const wss = new WebSocketServer({ port: AGENT_PORT })
+// Loopback only. The editor connects from this machine, and an open bind would let anyone
+// on the LAN drive the agent: their prompts, this account's subscription, this document.
+const wss = new WebSocketServer({ port: AGENT_PORT, host: '127.0.0.1' })
 
 /**
  * One editor at a time. A second tab taking over is deliberate: the alternative is two
