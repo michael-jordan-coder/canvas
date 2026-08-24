@@ -103,6 +103,24 @@ export function ChevronIcon(props: IconProps): ReactElement {
   )
 }
 
+/*
+ * Collapse all: two chevrons folding toward the line between them.
+ *
+ * Not the row chevron repeated. That one points the way a row will open and is rotated by
+ * CSS to say which state it is in, so reusing it here would read as one row's control that
+ * had drifted into the header.
+ */
+export function CollapseAllIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <g>
+        <path {...stroke} d="M4.5 3 8 6.5 11.5 3" />
+        <path {...stroke} d="M4.5 13 8 9.5 11.5 13" />
+      </g>
+    </Svg>
+  )
+}
+
 export function LockedIcon(props: IconProps): ReactElement {
   return (
     <Svg {...props}>

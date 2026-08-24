@@ -31,6 +31,7 @@ interface UIState {
   toggleInSelection: (id: NodeId) => void
   clearSelection: () => void
   setCollapsed: (id: NodeId, collapsed: boolean) => void
+  collapseAll: (ids: Iterable<NodeId>) => void
   beginTextEdit: (id: NodeId, caret: number, anchor?: number) => void
   setTextCaret: (caret: number, anchor: number) => void
   setCaretVisible: (caretVisible: boolean) => void
@@ -72,6 +73,12 @@ export const useUI = create<UIState>()((set) => ({
       return { editing: { ...state.editing, caretVisible } }
     }),
   endTextEdit: () => set((state) => (state.editing ? { editing: null } : state)),
+  /*
+   * The ids come from the caller because the store has no document to walk. It holds which
+   * rows are folded and nothing about what a row is, which is what keeps it view state
+   * rather than a second, lagging copy of the tree.
+   */
+  collapseAll: (ids) => set({ collapsed: new Set(ids) }),
   setCollapsed: (id, collapsed) =>
     set((state) => {
       if (state.collapsed.has(id) === collapsed) return state

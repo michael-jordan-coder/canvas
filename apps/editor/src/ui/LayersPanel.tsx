@@ -6,6 +6,7 @@ import { useUI } from '../state/uiStore'
 import { deepSelectionTarget } from '../state/selectionTarget'
 import {
   ChevronIcon,
+  CollapseAllIcon,
   EllipseIcon,
   FrameIcon,
   HiddenIcon,
@@ -53,7 +54,28 @@ export function LayersPanel(): ReactElement {
   const selection = useUI((state) => state.selection)
   const collapsed = useUI((state) => state.collapsed)
   const setCollapsed = useUI((state) => state.setCollapsed)
+  const collapseAll = useUI((state) => state.collapseAll)
   const treeRef = useRef<HTMLDivElement>(null)
+
+  /*
+   * Folds every row that has anything under it.
+   *
+   * Walked at the click rather than tracked, because the alternative is a second copy of
+   * the tree's shape kept in step with the document, and this runs once on a press over a
+   * document small enough to fit in a panel.
+   *
+   * The root is skipped: it draws no row, so folding it would put an id in the set that
+   * nothing can ever unfold.
+   */
+  const collapseEverything = (): void => {
+    const foldable: NodeId[] = []
+    for (const node of scene.walk()) {
+      if (node.id !== scene.rootId && scene.getChildren(node.id).length > 0) {
+        foldable.push(node.id)
+      }
+    }
+    collapseAll(foldable)
+  }
 
   /*
    * Opens every folded ancestor of the selection.
@@ -97,7 +119,18 @@ export function LayersPanel(): ReactElement {
         storageKey="figma-canvas:layers-width"
         label="Resize layers panel"
       />
-      <header className={styles.header}>Layers</header>
+      <header className={styles.header}>
+        <span className={styles.title}>Layers</span>
+        <button
+          type="button"
+          className={styles.headerButton}
+          title="Collapse all layers"
+          aria-label="Collapse all layers"
+          onClick={collapseEverything}
+        >
+          <CollapseAllIcon />
+        </button>
+      </header>
       <div className={styles.tree} ref={treeRef}>
         {roots.length === 0 ? (
           <div className={styles.empty}>No layers</div>

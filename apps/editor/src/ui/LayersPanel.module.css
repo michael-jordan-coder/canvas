@@ -12,9 +12,45 @@
   display: flex;
   align-items: center;
   height: 32px;
-  padding: 0 var(--space-3);
+  /* The same 6px on the right that .tree takes as a margin, and for the same reason: the
+     resize strip covers that edge at a higher z-index, so a button any closer would be
+     grabbed by the resizer instead of pressed. */
+  padding: 0 6px 0 var(--space-3);
   color: var(--text-secondary);
   border-bottom: 1px solid var(--line);
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The same shape as the section buttons in the properties panel, at the row height the
+   layer rows use so the two panels' headers read as one family. */
+.headerButton {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background var(--duration) var(--ease),
+    color var(--duration) var(--ease);
+}
+
+.headerButton:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.headerButton:active {
+  background: var(--pressed);
 }
 
 .tree {

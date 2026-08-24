@@ -388,6 +388,9 @@ Figma's selection model, replacing the deepest-node-wins policy the editor start
       world points still across four kinds of resize at three zooms.
 - [x] Selecting reveals the node in the layers panel: folded ancestors open and the row
       scrolls into view. `apps/editor/src/ui/LayersPanel.tsx`
+- [x] A collapse-all icon button opposite the Layers label, folding every row that has
+      children. New `collapseAll` in `uiStore` taking the ids, since the store has no
+      document to walk, and a new `CollapseAllIcon`. `apps/editor/src/ui/LayersPanel.tsx`
 
 ## Drag slop
 
