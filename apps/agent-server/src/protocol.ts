@@ -231,8 +231,14 @@ export type ServerMessage =
    * `--watch` and its session goes with it, so a transcript the editor restored can be one
    * the model no longer remembers, and the editor says so rather than letting the person
    * refer back to something that is no longer context.
+   *
+   * `token` is the handshake's other half. `origin.ts` lets this server refuse a page, and the
+   * URL token lets it refuse a client without the secret; this echoes the same secret back so
+   * the editor can refuse a server without it, which is a rogue process squatting on the port
+   * while the real sidecar is down. The editor holds nothing back and runs no command until
+   * this matches the token it was handed. See `token.ts` for what that fence is and is not.
    */
-  | { type: 'hello'; busy: boolean; session: boolean }
+  | { type: 'hello'; busy: boolean; session: boolean; token: string }
   | { type: 'turn_start' }
   | { type: 'assistant'; text: string }
   | { type: 'thinking'; text: string }

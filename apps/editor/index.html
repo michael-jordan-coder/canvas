@@ -2,6 +2,20 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <!--
+      The network the page may reach, which is the fence around the code worker's exfiltration
+      route: same origin for the atlas and its own assets, ws://localhost:5174 for the agent
+      sidecar, and ws://localhost:5173 for Vite's HMR socket in dev (unreachable and so inert
+      in a built deploy, which lets one policy serve both). connect-src is the directive that
+      matters here; script-src is left unset on purpose, because plugin-react injects an inline
+      Fast Refresh preamble in dev that a strict script-src would break, and the worker egress
+      is closed in the worker itself (codeWorker) rather than leaned on here, since a worker's
+      requests answer to its own policy, not this document's meta.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="connect-src 'self' ws://localhost:5174 ws://localhost:5173; object-src 'none'; base-uri 'self'"
+    />
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
     <title>canvas</title>
   </head>

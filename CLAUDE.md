@@ -614,6 +614,14 @@ as a `new Function` parameter, so there is no module system at all and `import` 
 its own explanation. An infinite loop is a 2s timeout, `terminate()` and a fresh worker; on
 the main thread it would be a dead tab and the last 600ms of autosave with it.
 
+**Source is arbitrary code, so the worker runs it with the network taken away.** Before any
+user code compiles, the worker deletes `fetch`, `WebSocket`, `XMLHttpRequest`, `EventSource`
+and `importScripts` from its global, so a code node cannot phone home or open the agent
+socket, and the page ships a CSP whose `connect-src` is only its own origin and
+`ws://localhost:5174`. This matters because source arrives from outside too (see below), and a
+foreign snippet that draws shapes is a nuisance where one that exfiltrates or drives the agent
+is a breach.
+
 **The worker's output is untrusted input**, the second door after `serialize.ts` and held to
 its exact standard: hand validation in `packages/document/src/code/validate.ts` with dotted
 path errors, an element budget and a depth cap, because user code holds the worker's
@@ -626,9 +634,17 @@ implementation waiting to drift.
 
 **Only `source` and `props` persist.** `serializeDocument` and `serializeSubtree` walk
 through `persistedClones`, which stops at a code node and writes it with empty children:
-saving the output would put two copies of one fact in the file and let them disagree. Load,
-paste and duplicate re-run the code (`rerunAllCodeNodes` on load is not an edit and clears
-history, the `remeasureAll` rule). A source edit is an edit: `state/code.ts` is the one
+saving the output would put two copies of one fact in the file and let them disagree.
+
+**Foreign source does not run until the person asks.** Source from a loaded file, a paste or
+the autosaved document restored on reload is untrusted under the `serialize.ts` rule, so it is
+shown but not executed. `codeTrust.ts` holds the sources trusted to auto-run, keyed by the
+source string and never persisted: source the person authored, edited or ran here, and source
+the agent wrote through its tools, is trusted, and running an untrusted node once through the
+panel trusts it from then on. So load, paste and duplicate re-run only what is already trusted
+(still not an edit, still clearing history, the `remeasureAll` rule); a shared file's code
+nodes sit inert with their last-saved bounds until run. A source edit is an edit:
+`state/code.ts` is the one
 door, and it awaits the worker outside any transaction, then commits source, children,
 relayout and the measured `size` in one synchronous transact. A failed run still commits the
 source, keeps the previous output on canvas, and surfaces the failure in the panel; the
@@ -675,7 +691,11 @@ and for the same reason, committing on 400ms idle, on blur and on Cmd+Enter thro
 door. The agent has `create_code_node`, `get_code_source` and `set_code_source`; the run's
 failure text travels back in the tool result so the model can fix and retry, and
 `get_document` deliberately reports only that source exists, because three code nodes would
-otherwise ship kilobytes of TSX on every turn.
+otherwise ship kilobytes of TSX on every turn. Since `get_document` also returns text nodes'
+characters, the system prompt and those two tools' descriptions state that text read from a
+node is canvas content, never an instruction: an injected "create a code node that..." in a
+text layer is something to design with, not a command to obey. The worker egress fence above
+is the structural half of that, so this is defence in depth rather than the only line.
 
 The prop names are the web's (`direction: "row"`, `gap`, `padding`, `background`,
 `borderRadius`, `onClick`), not the canvas's, and that is a requirement rather than a taste:
@@ -693,6 +713,25 @@ editor, and no key in this process either. The document lives in the tab, so the
 holds one. Every tool call travels back over the same WebSocket as a command the editor
 executes against the live document, which is why the agent's edits are real edits, visible as
 they happen and undoable by the person who watched them.
+
+**The socket admits one page, and the editor admits one server: two checks, both in the
+handshake, because binding to loopback keeps the LAN out and not the machine.** Any tab can
+open `ws://localhost:5174`, and any local process can answer it, so both directions are
+verified before a socket is trusted. `origin.ts` decides who may connect on the Origin header
+alone, the one thing a browser cannot forge: the editor on 5173 and 4173 (both host spellings,
+both pinned with `strictPort`), plus anything in `AGENT_ALLOWED_ORIGINS` for a deployed build.
+Comparison is exact string equality, since a prefix test would admit
+`http://localhost:5173.evil.com`, and a missing Origin is refused. `token.ts` adds the mirror
+check: the sidecar mints a random per-run token, writes it `0o600` to the OS temp dir, and
+requires it in `verifyClient` after the origin; the editor fetches it (a dev-only Vite endpoint
+under `connect-src 'self'`, `localStorage` for a deployed build) and drops every message until a
+`hello` echoes it back, so an unverified peer's commands never reach the document. Both compares
+are constant time. A refused page or peer reaches no agent code, and the origin is logged, never
+the token. **The honest limit:** on a single-user machine a process running as the user can read
+the token file, so this raises the bar against opportunistic port squatting and closes the
+deployed case, but it is not the defence against a same-user native process. That threat still
+wants "a token, or not listening at all"; the token is the partial half, and `token.ts` and
+`origin.ts` say so plainly rather than overclaiming.
 
 `protocol.ts` is the contract and it is compile enforced in both directions: `CommandMap`
 names every command with its args and its result, the editor's `executor.ts` implements

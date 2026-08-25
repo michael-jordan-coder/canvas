@@ -1,5 +1,6 @@
 import { AGENT_PORT } from '@canvas/agent-server/protocol'
 import type { ClientMessage, ServerMessage } from '@canvas/agent-server/protocol'
+import { TOKEN_QUERY_KEY } from '@canvas/agent-server/tokenFile'
 import { scene } from '../state/scene'
 import { isWorking, useAgent } from './agentStore'
 import { turnEndItem } from './turnEnd'
@@ -7,6 +8,7 @@ import { clearSavedTranscript } from './chatStorage'
 import { reconnectDelay } from './reconnect'
 import { humanizeCommand, toolSummary } from './toolSummary'
 import { executeCommand } from './executor'
+import { loadAgentToken, tokensEqual } from './agentToken'
 
 /**
  * The editor's end of the bridge: one WebSocket to the agent server, reconnecting quietly
@@ -24,6 +26,22 @@ import { executeCommand } from './executor'
 
 let socket: WebSocket | null = null
 let turnOpen = false
+/**
+ * Whether the peer on the other end has proved it is the sidecar, by echoing the token this
+ * editor holds in its `hello`. It starts false on every connection and gates command
+ * execution: nothing the server sends runs against the document until this is true. The real
+ * sidecar sends `hello` first, so it flips before any command arrives; a process squatting on
+ * the port that cannot echo the token never flips it, and its commands are dropped.
+ */
+let verified = false
+/** The token this connection was opened with, compared against the one `hello` echoes. */
+let currentToken: string | null = null
+/**
+ * Whether this page has already said it could not verify the server. Once is the right number,
+ * the way the stale-transcript notice is: a rogue peer left on the port is reconnected to on
+ * the backoff, and a notice on every cycle would bury everything else.
+ */
+let verifyFailNoticed = false
 /**
  * Whether another tab took the editor. It suppresses the reconnect that would otherwise
  * take it straight back, so the two tabs hand over once instead of trading it forever.
@@ -78,6 +96,24 @@ async function runCommand(id: number, name: string, args: unknown): Promise<void
 
 function onMessage(message: ServerMessage): void {
   const agent = useAgent.getState()
+  if (message.type === 'hello') {
+    // The server proves it holds the token before anything it says is acted on. A peer that
+    // cannot echo the token this editor was handed is not the sidecar, whatever it claims: the
+    // socket is dropped, and `onclose` takes it offline and schedules the retry.
+    if (!tokensEqual(message.token, currentToken)) {
+      if (!verifyFailNoticed) {
+        verifyFailNoticed = true
+        agent.append('notice', 'Could not verify the assistant server, so it is not being used.')
+      }
+      socket?.close()
+      return
+    }
+    verified = true
+  } else if (!verified) {
+    // Nothing runs before the handshake completes. The real sidecar sends `hello` first, so
+    // this only ever drops a message from a peer that skipped proving itself.
+    return
+  }
   switch (message.type) {
     case 'hello':
       if (pendingReset) {
@@ -145,15 +181,44 @@ export function createAgentConnection(): () => void {
   /** How many attempts have failed in a row, which is what the backoff grows with. */
   let attempts = 0
 
-  const connect = (): void => {
+  /**
+   * Schedules the next attempt on the backoff. Shared by the socket closing and the case where
+   * no token is available to open one with, so both roads back are the same countdown.
+   */
+  const scheduleReconnect = (): void => {
+    if (disposed) return
+    const delay = reconnectDelay(attempts)
+    attempts += 1
+    timer = window.setTimeout(() => void connect(), delay)
+    // The panel counts down from this rather than showing a spinner that means nothing:
+    // an offline state that says when it will try again is a state, not a dead end.
+    useAgent.getState().setNextAttemptAt(Date.now() + delay)
+  }
+
+  const connect = async (): Promise<void> => {
     if (disposed) return
     window.clearTimeout(timer)
     displaced = false
+    verified = false
     const agent = useAgent.getState()
     agent.setStatus('connecting')
     agent.setNextAttemptAt(null)
 
-    const ws = new WebSocket(`ws://localhost:${AGENT_PORT}`)
+    // Fetched fresh each attempt, not cached: the sidecar mints a new token every restart, so a
+    // token held from a previous connection would fail the very check it is meant to pass.
+    const token = await loadAgentToken()
+    if (disposed || socket !== null) return
+    if (token === null) {
+      // No token, so the sidecar cannot be told from a squatter, so the editor does not connect.
+      // In dev this clears itself the moment the sidecar has written its token; on a deployed
+      // host with none it reads as offline, which is the honest state.
+      agent.setStatus('offline')
+      scheduleReconnect()
+      return
+    }
+    currentToken = token
+
+    const ws = new WebSocket(`ws://localhost:${AGENT_PORT}/?${TOKEN_QUERY_KEY}=${encodeURIComponent(token)}`)
     socket = ws
 
     ws.onopen = () => {
@@ -179,20 +244,14 @@ export function createAgentConnection(): () => void {
       // server going away, and there is nothing to count down to.
       if (displaced) return
       state.setStatus('offline')
-      if (disposed) return
-      const delay = reconnectDelay(attempts)
-      attempts += 1
-      timer = window.setTimeout(connect, delay)
-      // The panel counts down from this rather than showing a spinner that means nothing:
-      // an offline state that says when it will try again is a state, not a dead end.
-      state.setNextAttemptAt(Date.now() + delay)
+      scheduleReconnect()
     }
     // The close handler fires after an error too, so this only silences the console.
     ws.onerror = () => {}
   }
 
-  connectNow = connect
-  connect()
+  connectNow = () => void connect()
+  void connect()
 
   return () => {
     disposed = true

@@ -19,10 +19,14 @@ import {
 } from '@canvas/document'
 import { CodeWorkerClient } from '../code/workerClient'
 import { relayout } from './autoLayout'
+import { isCodeSourceTrusted, trustCodeSource } from './codeTrust'
 import { fontMetrics, textLayouts } from './font'
 import { scene } from './scene'
 import { endEditing } from './textEditing'
 import { useUI } from './uiStore'
+
+// The panel asks this to decide whether to offer Run instead of auto-running a loaded node.
+export { isCodeSourceTrusted } from './codeTrust'
 
 /**
  * The one door for everything that runs a code node, the same door `updateText` is for
@@ -186,6 +190,8 @@ async function execute(
 export function updateCodeSource(id: NodeId, source: string): void {
   const node = scene.getNode(id)
   if (node?.type !== 'code' || node.source === source) return
+  // The person typed this here, so it is theirs to run from now on.
+  trustCodeSource(source)
   void execute(id, source, node.props, 'static', true, () => {
     scene.update<CodeNode>(id, { source })
   })
@@ -194,6 +200,12 @@ export function updateCodeSource(id: NodeId, source: string): void {
 export function updateCodeProps(id: NodeId, props: Record<string, JsonValue>): void {
   const node = scene.getNode(id)
   if (node?.type !== 'code') return
+  // Editing props is not authoring the source, so it must not launder an untrusted node into
+  // running. The props are written either way; running waits until the source itself is run.
+  if (!isCodeSourceTrusted(node.source)) {
+    scene.transact(() => scene.update<CodeNode>(id, { props }))
+    return
+  }
   void execute(id, node.source, props, 'static', true, () => {
     scene.update<CodeNode>(id, { props })
   })
@@ -207,6 +219,9 @@ export function updateCodeProps(id: NodeId, props: Record<string, JsonValue>): v
 export async function runCodeNodeNow(id: NodeId): Promise<string | null> {
   const node = scene.getNode(id)
   if (node?.type !== 'code') return `${id} is not a code node`
+  // The one deliberate "run this" door: the agent's tool and the panel's Run affordance for a
+  // node loaded from a file both arrive here, and asking for a run is the consent that trusts it.
+  trustCodeSource(node.source)
   const ok = await execute(id, node.source, node.props, 'static', true)
   return ok ? null : (useCodeStatus.getState().errors.get(id) ?? 'the run failed')
 }
@@ -220,24 +235,36 @@ export async function setCodeSourceNow(
   if (node?.type !== 'code') return `${id} is not a code node`
   const source = changes.source ?? node.source
   const props = changes.props ?? node.props
+  // The agent wrote this source, so it runs on the same footing as one the person typed.
+  trustCodeSource(source)
   const ok = await execute(id, source, props, 'static', true, () => {
     scene.update<CodeNode>(id, { source, props })
   })
   return ok ? null : (useCodeStatus.getState().errors.get(id) ?? 'the run failed')
 }
 
-/** Re-runs from what the document already holds: paste, duplicate, agent edits. */
+/**
+ * Re-runs from what the document already holds: paste, duplicate, insert. It runs only source
+ * this session already trusts, because paste and duplicate can carry source from another tab
+ * or app that the person has not chosen to run. Insert and the agent trust their source before
+ * they reach here, so their nodes still run; a foreign pasted node stays unexecuted, showing
+ * its source, until the person runs it.
+ */
 export function rerunCodeNode(id: NodeId): void {
   const node = scene.getNode(id)
   if (node?.type !== 'code') return
+  if (!isCodeSourceTrusted(node.source)) return
   void execute(id, node.source, node.props, 'static', true)
 }
 
 /**
  * After a paste or a duplicate: the copy arrived with a source and no children, because the
- * clipboard strips generated output, so anything code-shaped in the new subtrees runs now.
- * The regeneration is its own history step after the paste's; undoing a paste therefore
- * takes two steps when it contained a code node, which is accepted and noted in TASKS.md.
+ * clipboard strips generated output. Anything code-shaped in the new subtrees runs now only
+ * if this session already trusts its source (a duplicate of a node authored here carries the
+ * trust; a paste from another tab or app does not), so pasted foreign code stays unexecuted
+ * until the person runs it. Regeneration is its own history step after the paste's; undoing a
+ * paste therefore takes two steps when it contained a code node it ran, accepted and noted in
+ * TASKS.md.
  */
 export function rerunCodeNodesIn(roots: readonly NodeId[]): void {
   for (const rootId of roots) {
@@ -248,8 +275,12 @@ export function rerunCodeNodesIn(roots: readonly NodeId[]): void {
 }
 
 /**
- * The load path: every code node in the file runs once, and none of it is an edit, so
- * history clears when the last one lands. The `remeasureAll` rule, applied to code.
+ * The load path: opening a file or restoring the autosaved document on reload. Only code
+ * nodes whose source this session already trusts run; the rest stay unexecuted behind their
+ * source, because a saved or shared document is untrusted input and running it on open is the
+ * whole vulnerability this closes. A fresh session trusts nothing, so a reopened document runs
+ * nothing until the person runs each node. None of this is an edit, so history still clears
+ * when the runs settle, the `remeasureAll` rule applied to code.
  */
 export function rerunAllCodeNodes(): void {
   const ids: NodeId[] = []
@@ -271,6 +302,7 @@ export function rerunAllCodeNodes(): void {
     ids.map((id) => {
       const node = scene.getNode(id)
       if (node?.type !== 'code') return Promise.resolve(false)
+      if (!isCodeSourceTrusted(node.source)) return Promise.resolve(false)
       return execute(id, node.source, node.props, 'static', true)
     }),
   ).then(() => {
@@ -317,6 +349,8 @@ export function insertCodeNode(): void {
     x = Math.max(x, child.transform.tx + child.size.width + 40)
   }
   const node = createCode({ source: STARTER_SOURCE, transform: translation(x, 60) })
+  // Authored here, so it runs here.
+  trustCodeSource(STARTER_SOURCE)
   scene.transact(() => {
     scene.insert(node)
     // In the step, not after it: the step's "after" selection is captured when it commits,
@@ -366,6 +400,9 @@ export function beginPlay(id: NodeId): void {
   if (useUI.getState().play === id) return
   endPlay()
   endEditing()
+  // Pressing Play on a node is an explicit "run this", so it consents the same way the Run
+  // affordance does; the worker has no network reach either way (see codeWorker).
+  trustCodeSource(node.source)
   generation += 1
   scene.beginHistoryGroup()
   useUI.getState().setPlay(id)

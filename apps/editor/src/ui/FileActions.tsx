@@ -26,8 +26,10 @@ export function FileActions(): ReactElement {
     try {
       const parsed = fromJSON(await file.text())
       scene.load(parsed.root, parsed.nodes)
-      // The file carries no generated children, only sources; running them is part of
-      // opening it, and not an edit, which rerunAllCodeNodes itself accounts for.
+      // The file carries no generated children, only sources. A file is untrusted input, so
+      // rerunAllCodeNodes runs only sources this session already trusts and leaves the rest
+      // showing their source until the person runs them; opening a file is not an edit either,
+      // which it also accounts for.
       rerunAllCodeNodes()
       useUI.getState().clearSelection()
       setError(null)

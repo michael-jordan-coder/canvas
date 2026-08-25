@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./protocol": "./src/protocol.ts"
+    "./protocol": "./src/protocol.ts",
+    "./tokenFile": "./src/tokenFile.ts"
   },
   "scripts": {
     "dev": "node --watch src/index.ts",

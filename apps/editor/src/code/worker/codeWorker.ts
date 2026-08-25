@@ -29,6 +29,42 @@ interface NodeSession {
   rerenderQueued: boolean
 }
 
+/**
+ * Take the network away from this thread before a single line of user code compiles.
+ *
+ * The worker exists to run untrusted TypeScript, and left alone it can reach the network as
+ * freely as the page: a code node could `fetch` a canvas out to a server, or open
+ * `ws://localhost:5174` and drive the agent, which admits this origin. None of that is
+ * anything a code node is meant to do, so the capabilities are removed rather than policed.
+ *
+ * The methods live on the WorkerGlobalScope prototype (the WindowOrWorkerGlobalScope mixin)
+ * and the constructors on `self` itself, so shadowing `self.fetch` alone would leave the real
+ * one reachable up the prototype chain. Each name is deleted wherever it sits on the chain and
+ * then pinned to `undefined` as an own property, so a plain reference reads as missing and a
+ * call throws. This runs once at module load, which is before any `run` message can arrive.
+ */
+function removeNetworkEgress(): void {
+  const names = ['fetch', 'WebSocket', 'XMLHttpRequest', 'EventSource', 'importScripts']
+  for (const name of names) {
+    // The chain walk needs to index arbitrary names off each prototype; `unknown`-valued record
+    // is the honest type for "a global object whose members we are erasing".
+    let level: object | null = self as object
+    while (level) {
+      if (Object.prototype.hasOwnProperty.call(level, name)) {
+        try {
+          delete (level as Record<string, unknown>)[name]
+        } catch {
+          // A non-configurable slot in some engine: the own-property shadow below still hides it.
+        }
+      }
+      level = Object.getPrototypeOf(level) as object | null
+    }
+    ;(self as unknown as Record<string, unknown>)[name] = undefined
+  }
+}
+
+removeNetworkEgress()
+
 const sessions = new Map<string, NodeSession>()
 
 function post(message: CodeWorkerResponse): void {

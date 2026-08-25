@@ -1,3 +1,4 @@
+import type { IncomingMessage } from 'node:http'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { WebSocketServer, WebSocket } from 'ws'
 import {
@@ -10,6 +11,8 @@ import {
 import { createCanvasMcpServer } from './tools.ts'
 import { SYSTEM_PROMPT } from './prompt.ts'
 import { resultReason } from './turnEnd.ts'
+import { allowedOrigins, isOriginAllowed } from './origin.ts'
+import { generateToken, tokenFromUrl, tokensMatch, writeTokenFile } from './token.ts'
 
 /**
  * The agent sidecar: Claude with hands on the canvas.
@@ -25,9 +28,41 @@ import { resultReason } from './turnEnd.ts'
 /** Generous, because a command runs behind whatever the browser is already doing. */
 const COMMAND_TIMEOUT_MS = 30_000
 
+const ALLOWED_ORIGINS = allowedOrigins(process.env.AGENT_ALLOWED_ORIGINS)
+
+// Minted once per run and written where the editor's delivery path can read it. The value is
+// never logged, only the path is: the file is the one thing here worth not writing down twice.
+const SESSION_TOKEN = generateToken()
+const TOKEN_FILE = writeTokenFile(SESSION_TOKEN)
+
 // Loopback only. The editor connects from this machine, and an open bind would let anyone
 // on the LAN drive the agent: their prompts, this account's subscription, this document.
-const wss = new WebSocketServer({ port: AGENT_PORT, host: '127.0.0.1' })
+// The bind is half of it. A page in any tab can reach loopback too, so `origin.ts` decides
+// which page may, and a native process that spoofs the origin is turned away by the token it
+// cannot present. Both refusals happen in the handshake: nothing below this line, and no
+// agent code at all, ever sees a socket that failed either check.
+const wss = new WebSocketServer({
+  port: AGENT_PORT,
+  host: '127.0.0.1',
+  // Annotated because `verifyClient` is a union of a sync and an async signature, and a
+  // union infers nothing for the parameter.
+  verifyClient: ({ req }: { req: IncomingMessage }) => {
+    const origin = req.headers.origin
+    if (!isOriginAllowed(origin, ALLOWED_ORIGINS)) {
+      // Named, because the one failure this produces in normal use is an editor served from
+      // an origin nobody has listed, and a silent handshake failure says nothing about why.
+      console.warn(`agent server refused a connection from origin ${origin ?? '(none)'}`)
+      return false
+    }
+    if (!tokensMatch(tokenFromUrl(req.url), SESSION_TOKEN)) {
+      // The origin, never the token: the value is the one thing here worth not logging, and a
+      // client that reached the right origin without the secret is the case worth naming.
+      console.warn(`agent server refused a connection from origin ${origin} without a valid token`)
+      return false
+    }
+    return true
+  },
+})
 
 /**
  * One editor at a time. A second tab taking over is deliberate: the alternative is two
@@ -194,7 +229,10 @@ wss.on('connection', (socket) => {
     displaced.close()
   }
   editor = socket
-  send({ type: 'hello', busy, session: sessionId !== undefined })
+  // The token rides back so the editor can prove this is the sidecar and not a squatter. A
+  // client only reaches this line by presenting the token in `verifyClient`, so it already
+  // holds what is echoed: nothing new is handed out here.
+  send({ type: 'hello', busy, session: sessionId !== undefined, token: SESSION_TOKEN })
 
   socket.on('message', (data) => {
     onMessage(typeof data === 'string' ? data : data.toString())
@@ -210,3 +248,4 @@ wss.on('connection', (socket) => {
 })
 
 console.log(`agent server listening on ws://localhost:${AGENT_PORT}`)
+console.log(`agent token written to ${TOKEN_FILE}`)
