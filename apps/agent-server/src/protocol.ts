@@ -198,6 +198,17 @@ export type CommandName = keyof CommandMap
 
 // Messages -------------------------------------------------------------------------------
 
+/** An image the person attached to a chat message, as reference material for the agent. */
+export interface Attachment {
+  /** Base64 without the data-URL prefix, which is what the SDK wants. */
+  base64: string
+  mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
+}
+
+export const MAX_ATTACHMENTS = 4
+/** Bytes, before base64. Comfortably under the 8 MiB the SDK will take per image. */
+export const MAX_ATTACHMENT_BYTES = 5_000_000
+
 export type ServerMessage =
   | { type: 'hello'; busy: boolean }
   | { type: 'turn_start' }
@@ -208,7 +219,7 @@ export type ServerMessage =
   | { type: 'turn_end'; error?: string }
 
 export type ClientMessage =
-  | { type: 'chat'; text: string }
+  | { type: 'chat'; text: string; attachments?: Attachment[] }
   | { type: 'stop' }
   | { type: 'reset' }
   | { type: 'result'; id: number; ok: boolean; value?: unknown; error?: string }

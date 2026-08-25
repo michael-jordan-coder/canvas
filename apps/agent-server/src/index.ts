@@ -1,6 +1,14 @@
-import { query } from '@anthropic-ai/claude-agent-sdk'
+import { query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { WebSocketServer, WebSocket } from 'ws'
-import { AGENT_PORT, type ClientMessage, type CommandName, type ServerMessage } from './protocol.ts'
+import {
+  AGENT_PORT,
+  MAX_ATTACHMENTS,
+  MAX_ATTACHMENT_BYTES,
+  type Attachment,
+  type ClientMessage,
+  type CommandName,
+  type ServerMessage,
+} from './protocol.ts'
 import { createCanvasMcpServer } from './tools.ts'
 import { SYSTEM_PROMPT } from './prompt.ts'
 
@@ -73,14 +81,50 @@ function forward(name: CommandName, args: unknown): Promise<unknown> {
 
 const canvas = createCanvasMcpServer(forward)
 
-async function runChat(text: string): Promise<void> {
+/**
+ * The SDK's structured entry: one user message carrying the images and the text as content
+ * blocks. Images first, then the text, because a model reads the instruction better when
+ * the thing it refers to is already in context.
+ */
+function promptWithImages(text: string, attachments: Attachment[]): AsyncIterable<SDKUserMessage> {
+  async function* stream(): AsyncGenerator<SDKUserMessage> {
+    yield {
+      type: 'user',
+      parent_tool_use_id: null,
+      message: {
+        role: 'user',
+        content: [
+          ...attachments.map((a) => ({
+            type: 'image' as const,
+            source: { type: 'base64' as const, media_type: a.mimeType, data: a.base64 },
+          })),
+          { type: 'text' as const, text },
+        ],
+      },
+    }
+  }
+  return stream()
+}
+
+async function runChat(text: string, attachments?: Attachment[]): Promise<void> {
   busy = true
   send({ type: 'turn_start' })
   let error: string | undefined
 
   try {
+    // The editor enforces both limits too, but the socket is not the editor's alone to
+    // speak on: a malformed message should end as a readable error, not a rejected API call.
+    const images = attachments?.slice(0, MAX_ATTACHMENTS) ?? []
+    for (const image of images) {
+      if (Buffer.from(image.base64, 'base64').length > MAX_ATTACHMENT_BYTES) {
+        throw new Error(
+          `An attached image exceeds ${Math.round(MAX_ATTACHMENT_BYTES / 1_000_000)} MB.`,
+        )
+      }
+    }
+
     const q = query({
-      prompt: text,
+      prompt: images.length > 0 ? promptWithImages(text, images) : text,
       options: {
         ...(sessionId ? { resume: sessionId } : {}),
         systemPrompt: SYSTEM_PROMPT,
@@ -130,7 +174,7 @@ function onMessage(raw: string): void {
     case 'chat': {
       const text = message.text.trim()
       if (!text || busy) return
-      void runChat(text)
+      void runChat(text, message.attachments)
       return
     }
     case 'stop': {

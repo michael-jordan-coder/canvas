@@ -1,5 +1,5 @@
 import { AGENT_PORT } from '@canvas/agent-server/protocol'
-import type { ClientMessage, ServerMessage } from '@canvas/agent-server/protocol'
+import type { Attachment, ClientMessage, ServerMessage } from '@canvas/agent-server/protocol'
 import { scene } from '../state/scene'
 import { useAgent } from './agentStore'
 import { executeCommand } from './executor'
@@ -117,15 +117,20 @@ export function createAgentConnection(): () => void {
   }
 }
 
+/** Back to a data URL for display; the stripped base64 is what goes over the wire. */
+export function toDataUrl(attachment: Attachment): string {
+  return `data:${attachment.mimeType};base64,${attachment.base64}`
+}
+
 /** What the panel calls. Module level so the panel needs no handle threaded through props. */
 export const agentClient = {
-  send(text: string): void {
+  send(text: string, attachments?: Attachment[]): void {
     const agent = useAgent.getState()
     if (agent.status !== 'idle') return
-    agent.append('user', text)
+    agent.append('user', text, attachments?.map(toDataUrl))
     // Optimistic: the server's turn_start confirms it, but the input should lock now.
     agent.setStatus('busy')
-    send({ type: 'chat', text })
+    send({ type: 'chat', text, attachments })
   },
   stop(): void {
     send({ type: 'stop' })

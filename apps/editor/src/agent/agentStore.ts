@@ -11,6 +11,8 @@ export interface ChatItem {
   id: number
   kind: 'user' | 'assistant' | 'thinking' | 'tool' | 'error'
   text: string
+  /** Data URLs, for the thumbnails on a user message. Only ever set on kind 'user'. */
+  images?: string[]
 }
 
 interface AgentState {
@@ -19,7 +21,7 @@ interface AgentState {
   items: ChatItem[]
   setStatus: (status: AgentStatus) => void
   setOpen: (open: boolean) => void
-  append: (kind: ChatItem['kind'], text: string) => void
+  append: (kind: ChatItem['kind'], text: string, images?: string[]) => void
   clear: () => void
 }
 
@@ -31,10 +33,10 @@ export const useAgent = create<AgentState>()((set) => ({
   items: [],
   setStatus: (status) => set({ status }),
   setOpen: (open) => set({ open }),
-  append: (kind, text) =>
+  append: (kind, text, images) =>
     set((state) => {
       nextItemId += 1
-      return { items: [...state.items, { id: nextItemId, kind, text }] }
+      return { items: [...state.items, { id: nextItemId, kind, text, ...(images ? { images } : {}) }] }
     }),
   clear: () => set({ items: [] }),
 }))

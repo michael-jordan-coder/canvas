@@ -422,6 +422,14 @@ export function CloseIcon(props: IconProps): ReactElement {
   )
 }
 
+export function PaperclipIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <path {...stroke} d="M10.5 5.5v4.25a2.5 2.5 0 0 1-5 0V5a2 2 0 0 1 4 0v4.5a1 1 0 0 1-2 0V6" />
+    </Svg>
+  )
+}
+
 export function SendIcon(props: IconProps): ReactElement {
   return (
     <Svg {...props}>
