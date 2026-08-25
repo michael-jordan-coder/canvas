@@ -1,5 +1,5 @@
 import { AGENT_PORT } from '@canvas/agent-server/protocol'
-import type { ClientMessage, ServerMessage } from '@canvas/agent-server/protocol'
+import type { ClientMessage, QuestionAnswer, ServerMessage } from '@canvas/agent-server/protocol'
 import { TOKEN_QUERY_KEY } from '@canvas/agent-server/tokenFile'
 import { scene } from '../state/scene'
 import { isWorking, useAgent } from './agentStore'
@@ -149,8 +149,16 @@ function onMessage(message: ServerMessage): void {
     case 'command':
       void runCommand(message.id, message.name, message.args)
       return
+    case 'ask':
+      // An interactive card in the transcript, not a folded step: the turn is now waiting on
+      // the person, and the answer travels back over `answer`, not as a command result.
+      agent.ask(message.id, message.question)
+      return
     case 'turn_end': {
       closeTurn()
+      // A question still open when the turn ends can no longer be answered to anything, so its
+      // card settles into an unanswered record rather than staying live.
+      agent.clearPendingAsk()
       agent.setStatus('idle')
       // The server sends why, which is the part only it can know; what that reads as is
       // decided here, with the rest of the assistant's copy.
@@ -163,6 +171,7 @@ function onMessage(message: ServerMessage): void {
       // still reach, so the panel says where rather than counting down to nothing.
       displaced = true
       closeTurn()
+      agent.clearPendingAsk()
       agent.setStatus('displaced')
       agent.setNextAttemptAt(null)
       return
@@ -240,6 +249,9 @@ export function createAgentConnection(): () => void {
       socket = null
       closeTurn()
       const state = useAgent.getState()
+      // A pending question cannot be answered to a server that is gone, so its card stops
+      // waiting. The server rejects its side on the same disconnect.
+      state.clearPendingAsk()
       // Displaced keeps its own status: this close is the handover completing, not the
       // server going away, and there is nothing to count down to.
       if (displaced) return
@@ -280,6 +292,15 @@ export const agentClient = {
     // Optimistic: the server's turn_start confirms it, but the input should lock now.
     agent.setStatus('busy')
     return true
+  },
+  /**
+   * Answers the pending question. Writes the choice onto the card at once, so it settles into a
+   * record the moment the person picks, and sends it back to the waiting turn. Only reachable
+   * while a question is pending, which is only ever while the socket is up.
+   */
+  answer(askId: number, answer: QuestionAnswer): void {
+    useAgent.getState().answerQuestion(askId, answer)
+    send({ type: 'answer', id: askId, answer })
   },
   stop(): void {
     const agent = useAgent.getState()

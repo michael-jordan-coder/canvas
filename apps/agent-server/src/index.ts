@@ -3,6 +3,8 @@ import { query } from '@anthropic-ai/claude-agent-sdk'
 import { WebSocketServer, WebSocket } from 'ws'
 import {
   AGENT_PORT,
+  formatAnswer,
+  type AgentQuestion,
   type ClientMessage,
   type CommandName,
   type ServerMessage,
@@ -89,6 +91,18 @@ const pending = new Map<
   { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
 >()
 
+/**
+ * A question waits on a person, not on the editor, so it gets minutes rather than the command
+ * window's seconds. Long enough that a real deliberation never trips it, bounded so a tool that
+ * was forgotten does not pin a turn open forever.
+ */
+const QUESTION_TIMEOUT_MS = 10 * 60_000
+let nextQuestionId = 1
+const pendingQuestions = new Map<
+  number,
+  { resolve: (text: string) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
+>()
+
 function send(message: ServerMessage): void {
   if (editor?.readyState === WebSocket.OPEN) editor.send(JSON.stringify(message))
 }
@@ -100,6 +114,39 @@ function failPending(reason: string): void {
     entry.reject(new Error(reason))
     pending.delete(id)
   }
+}
+
+/**
+ * The same, for questions. Kept separate because their tool call is awaiting a human: a stop
+ * or a lost editor has to unblock it, or the query hangs on a tool that will never answer.
+ */
+function failPendingQuestions(reason: string): void {
+  for (const [id, entry] of pendingQuestions) {
+    clearTimeout(entry.timer)
+    entry.reject(new Error(reason))
+    pendingQuestions.delete(id)
+  }
+}
+
+/**
+ * Puts a question to the editor and resolves with the person's answer as one line. The `ask`
+ * side of the tool: no document command runs, the editor renders a card and answers with
+ * `answer`, and the whole thing is held on the long question timeout.
+ */
+function askQuestion(question: AgentQuestion): Promise<string> {
+  if (editor?.readyState !== WebSocket.OPEN) {
+    return Promise.reject(new Error('The editor is not connected.'))
+  }
+  const id = nextQuestionId
+  nextQuestionId += 1
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingQuestions.delete(id)
+      reject(new Error('The person did not answer in time.'))
+    }, QUESTION_TIMEOUT_MS)
+    pendingQuestions.set(id, { resolve, reject, timer })
+    send({ type: 'ask', id, question })
+  })
 }
 
 function forward(name: CommandName, args: unknown): Promise<unknown> {
@@ -119,7 +166,7 @@ function forward(name: CommandName, args: unknown): Promise<unknown> {
   })
 }
 
-const canvas = createCanvasMcpServer(forward)
+const canvas = createCanvasMcpServer(forward, askQuestion)
 
 async function runChat(text: string): Promise<void> {
   busy = true
@@ -134,6 +181,11 @@ async function runChat(text: string): Promise<void> {
       options: {
         ...(sessionId ? { resume: sessionId } : {}),
         systemPrompt: SYSTEM_PROMPT,
+        // Adaptive so the model decides when and how much to reason, summarised so what streams
+        // back is a readable account rather than the raw scratchpad. The turn loop below already
+        // forwards `thinking` blocks; without this they never arrive, and the panel's thinking
+        // row stays dead code. It is the one line that makes the assistant show its work.
+        thinking: { type: 'adaptive', display: 'summarized' },
         // No built-ins: an agent embedded in an app gets exactly the tools the app defines,
         // not Read/Write/Bash on this machine.
         tools: [],
@@ -196,6 +248,9 @@ function onMessage(raw: string): void {
     }
     case 'stop': {
       if (activeQuery) interrupted = true
+      // Unblock any question the turn is waiting on, or the query hangs interrupting a tool
+      // that is itself waiting on a person who is no longer going to answer.
+      failPendingQuestions('The person stopped the turn.')
       void activeQuery?.interrupt().catch(() => {
         // Interrupting a query that just finished on its own is not a failure.
       })
@@ -212,6 +267,16 @@ function onMessage(raw: string): void {
       clearTimeout(entry.timer)
       if (message.ok) entry.resolve(message.value)
       else entry.reject(new Error(message.error ?? 'The editor rejected the command.'))
+      return
+    }
+    case 'answer': {
+      const entry = pendingQuestions.get(message.id)
+      if (!entry) return
+      pendingQuestions.delete(message.id)
+      clearTimeout(entry.timer)
+      // Formatted through the shared helper, so the tool result reads the same as the record
+      // the editor leaves on the answered card.
+      entry.resolve(formatAnswer(message.answer))
       return
     }
   }
@@ -242,6 +307,7 @@ wss.on('connection', (socket) => {
     if (editor !== socket) return
     editor = null
     failPending('The editor disconnected.')
+    failPendingQuestions('The editor disconnected.')
     // The person closed the tab mid-turn; without them there is nothing to design on.
     void activeQuery?.interrupt().catch(() => {})
   })

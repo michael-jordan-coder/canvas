@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { AgentQuestion, QuestionAnswer } from '@canvas/agent-server/protocol'
 
 /**
  * Chat state for the agent panel. View state in exactly the sense the UI store is: none of
@@ -51,10 +52,24 @@ export interface ChatItem {
    * `tool-error` is a step that failed, and it is deliberately not `error`: it folds with
    * the run of steps it belongs to, because a tool the model will retry is process rather
    * than an answer. `notice` is the panel talking about itself, a stop or a lost connection,
-   * which is neither the person's words nor the model's.
+   * which is neither the person's words nor the model's. `question` is the assistant asking
+   * the person something and waiting on the answer, an interactive card while it is pending
+   * and a record of the choice once it is not.
    */
-  kind: 'user' | 'assistant' | 'thinking' | 'tool' | 'tool-error' | 'error' | 'notice'
+  kind: 'user' | 'assistant' | 'thinking' | 'tool' | 'tool-error' | 'error' | 'notice' | 'question'
+  /**
+   * The message, or for a `question` the question itself, so every existing reader that shows
+   * `text` still shows something sensible and the extra structure below is additive.
+   */
   text: string
+  /**
+   * On a `question` item only. `askId` is the server's id for the question, echoed back in the
+   * answer; `question` is what to render; `answer` is the person's choice once they have made
+   * it, absent while the card is still open.
+   */
+  askId?: number
+  question?: AgentQuestion
+  answer?: QuestionAnswer
 }
 
 interface AgentState {
@@ -73,11 +88,27 @@ interface AgentState {
    * `connection.ts` beside the socket it is about.
    */
   nextAttemptAt: number | null
+  /**
+   * The server id of the question awaiting an answer right now, or null. Held in memory only,
+   * never restored from storage: a question read back from a past session has no live turn to
+   * answer to, so it renders as a record rather than an interactive card. At most one is ever
+   * pending, since the model's turn blocks on it.
+   */
+  pendingAsk: number | null
   setStatus: (status: AgentStatus) => void
   setDraft: (draft: string) => void
   setOpen: (open: boolean) => void
   setNextAttemptAt: (at: number | null) => void
   append: (kind: ChatItem['kind'], text: string) => void
+  /** Append a question card and mark it the one awaiting an answer. */
+  ask: (askId: number, question: AgentQuestion) => void
+  /** Record the person's answer on its card and, if it was the pending one, clear that. */
+  answerQuestion: (askId: number, answer: QuestionAnswer) => void
+  /**
+   * Stop waiting on the pending question without answering it, leaving its card as an
+   * unanswered record. For when the turn ends or the connection drops out from under it.
+   */
+  clearPendingAsk: () => void
   /**
    * Replaces the transcript with a restored one, pushing the id generator past every id it
    * holds. Without that a restored id and a fresh one collide, and two rows in the list end
@@ -99,6 +130,7 @@ export const useAgent = create<AgentState>()((set) => ({
   items: [],
   draft: '',
   nextAttemptAt: null,
+  pendingAsk: null,
   focusToken: 0,
   setStatus: (status) => set((state) => (state.status === status ? state : { status })),
   setDraft: (draft) => set((state) => (state.draft === draft ? state : { draft })),
@@ -110,6 +142,20 @@ export const useAgent = create<AgentState>()((set) => ({
       nextItemId += 1
       return { items: [...state.items, { id: nextItemId, kind, text }] }
     }),
+  ask: (askId, question) =>
+    set((state) => {
+      nextItemId += 1
+      const item: ChatItem = { id: nextItemId, kind: 'question', text: question.question, askId, question }
+      return { items: [...state.items, item], pendingAsk: askId }
+    }),
+  answerQuestion: (askId, answer) =>
+    set((state) => ({
+      items: state.items.map((item) =>
+        item.kind === 'question' && item.askId === askId ? { ...item, answer } : item,
+      ),
+      pendingAsk: state.pendingAsk === askId ? null : state.pendingAsk,
+    })),
+  clearPendingAsk: () => set((state) => (state.pendingAsk === null ? state : { pendingAsk: null })),
   load: (items) =>
     set(() => {
       for (const item of items) nextItemId = Math.max(nextItemId, item.id)

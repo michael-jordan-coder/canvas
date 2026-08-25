@@ -220,6 +220,57 @@ export interface CommandMap {
 
 export type CommandName = keyof CommandMap
 
+// Asking the person -----------------------------------------------------------------------
+
+/**
+ * One offered answer. `description` is optional subtext under the label, the way Claude Code's
+ * question options carry one: "Corporate" reads better with "restrained, lots of whitespace"
+ * beside it, and a bare label is fine when it needs nothing.
+ */
+export interface AgentQuestionOption {
+  label: string
+  description?: string
+}
+
+/**
+ * A question the agent puts to the person mid-turn, the AskUserQuestion pattern.
+ *
+ * It is not a document command: it edits nothing and it blocks on a human rather than on the
+ * editor, so it rides its own `ask`/`answer` pair rather than `command`/`result`, with its own
+ * long timeout. `header` is a short chip label ("Direction", "Tone"); `options` are the 2 to 4
+ * offered answers, and the editor always adds a free-text "Other" beside them. `multiSelect`
+ * lets the person pick several rather than one.
+ */
+export interface AgentQuestion {
+  question: string
+  header: string
+  options: AgentQuestionOption[]
+  multiSelect: boolean
+}
+
+/**
+ * What the person chose. `selected` are the labels they picked (one unless `multiSelect`),
+ * `other` is the free-text answer if they used the Other field. At least one is non-empty;
+ * the editor does not send an empty answer.
+ */
+export interface QuestionAnswer {
+  selected: string[]
+  other?: string
+}
+
+/**
+ * The answer as one line for the model, which is what a tool result is. Selected labels first,
+ * the free-text answer last, joined the way a person would read a list back. Kept here in the
+ * shared contract so the server (the tool result) and the editor (the answered-card record)
+ * say the same thing rather than formatting it twice.
+ */
+export function formatAnswer(answer: QuestionAnswer): string {
+  const parts = [...answer.selected]
+  const other = answer.other?.trim()
+  if (other) parts.push(other)
+  return parts.join(', ')
+}
+
 // Messages -------------------------------------------------------------------------------
 
 /** Why a turn ended. `ok` is the ordinary case and says nothing to the person. */
@@ -249,6 +300,13 @@ export type ServerMessage =
    */
   | { type: 'tool'; name: CommandName; args: unknown }
   | { type: 'command'; id: number; name: CommandName; args: unknown }
+  /**
+   * A question the agent is asking the person, its `answer` awaited before the turn goes on.
+   * Its own message rather than a `command` because it edits no document and blocks on a human:
+   * the editor renders it as an interactive card and answers with `answer`, not `result`, and
+   * the server holds it on a far longer timeout than a document command gets.
+   */
+  | { type: 'ask'; id: number; question: AgentQuestion }
   /**
    * How the turn ended, as a reason rather than as a sentence.
    *
@@ -285,3 +343,5 @@ export type ClientMessage =
   | { type: 'stop' }
   | { type: 'reset' }
   | { type: 'result'; id: number; ok: boolean; value?: unknown; error?: string }
+  /** The person's answer to an `ask`, matched to it by id. The other half of `ask`. */
+  | { type: 'answer'; id: number; answer: QuestionAnswer }

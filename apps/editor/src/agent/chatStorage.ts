@@ -1,3 +1,8 @@
+import type {
+  AgentQuestion,
+  AgentQuestionOption,
+  QuestionAnswer,
+} from '@canvas/agent-server/protocol'
 import { readStored, startDebouncedSave, writeStored } from '../state/localStorage'
 import { useAgent, type ChatItem } from './agentStore'
 
@@ -34,7 +39,45 @@ const KINDS: ReadonlySet<string> = new Set([
   'tool-error',
   'error',
   'notice',
+  'question',
 ])
+
+/**
+ * A question restored from storage, validated by hand like everything else that left the
+ * process. It comes back as a record, never as a live card: the server ids it was answered
+ * against are gone, so `askId` is deliberately not restored. A malformed question drops the
+ * whole item rather than rendering half a card.
+ */
+function parseQuestion(value: unknown): AgentQuestion | null {
+  if (typeof value !== 'object' || value === null) return null
+  const q = value as { question?: unknown; header?: unknown; options?: unknown; multiSelect?: unknown }
+  if (typeof q.question !== 'string' || typeof q.header !== 'string') return null
+  if (typeof q.multiSelect !== 'boolean' || !Array.isArray(q.options)) return null
+  const options: AgentQuestionOption[] = []
+  for (const entry of q.options) {
+    if (typeof entry !== 'object' || entry === null) return null
+    const option = entry as { label?: unknown; description?: unknown }
+    if (typeof option.label !== 'string') return null
+    if (option.description !== undefined && typeof option.description !== 'string') return null
+    options.push(
+      option.description !== undefined
+        ? { label: option.label, description: option.description }
+        : { label: option.label },
+    )
+  }
+  return { question: q.question, header: q.header, multiSelect: q.multiSelect, options }
+}
+
+function parseAnswer(value: unknown): QuestionAnswer | null {
+  if (typeof value !== 'object' || value === null) return null
+  const answer = value as { selected?: unknown; other?: unknown }
+  if (!Array.isArray(answer.selected) || !answer.selected.every((s) => typeof s === 'string')) {
+    return null
+  }
+  if (answer.other !== undefined && typeof answer.other !== 'string') return null
+  const selected = answer.selected as string[]
+  return answer.other !== undefined ? { selected, other: answer.other } : { selected }
+}
 
 /**
  * Validated by hand rather than cast, the `serialize.ts` stance: this is data that left the
@@ -61,6 +104,19 @@ export function parseTranscript(text: string): ChatItem[] {
     if (typeof item.id !== 'number' || !Number.isFinite(item.id)) continue
     if (typeof item.kind !== 'string' || !KINDS.has(item.kind)) continue
     if (typeof item.text !== 'string') continue
+    if (item.kind === 'question') {
+      const source = entry as { question?: unknown; answer?: unknown }
+      const question = parseQuestion(source.question)
+      if (!question) continue
+      const answer = source.answer === undefined ? undefined : parseAnswer(source.answer)
+      // A present-but-malformed answer drops the item rather than showing a question as
+      // unanswered when it was not.
+      if (source.answer !== undefined && answer === null) continue
+      const restored: ChatItem = { id: item.id, kind: 'question', text: item.text, question }
+      if (answer) restored.answer = answer
+      items.push(restored)
+      continue
+    }
     items.push({ id: item.id, kind: item.kind as ChatItem['kind'], text: item.text })
   }
   return items

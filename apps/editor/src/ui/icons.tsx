@@ -453,3 +453,11 @@ export function StopIcon(props: IconProps): ReactElement {
     </Svg>
   )
 }
+
+export function CheckIcon(props: IconProps): ReactElement {
+  return (
+    <Svg {...props}>
+      <path {...stroke} d="M3.5 8.5 6.5 11.5 12.5 4.5" />
+    </Svg>
+  )
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatItem } from './agentStore'
-import { failureCount, isNearBottom, stepsLabel, toRows } from './chatRows'
+import { failureCount, isNearBottom, showsPendingWork, stepsLabel, toRows } from './chatRows'
 
 let id = 0
 function item(kind: ChatItem['kind'], text = ''): ChatItem {
@@ -46,12 +46,50 @@ describe('toRows', () => {
     expect(failureCount([item('tool-error'), item('tool'), item('tool-error')])).toBe(2)
   })
 
+  it('keeps a question as its own row rather than folding it with the steps around it', () => {
+    const rows = toRows([
+      item('tool', 'create_frame'),
+      item('question', 'row or column?'),
+      item('tool', 'set_fill'),
+    ])
+    expect(rows.map((row) => row.kind)).toEqual(['steps', 'item', 'steps'])
+  })
+
   it('gives every row a key that survives the list growing', () => {
     const first = item('tool', 'create_frame')
     const before = toRows([first])
     const after = toRows([first, item('tool', 'create_text')])
     // The run is keyed by the item that opened it, so appending to it is not a remount.
     expect(after[0]?.key).toBe(before[0]?.key)
+  })
+})
+
+describe('showsPendingWork', () => {
+  it('is false when the turn is not running', () => {
+    expect(showsPendingWork(toRows([item('user', 'make a card')]), false, false)).toBe(false)
+  })
+
+  it('shows the loading line in the gap after the question, before the first step', () => {
+    expect(showsPendingWork(toRows([item('user', 'make a card')]), true, false)).toBe(true)
+  })
+
+  it('stays quiet while a run of steps is live and reading out its own activity', () => {
+    const rows = toRows([item('user', 'make a card'), item('tool', 'create_frame')])
+    expect(showsPendingWork(rows, true, false)).toBe(false)
+  })
+
+  it('shows again after an assistant line while the model works on', () => {
+    const rows = toRows([item('tool', 'create_frame'), item('assistant', 'One moment.')])
+    expect(showsPendingWork(rows, true, false)).toBe(true)
+  })
+
+  it('is false on an empty transcript that is not working', () => {
+    expect(showsPendingWork([], false, false)).toBe(false)
+  })
+
+  it('is quiet while the turn is blocked on a question, which does its own waiting', () => {
+    const rows = toRows([item('user', 'row or column?'), item('question', 'row or column?')])
+    expect(showsPendingWork(rows, true, true)).toBe(false)
   })
 })
 

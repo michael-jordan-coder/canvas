@@ -9,10 +9,18 @@ import {
 } from 'react'
 import { agentClient } from '../agent/connection'
 import { isConnected, isWorking, useAgent, type ChatItem } from '../agent/agentStore'
-import { failureCount, isNearBottom, stepsLabel, toRows } from '../agent/chatRows'
+import { failureCount, isNearBottom, showsPendingWork, stepsLabel, toRows } from '../agent/chatRows'
 import { isAssistantShortcut } from '../input/assistantShortcut'
 import { CornerGrip } from './CornerGrip'
-import { AssistantIcon, ChevronIcon, CloseIcon, PlusIcon, SendIcon, StopIcon } from './icons'
+import {
+  AssistantIcon,
+  CheckIcon,
+  ChevronIcon,
+  CloseIcon,
+  PlusIcon,
+  SendIcon,
+  StopIcon,
+} from './icons'
 import styles from './AgentPanel.module.css'
 
 /**
@@ -75,11 +83,169 @@ function Steps({ items, live }: { items: ChatItem[]; live: boolean }): ReactElem
   )
 }
 
+/**
+ * The loading line, shown while the turn is running but no step has landed to show for it yet.
+ *
+ * The same sunken pill and breathing pip as a live run of steps, so it reads as the assistant
+ * working rather than as a new kind of thing. It is not a button: there is nothing folded to
+ * open, since this is the state before the first step exists rather than a record of one.
+ */
+function Working(): ReactElement {
+  return (
+    <div className={styles.working}>
+      <span className={styles.pip} />
+      Working
+    </div>
+  )
+}
+
 function Item({ item }: { item: ChatItem }): ReactElement {
   return (
     <p className={styles.message} data-kind={item.kind}>
       {item.text}
     </p>
+  )
+}
+
+/**
+ * A question the assistant put to the person, the one place in the transcript they act rather
+ * than read. Interactive while it is the pending one, a record of the choice once answered, and
+ * a settled un-actionable record otherwise: the turn ended before it was answered, or it came
+ * back from a past session with no live turn to answer to.
+ *
+ * Single-select options answer on click, the fastest path when the choice is the whole point.
+ * Multi-select toggles and confirms with Submit, since a set is not finished until it is said
+ * to be. Both offer a free-text row, so the person is never boxed in by the options.
+ */
+function Question({ item, pending }: { item: ChatItem; pending: boolean }): ReactElement | null {
+  const [chosen, setChosen] = useState<readonly string[]>([])
+  const [other, setOther] = useState('')
+
+  const question = item.question
+  if (!question) return null
+
+  // A record: answered, or no longer answerable. Either way, no controls.
+  if (item.answer !== undefined || !pending || item.askId === undefined) {
+    const answer = item.answer
+    return (
+      <div className={styles.question}>
+        <div className={styles.questionHead}>
+          <span className={styles.questionChip}>{question.header}</span>
+          <p className={styles.questionText}>{question.question}</p>
+        </div>
+        {answer ? (
+          <div className={styles.answerChips}>
+            {answer.selected.map((label) => (
+              <span key={label} className={styles.answerChip}>
+                <CheckIcon size={11} />
+                {label}
+              </span>
+            ))}
+            {answer.other && (
+              <span className={styles.answerChip}>
+                <CheckIcon size={11} />
+                {answer.other}
+              </span>
+            )}
+          </div>
+        ) : (
+          <p className={styles.questionUnanswered}>No answer</p>
+        )}
+      </div>
+    )
+  }
+
+  const askId = item.askId
+  const multi = question.multiSelect
+  const trimmedOther = other.trim()
+
+  const toggle = (label: string): void => {
+    setChosen((current) =>
+      current.includes(label) ? current.filter((value) => value !== label) : [...current, label],
+    )
+  }
+
+  const submitOther = (): void => {
+    if (!trimmedOther) return
+    agentClient.answer(askId, { selected: [], other: trimmedOther })
+  }
+
+  const submitMulti = (): void => {
+    const selected = [...chosen]
+    if (selected.length === 0 && !trimmedOther) return
+    agentClient.answer(askId, trimmedOther ? { selected, other: trimmedOther } : { selected })
+  }
+
+  return (
+    <div className={styles.question}>
+      <div className={styles.questionHead}>
+        <span className={styles.questionChip}>{question.header}</span>
+        <p className={styles.questionText}>{question.question}</p>
+      </div>
+      <div className={styles.options}>
+        {question.options.map((option) => {
+          const active = multi && chosen.includes(option.label)
+          return (
+            <button
+              key={option.label}
+              type="button"
+              className={styles.option}
+              data-active={active}
+              onClick={() =>
+                multi ? toggle(option.label) : agentClient.answer(askId, { selected: [option.label] })
+              }
+            >
+              {multi && (
+                <span className={styles.optionCheck}>{active && <CheckIcon size={12} />}</span>
+              )}
+              <span className={styles.optionText}>
+                <span className={styles.optionLabel}>{option.label}</span>
+                {option.description && (
+                  <span className={styles.optionDesc}>{option.description}</span>
+                )}
+              </span>
+            </button>
+          )
+        })}
+        <div className={styles.otherRow}>
+          <input
+            className={styles.otherInput}
+            value={other}
+            placeholder="Something else"
+            aria-label="Other answer"
+            onChange={(event) => setOther(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                if (multi) submitMulti()
+                else submitOther()
+              }
+            }}
+          />
+          {!multi && (
+            <button
+              type="button"
+              className={styles.otherSend}
+              aria-label="Send"
+              disabled={trimmedOther === ''}
+              onClick={submitOther}
+            >
+              <SendIcon />
+            </button>
+          )}
+        </div>
+      </div>
+      {multi && (
+        <button
+          type="button"
+          className={styles.submit}
+          disabled={chosen.length === 0 && trimmedOther === ''}
+          onClick={submitMulti}
+        >
+          Submit
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -259,6 +425,7 @@ function Composer(): ReactElement {
 function Card(): ReactElement {
   const status = useAgent((state) => state.status)
   const items = useAgent((state) => state.items)
+  const pendingAsk = useAgent((state) => state.pendingAsk)
   const setOpen = useAgent((state) => state.setOpen)
   const setDraft = useAgent((state) => state.setDraft)
   const openForInput = useAgent((state) => state.openForInput)
@@ -376,10 +543,23 @@ function Card(): ReactElement {
                 items={row.items}
                 live={isWorking(status) && index === rows.length - 1}
               />
+            ) : row.item.kind === 'question' ? (
+              <Question
+                key={row.key}
+                item={row.item}
+                // Not while stopping: the turn is being torn down, and the server has already
+                // let go of the question, so an answer would land nowhere.
+                pending={
+                  status === 'busy' &&
+                  row.item.askId !== undefined &&
+                  pendingAsk === row.item.askId
+                }
+              />
             ) : (
               <Item key={row.key} item={row.item} />
             ),
           )}
+          {showsPendingWork(rows, isWorking(status), pendingAsk !== null) && <Working />}
         </div>
         {detached && (
           <button type="button" className={styles.jump} onClick={toBottom}>

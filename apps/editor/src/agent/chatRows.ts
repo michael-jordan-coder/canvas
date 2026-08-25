@@ -43,6 +43,29 @@ export function failureCount(items: readonly ChatItem[]): number {
 }
 
 /**
+ * Whether to show the standalone working line: the loading state for the moment a turn is
+ * running but nothing has landed to show for it yet.
+ *
+ * A trailing run of steps is already live and reads out its own activity through the chip, so
+ * this is for exactly the other case: the gap between the question and the first step, and the
+ * gap after an assistant line while the model works on. Without it that gap is the person's
+ * message with nothing beneath it and a 6px dot breathing in the header, which reads as
+ * nothing happening.
+ *
+ * `awaitingAnswer` is the one time the turn is busy but the model is not working: it is blocked
+ * on a question card, which is doing the waiting itself, so the loading line would be a second
+ * thing claiming to be busy under it.
+ */
+export function showsPendingWork(
+  rows: readonly Row[],
+  working: boolean,
+  awaitingAnswer: boolean,
+): boolean {
+  if (!working || awaitingAnswer) return false
+  return rows[rows.length - 1]?.kind !== 'steps'
+}
+
+/**
  * How close to the bottom counts as reading the newest message.
  *
  * A transcript that pins unconditionally cannot be scrolled back while a turn is running,

@@ -36,6 +36,44 @@ describe('parseTranscript', () => {
     ])
     expect(parseTranscript(text).map((entry) => entry.text)).toEqual(['first', 'last'])
   })
+
+  it('restores an answered question as a record, without its stale askId', () => {
+    const question = {
+      question: 'Row or column?',
+      header: 'Direction',
+      multiSelect: false,
+      options: [{ label: 'Row', description: 'side by side' }, { label: 'Column' }],
+    }
+    const text = stored([
+      {
+        id: 1,
+        kind: 'question',
+        text: 'Row or column?',
+        askId: 7,
+        question,
+        answer: { selected: ['Row'] },
+      },
+    ])
+    expect(parseTranscript(text)).toEqual([
+      { id: 1, kind: 'question', text: 'Row or column?', question, answer: { selected: ['Row'] } },
+    ])
+  })
+
+  it('restores a question that was never answered, with no answer', () => {
+    const question = { question: 'Tone?', header: 'Tone', multiSelect: true, options: [{ label: 'Warm' }, { label: 'Cool' }] }
+    const text = stored([{ id: 1, kind: 'question', text: 'Tone?', question }])
+    expect(parseTranscript(text)).toEqual([{ id: 1, kind: 'question', text: 'Tone?', question }])
+  })
+
+  it('drops a question whose payload is malformed rather than half rendering it', () => {
+    const text = stored([
+      item(1, 'user', 'first'),
+      { id: 2, kind: 'question', text: 'broken', question: { header: 'x' } },
+      { id: 3, kind: 'question', text: 'bad answer', question: { question: 'q', header: 'h', multiSelect: false, options: [{ label: 'a' }] }, answer: { selected: [5] } },
+      item(4, 'assistant', 'last'),
+    ])
+    expect(parseTranscript(text).map((entry) => entry.text)).toEqual(['first', 'last'])
+  })
 })
 
 describe('capItems', () => {
