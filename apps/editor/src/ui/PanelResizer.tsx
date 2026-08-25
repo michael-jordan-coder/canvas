@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactElement } from 'react'
+import { readStored, writeStored } from '../state/localStorage'
 import styles from './PanelResizer.module.css'
 
 /** How wide a panel is allowed to be dragged, and where a double click puts it back. */
@@ -7,31 +8,6 @@ const PANEL_MAX_WIDTH = 480
 
 const clampWidth = (width: number): number =>
   Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, width))
-
-/**
- * Storage can throw rather than merely fail: Safari private mode and storage-blocked
- * embeds raise on access, the case `state/persistence.ts` already guards against. A panel
- * width is not worth a blank editor, so these degrade to "this session does not persist".
- */
-const readStored = (key: string): string | null => {
-  try {
-    return window.localStorage.getItem(key)
-  } catch {
-    return null
-  }
-}
-
-const writeStored = (key: string, value: string | null): void => {
-  try {
-    if (value === null) {
-      window.localStorage.removeItem(key)
-    } else {
-      window.localStorage.setItem(key, value)
-    }
-  } catch {
-    // Quota exceeded, or storage blocked. The width simply resets next load.
-  }
-}
 
 interface PanelResizerProps {
   /** Which screen edge the panel is docked to. The grab edge sits on the opposite side. */

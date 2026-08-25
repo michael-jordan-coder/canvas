@@ -11,6 +11,7 @@ import { agentClient } from '../agent/connection'
 import { useAgent, type ChatItem } from '../agent/agentStore'
 import { failureCount, hasFailure, isNearBottom, toRows } from '../agent/chatRows'
 import { isAssistantShortcut } from '../input/assistantShortcut'
+import { CornerGrip } from './CornerGrip'
 import { AssistantIcon, ChevronIcon, CloseIcon, PlusIcon, SendIcon, StopIcon } from './icons'
 import styles from './AgentPanel.module.css'
 
@@ -114,6 +115,7 @@ export function AgentPanel(): ReactElement {
   const focusToken = useAgent((state) => state.focusToken)
   const listRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const panelRef = useRef<HTMLElement>(null)
   const rows = useMemo(() => toRows(items), [items])
   // Only while the card is open: a closed panel counting seconds nobody can read is a
   // render a second for nothing.
@@ -134,6 +136,22 @@ export function AgentPanel(): ReactElement {
     pinned.current = true
     setDetached(false)
   }
+
+  /*
+   * Shrinking the card changes the list's height without firing a scroll event, so a
+   * transcript that was following the newest message would silently come off the bottom and
+   * stay there. The observer catches every cause at once: the grip, a window resize, and a
+   * panel being dragged wider beside it.
+   */
+  useEffect(() => {
+    const list = listRef.current
+    if (!list) return
+    const observer = new ResizeObserver(() => {
+      if (pinned.current) list.scrollTop = list.scrollHeight
+    })
+    observer.observe(list)
+    return () => observer.disconnect()
+  }, [])
 
   // Whatever asked for the caret gets it, however the card was already standing: the token
   // changes even when `open` does not, which is what makes the shortcut work twice.
@@ -194,7 +212,15 @@ export function AgentPanel(): ReactElement {
   }
 
   return (
-    <section className={styles.panel} aria-label="Assistant">
+    <section ref={panelRef} className={styles.panel} aria-label="Assistant">
+      <CornerGrip
+        targetRef={panelRef}
+        widthVar="--agent-card-width"
+        heightVar="--agent-card-height"
+        widthKey="figma-canvas:agent-width"
+        heightKey="figma-canvas:agent-height"
+        label="Resize assistant"
+      />
       <header className={styles.header}>
         <span className={styles.status} data-status={status} />
         <h2 className={styles.title}>Assistant</h2>

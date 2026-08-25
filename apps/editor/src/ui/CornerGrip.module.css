@@ -1,0 +1,42 @@
+/*
+ * A corner, not an edge: 14px square in the card's free corner, with the same accent
+ * language the panel resizer speaks. The mark is a bracket rather than a filled block, so a
+ * card that is never resized shows almost nothing until the pointer is on it.
+ */
+.grip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  z-index: 1;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
+.grip::after {
+  content: '';
+  position: absolute;
+  inset: 4px auto auto 4px;
+  width: 6px;
+  height: 6px;
+  border-top: 1px solid transparent;
+  border-left: 1px solid transparent;
+  transition: border-color var(--duration) var(--ease);
+}
+
+.grip:hover::after {
+  border-color: var(--line-strong);
+}
+
+.grip[data-active]::after,
+.grip:focus-visible::after {
+  border-color: var(--accent);
+}
+
+.grip:focus-visible {
+  outline: none;
+}

@@ -749,9 +749,20 @@ in a text field back to the field. Focus travels as a token rather than a flag, 
 same shortcut pressed twice has to focus twice and `open` will not have changed the second
 time.
 
+**The card is sized from its free corner.** It is anchored bottom right, so the grip is at
+its top left and dragging away from the anchor grows it. `CornerGrip` takes `PanelResizer`'s
+idioms rather than its code, since that one is a single axis on a docked grid column and
+widening it would double every branch it has for its one caller: refs for the live numbers,
+a layout effect to restore, a write on release, a double click for the default, arrow keys
+with the event stopped. The size goes on `--agent-card-width` and `--agent-card-height` on
+the root rather than on the card, because the card unmounts when the panel closes and a
+property set on it would be gone on every reopen. The clamp is split: TypeScript holds the
+minimum and maximum, CSS holds the viewport bound, so neither restates the other.
+
 The transcript follows the newest message only while it is the one being read. Pinning
 unconditionally meant it could not be scrolled back during a turn, since every arriving step
-dragged it down again, which is exactly when there is most to read.
+dragged it down again, which is exactly when there is most to read. A `ResizeObserver` keeps
+that promise across a resize, which changes the list's height without firing a scroll event.
 
 ## Rotation, and the one rule it added
 
