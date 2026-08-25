@@ -113,10 +113,6 @@ export interface CreateShapeArgs {
 export interface CommandMap {
   get_document: { args: Record<string, never>; result: DocumentSnapshot }
   get_node: { args: { nodeId: string }; result: AgentNode }
-  screenshot: {
-    args: { fit?: 'view' | 'all' | 'selection'; nodeId?: string }
-    result: { mimeType: string; base64: string }
-  }
   set_selection: { args: { nodeIds: string[] }; result: { selected: string[] } }
   create_frame: {
     args: CreateShapeArgs & { clipsContent?: boolean }

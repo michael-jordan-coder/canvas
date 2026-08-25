@@ -459,6 +459,39 @@ Open, in rough order of likely need:
 - [ ] The editor bundle crossed Vite's 500 kB warning with CodeMirror in it; splitting the
       panel or the CodeMirror import is the obvious cut.
 
+## The assistant
+
+Claude with hands on the canvas, over a Node sidecar on 5174. Shipped across six commits;
+`CLAUDE.md` has the architecture and the reasoning.
+
+- [x] Screenshot removed from the agent rather than fixed. It had never worked: the capture
+      waited two animation frames before reading the canvas with `drawImage`, and a WebGPU
+      canvas is readable only until the next frame boundary, so every image the model ever
+      received was blank. It also moved the camera with `fitTo` and never restored it. The
+      tool, the `CommandMap` entry, the executor handler, `capture.ts` and `captureCanvas`
+      are gone, and the prompt rule that told the model to look at its work now says it
+      cannot see and must read back through `get_document`.
+      `apps/agent-server/src/tools.ts`, `apps/agent-server/src/prompt.ts:47`,
+      `apps/editor/src/canvas/CanvasHost.tsx`
+
+Open:
+
+- [ ] Let the person hand the assistant a picture. This is what replaces the tool that was
+      removed: seeing the canvas should be Daniel offering an image deliberately, not the
+      model helping itself. Nothing of it exists yet. It needs an image input on the
+      composer (paste, drag, and a file picker), a `ClientMessage` that can carry the bytes,
+      an image content block on the way into the SDK, and a decision about how a sent image
+      appears in the transcript and whether it is saved with it. Note the transcript's
+      storage is capped at 64 kB and drops the oldest first, so images almost certainly must
+      not go through `figma-canvas:agent-chat`.
+- [ ] Two editor tabs flap the agent socket forever. The server keeps one editor and closes
+      the previous socket when a new one connects (`apps/agent-server/src/index.ts:186`),
+      and each editor reconnects automatically on close, so two open tabs evict each other
+      about once a second and each cycle appends a notice to the transcript. The fix is
+      probably for the evicted tab to be told why and stop reconnecting, rather than for the
+      server to accept several editors: one document per tab means several editors is a
+      different feature, not a bug fix.
+
 ## Backlog
 
 Deferred from the panel polish pass:

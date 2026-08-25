@@ -44,7 +44,6 @@ const SUBJECTS: { [K in CommandName]?: Subject<K> } = {
   reorder_node: (a) => [a.command],
   align_nodes: (a) => [a.command],
   flip_nodes: (a) => [a.axis],
-  screenshot: (a) => [a.fit],
   set_auto_layout: (a) => [a.direction],
   set_layout_child: (a) => [a.widthMode, a.heightMode],
 }

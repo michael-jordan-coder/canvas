@@ -698,6 +698,16 @@ they happen and undoable by the person who watched them.
 names every command with its args and its result, the editor's `executor.ts` implements
 `Handlers` over that same map, and a tool added on one side without the other does not build.
 
+**The assistant cannot see the canvas, on purpose.** It had a `screenshot` tool and the
+tool never worked: it read the canvas back through `drawImage` after waiting two animation
+frames, and a WebGPU canvas is readable only until the next frame boundary, so the wait was
+the thing that emptied it. Every screenshot the model ever took was blank, and it moved the
+person's camera with `fitTo` without putting it back. Rather than fix it, the tool was
+removed. `get_document` and `get_node` are the whole of what the model knows, and a model
+that reads back what it built is honest about what it cannot check; one that is handed a
+blank image is not. If seeing the canvas comes back, it should be the person handing over a
+picture deliberately, not the assistant helping itself.
+
 **A turn is one history step.** `turn_start` opens a history group and `turn_end` closes it,
 so fifty node edits undo together, the same shape a nudge burst has. A socket that dies
 mid-turn force closes the group, because nothing else ever would.

@@ -50,7 +50,6 @@ import { flipNodes } from '../state/flip'
 import { duplicateNodes } from '../state/duplicate'
 import { rerunCodeNodesIn, runCodeNodeNow, setCodeSourceNow } from '../state/code'
 import { updateText } from '../state/font'
-import { capture } from './capture'
 
 /**
  * Where the agent's commands become document edits.
@@ -256,17 +255,6 @@ const handlers: Handlers = {
   get_document: () => snapshotDocument(),
 
   get_node: ({ nodeId }) => snapshotNode(resolve(nodeId)),
-
-  screenshot: async (args) => {
-    const options: Parameters<typeof capture>[0] = {}
-    if (args.nodeId) {
-      resolve(args.nodeId)
-      options.nodeId = args.nodeId
-    } else if (args.fit) {
-      options.fit = args.fit
-    }
-    return capture(options)
-  },
 
   set_selection: ({ nodeIds }) => {
     const ids = resolveIds(nodeIds)

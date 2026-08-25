@@ -17,9 +17,7 @@ import type { CommandName } from './protocol.ts'
 export type Forward = (name: CommandName, args: unknown) => Promise<unknown>
 
 type ToolResult = {
-  content: Array<
-    { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
-  >
+  content: Array<{ type: 'text'; text: string }>
   isError?: boolean
 }
 
@@ -119,28 +117,6 @@ export function createCanvasMcpServer(forward: Forward): ReturnType<typeof creat
       'Read one node and its subtree by id.',
       { nodeId },
       run(forward, 'get_node'),
-    ),
-    tool(
-      'screenshot',
-      'See the canvas as an image. fit "all" frames everything in the document, "selection" frames the current selection, a nodeId frames that node, "view" captures whatever is on screen. Use this to judge your work visually after a batch of edits.',
-      {
-        fit: z.enum(['view', 'all', 'selection']).optional(),
-        nodeId: nodeId.optional().describe('Frame this node instead of using fit'),
-      },
-      async (args): Promise<ToolResult> => {
-        try {
-          const value = (await forward('screenshot', args)) as {
-            mimeType: string
-            base64: string
-          }
-          return {
-            content: [{ type: 'image', data: value.base64, mimeType: value.mimeType }],
-          }
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          return { content: [{ type: 'text', text: message }], isError: true }
-        }
-      },
     ),
     tool(
       'set_selection',

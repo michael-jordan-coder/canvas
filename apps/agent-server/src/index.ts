@@ -22,7 +22,7 @@ import { resultReason } from './turnEnd.ts'
  * therefore real edits, visible as they happen and folded into the editor's own undo.
  */
 
-/** The screenshot waits on two animation frames in the browser, so it gets headroom. */
+/** Generous, because a command runs behind whatever the browser is already doing. */
 const COMMAND_TIMEOUT_MS = 30_000
 
 // Loopback only. The editor connects from this machine, and an open bind would let anyone
