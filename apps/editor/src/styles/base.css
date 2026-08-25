@@ -31,7 +31,8 @@ button {
   cursor: default;
 }
 
-input {
+input,
+textarea {
   font: inherit;
   color: inherit;
 }

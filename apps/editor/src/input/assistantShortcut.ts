@@ -11,7 +11,7 @@
  */
 type KeyLike = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey'>
 
-export const ASSISTANT_KEY = 'k'
+const ASSISTANT_KEY = 'k'
 
 export function isAssistantShortcut(event: KeyLike): boolean {
   if (event.altKey || event.shiftKey) return false

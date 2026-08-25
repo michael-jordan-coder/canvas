@@ -1,3 +1,4 @@
+import { readStored, startDebouncedSave, writeStored } from '../state/localStorage'
 import { useAgent, type ChatItem } from './agentStore'
 
 /**
@@ -74,40 +75,36 @@ export function capItems(
   maxItems: number = MAX_ITEMS,
   maxBytes: number = MAX_BYTES,
 ): ChatItem[] {
-  let kept = items.slice(Math.max(0, items.length - maxItems))
-  while (kept.length > 1 && JSON.stringify(kept).length > maxBytes) {
-    kept = kept.slice(1)
+  const kept = items.slice(Math.max(0, items.length - maxItems))
+  // Measured newest first, one serialization per item rather than one per item dropped.
+  // A single thinking block can be tens of kilobytes, so the tail that fits is often a
+  // fraction of the tail that is allowed, and re-serializing the whole list to find each
+  // boundary cost the save more than writing it did.
+  let bytes = 2
+  for (let i = kept.length - 1; i >= 0; i--) {
+    // The comma this item adds once it is not the only one, so the running total tracks
+    // what `JSON.stringify` of the surviving slice will actually measure.
+    bytes += JSON.stringify(kept[i]).length + (i === kept.length - 1 ? 0 : 1)
+    // The newest item is kept whatever it costs: a transcript with nothing in it says
+    // less than one that is over budget.
+    if (bytes > maxBytes && i < kept.length - 1) return kept.slice(i + 1)
   }
   return kept
 }
 
 export function readSavedTranscript(): ChatItem[] {
-  try {
-    const text = window.localStorage.getItem(KEY)
-    return text === null ? [] : parseTranscript(text)
-  } catch {
-    return []
-  }
+  return parseTranscript(readStored(KEY) ?? '')
 }
 
 export function saveTranscript(items: readonly ChatItem[]): void {
-  try {
-    if (items.length === 0) {
-      window.localStorage.removeItem(KEY)
-      return
-    }
-    window.localStorage.setItem(KEY, JSON.stringify({ version: VERSION, items: capItems(items) }))
-  } catch {
-    // Quota exceeded, or storage blocked. The conversation simply does not outlive the tab.
-  }
+  // An empty transcript is stored as absence rather than as an empty list, so a cleared
+  // chat and one that was never started read the same on the way back in.
+  const kept = items.length === 0 ? null : capItems(items)
+  writeStored(KEY, kept === null ? null : JSON.stringify({ version: VERSION, items: kept }))
 }
 
 export function clearSavedTranscript(): void {
-  try {
-    window.localStorage.removeItem(KEY)
-  } catch {
-    // Nothing to do: a clear that cannot be written is a transcript that was never saved.
-  }
+  writeStored(KEY, null)
 }
 
 /** Guards the hydrate against StrictMode running the mount effect twice. */
@@ -120,29 +117,14 @@ export function startTranscriptAutosave(): () => void {
     if (saved.length > 0) useAgent.getState().load(saved)
   }
 
-  let timer: number | undefined
-
-  const flush = (): void => {
-    if (timer === undefined) return
-    window.clearTimeout(timer)
-    timer = undefined
-    saveTranscript(useAgent.getState().items)
-  }
-
-  const unsubscribe = useAgent.subscribe((state, previous) => {
-    if (state.items === previous.items) return
-    window.clearTimeout(timer)
-    timer = window.setTimeout(() => {
-      timer = undefined
-      saveTranscript(useAgent.getState().items)
-    }, SAVE_DELAY)
-  })
-
-  window.addEventListener('pagehide', flush)
-
-  return () => {
-    window.clearTimeout(timer)
-    unsubscribe()
-    window.removeEventListener('pagehide', flush)
-  }
+  return startDebouncedSave(
+    // Only the transcript is worth a write: the status, the draft and whether the card is
+    // open all change far more often and none of them are saved.
+    (onChange) =>
+      useAgent.subscribe((state, previous) => {
+        if (state.items !== previous.items) onChange()
+      }),
+    () => saveTranscript(useAgent.getState().items),
+    SAVE_DELAY,
+  )
 }

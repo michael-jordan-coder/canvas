@@ -1,6 +1,15 @@
 import { useLayoutEffect, useRef, useState, type ReactElement, type RefObject } from 'react'
 import { readStored, writeStored } from '../state/localStorage'
-import { CARD_NUDGE, clampCardSize } from './cardSize'
+import {
+  CARD_HEIGHT_KEY,
+  CARD_HEIGHT_VAR,
+  PANEL_NUDGE,
+  CARD_WIDTH_KEY,
+  CARD_WIDTH_VAR,
+  clampCardSize,
+  type CardSize,
+} from './cardSize'
+import { setRootLength } from './rootLength'
 import styles from './CornerGrip.module.css'
 
 /**
@@ -24,58 +33,48 @@ import styles from './CornerGrip.module.css'
 interface CornerGripProps {
   /** The card being sized. Its anchored edges are what a drag measures from. */
   targetRef: RefObject<HTMLElement | null>
-  widthVar: string
-  heightVar: string
-  widthKey: string
-  heightKey: string
-  label: string
-  /** Called whenever the size changed, for anything that has to follow it. */
-  onResize?: () => void
 }
 
-function apply(cssVar: string, value: number | null): void {
-  if (value === null) {
-    document.documentElement.style.removeProperty(cssVar)
-  } else {
-    document.documentElement.style.setProperty(cssVar, `${value}px`)
-  }
+/** Both axes together: they are always written as a pair, and null restores the default. */
+function apply(size: CardSize | null): void {
+  setRootLength(CARD_WIDTH_VAR, size?.width ?? null)
+  setRootLength(CARD_HEIGHT_VAR, size?.height ?? null)
 }
 
-export function CornerGrip({
-  targetRef,
-  widthVar,
-  heightVar,
-  widthKey,
-  heightKey,
-  label,
-  onResize,
-}: CornerGripProps): ReactElement {
+export function CornerGrip({ targetRef }: CornerGripProps): ReactElement {
   const dragging = useRef<number | null>(null)
   /** The card's anchored edges, read once per drag: they are what the size is measured from. */
   const anchor = useRef<{ right: number; bottom: number } | null>(null)
+  /** The last size the grip set, which is what gets remembered. See `persist`. */
+  const sized = useRef<CardSize | null>(null)
   const [active, setActive] = useState(false)
 
   useLayoutEffect(() => {
-    const width = Number.parseFloat(readStored(widthKey) ?? '')
-    const height = Number.parseFloat(readStored(heightKey) ?? '')
+    const width = Number.parseFloat(readStored(CARD_WIDTH_KEY) ?? '')
+    const height = Number.parseFloat(readStored(CARD_HEIGHT_KEY) ?? '')
     if (!Number.isFinite(width) || !Number.isFinite(height)) return
-    const size = clampCardSize({ width, height })
-    apply(widthVar, size.width)
-    apply(heightVar, size.height)
-  }, [widthVar, heightVar, widthKey, heightKey])
+    apply(clampCardSize({ width, height }))
+  }, [])
 
   const setSize = (width: number, height: number): void => {
     const size = clampCardSize({ width, height })
-    apply(widthVar, size.width)
-    apply(heightVar, size.height)
-    onResize?.()
+    sized.current = size
+    apply(size)
   }
 
+  /*
+   * What the grip computed, not what the element ended up measuring. The card's stylesheet
+   * carries a viewport bound of its own, so a card sized on a short window measures smaller
+   * than the clamp allowed, and storing that would let the CSS bound leak into the value
+   * TypeScript owns: the card would come back shrunk on a screen with room for it. Nothing
+   * is written until a gesture has actually set a size, so a press that never moved leaves
+   * the stored size alone.
+   */
   const persist = (): void => {
-    const box = targetRef.current?.getBoundingClientRect()
-    if (!box) return
-    writeStored(widthKey, Math.round(box.width).toString())
-    writeStored(heightKey, Math.round(box.height).toString())
+    const size = sized.current
+    if (!size) return
+    writeStored(CARD_WIDTH_KEY, Math.round(size.width).toString())
+    writeStored(CARD_HEIGHT_KEY, Math.round(size.height).toString())
   }
 
   const release = (pointerId: number): void => {
@@ -100,7 +99,7 @@ export function CornerGrip({
       type="button"
       className={styles.grip}
       data-active={active ? '' : undefined}
-      aria-label={label}
+      aria-label="Resize assistant"
       onPointerDown={(event) => {
         if (event.button !== 0) return
         // Without this the drag also starts a native selection across the transcript.
@@ -119,20 +118,19 @@ export function CornerGrip({
       onPointerUp={(event) => release(event.pointerId)}
       onPointerCancel={(event) => release(event.pointerId)}
       onDoubleClick={() => {
-        apply(widthVar, null)
-        apply(heightVar, null)
-        writeStored(widthKey, null)
-        writeStored(heightKey, null)
-        onResize?.()
+        sized.current = null
+        apply(null)
+        writeStored(CARD_WIDTH_KEY, null)
+        writeStored(CARD_HEIGHT_KEY, null)
       }}
       onKeyDown={(event) => {
         // The arrows pointing away from the anchored corner grow the card, which is the
         // direction the drag moves in too.
         const steps: Record<string, [number, number]> = {
-          ArrowLeft: [CARD_NUDGE, 0],
-          ArrowRight: [-CARD_NUDGE, 0],
-          ArrowUp: [0, CARD_NUDGE],
-          ArrowDown: [0, -CARD_NUDGE],
+          ArrowLeft: [PANEL_NUDGE, 0],
+          ArrowRight: [-PANEL_NUDGE, 0],
+          ArrowUp: [0, PANEL_NUDGE],
+          ArrowDown: [0, -PANEL_NUDGE],
         }
         const step = steps[event.key]
         if (!step) return

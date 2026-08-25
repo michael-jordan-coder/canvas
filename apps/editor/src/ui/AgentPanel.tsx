@@ -8,8 +8,8 @@ import {
   type SyntheticEvent,
 } from 'react'
 import { agentClient } from '../agent/connection'
-import { useAgent, type ChatItem } from '../agent/agentStore'
-import { failureCount, hasFailure, isNearBottom, toRows } from '../agent/chatRows'
+import { isConnected, isWorking, useAgent, type ChatItem } from '../agent/agentStore'
+import { failureCount, isNearBottom, stepsLabel, toRows } from '../agent/chatRows'
 import { isAssistantShortcut } from '../input/assistantShortcut'
 import { CornerGrip } from './CornerGrip'
 import { AssistantIcon, ChevronIcon, CloseIcon, PlusIcon, SendIcon, StopIcon } from './icons'
@@ -31,18 +31,8 @@ import styles from './AgentPanel.module.css'
  */
 function Steps({ items, live }: { items: ChatItem[]; live: boolean }): ReactElement {
   const [open, setOpen] = useState(false)
-  const latest = items[items.length - 1]
-  const failed = hasFailure(items)
-  const failures = failureCount(items)
-  const count = `${items.length} ${items.length === 1 ? 'step' : 'steps'}`
-  const label =
-    live && latest
-      ? latest.kind === 'thinking'
-        ? 'Thinking'
-        : latest.text
-      : failed
-        ? `${count}, ${failures} failed`
-        : count
+  const failed = failureCount(items) > 0
+  const label = stepsLabel(items, live)
 
   // A failure opens its own run. Everything else in here is process the person can ignore,
   // which is the whole reason it folds; a step that did not work is the exception, and
@@ -109,6 +99,10 @@ function useCountdown(at: number | null): number | null {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     if (at === null) return
+    // Read the clock before the first tick, not only on it. No interval runs while nothing
+    // is scheduled, so `now` is otherwise as old as the last time one was, and the first
+    // frame of a fresh countdown starts from a minute ago.
+    setNow(Date.now())
     // A second is the resolution the text shows, so nothing finer is worth a render.
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
@@ -117,22 +111,148 @@ function useCountdown(at: number | null): number | null {
   return Math.max(0, Math.ceil((at - now) / 1000))
 }
 
-export function AgentPanel(): ReactElement {
-  const open = useAgent((state) => state.open)
-  const setOpen = useAgent((state) => state.setOpen)
+/**
+ * The connection strip, and the countdown in it.
+ *
+ * Its own component so the tick is scoped to the one line that shows it. Left at the top of
+ * the card, a state set once a second re-rendered the whole transcript to move a single
+ * number, and an offline sidecar is exactly when the card sits open longest.
+ */
+function ConnectionStrip(): ReactElement | null {
   const status = useAgent((state) => state.status)
-  const items = useAgent((state) => state.items)
   const nextAttemptAt = useAgent((state) => state.nextAttemptAt)
+  const seconds = useCountdown(status === 'offline' ? nextAttemptAt : null)
+
+  if (isConnected(status)) return null
+
+  return (
+    <div className={styles.connection}>
+      <span className={styles.connectionText}>
+        {status === 'connecting'
+          ? 'Connecting to the agent server'
+          : seconds === null
+            ? 'Agent server offline'
+            : `Agent server offline. Retrying in ${seconds}s`}
+      </span>
+      <button
+        type="button"
+        className={styles.retry}
+        disabled={status === 'connecting'}
+        onClick={() => agentClient.reconnect()}
+      >
+        Retry
+      </button>
+    </div>
+  )
+}
+
+/**
+ * The composer, which is the only thing here that changes per keystroke.
+ *
+ * That is the whole reason it is a component: `draft` lives in the store, so a card that
+ * read it at the top re-rendered every row of the transcript on every character typed. It
+ * is the field and the one button beside it that have to follow the draft, and nothing
+ * else does.
+ */
+function Composer(): ReactElement {
+  const status = useAgent((state) => state.status)
   const draft = useAgent((state) => state.draft)
   const setDraft = useAgent((state) => state.setDraft)
+  const setOpen = useAgent((state) => state.setOpen)
   const focusToken = useAgent((state) => state.focusToken)
-  const listRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const connected = isConnected(status)
+
+  // Whatever asked for the caret gets it, however the card was already standing: the token
+  // changes even when `open` does not, which is what makes the shortcut work twice.
+  useEffect(() => {
+    if (focusToken > 0) inputRef.current?.focus()
+  }, [focusToken])
+
+  const submit = (event: SyntheticEvent): void => {
+    event.preventDefault()
+    const text = draft.trim()
+    if (!text || status !== 'idle') return
+    // The draft is cleared only once the socket has taken it. A message the server never
+    // heard would otherwise vanish from the composer and from the transcript alike.
+    if (agentClient.send(text)) setDraft('')
+  }
+
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    /*
+     * The shortcut closes from in here, because the window handler will never see it: its
+     * first line hands every keystroke in a text field back to the field. Escape does the
+     * same, matching what Escape means everywhere else in the editor, and both stop here so
+     * the canvas does not also act on them.
+     */
+    if (isAssistantShortcut(event) || event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      setOpen(false)
+      return
+    }
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      submit(event)
+    }
+  }
+
+  return (
+    <form className={styles.composer} onSubmit={submit}>
+      <div className={styles.field}>
+        <textarea
+          ref={inputRef}
+          className={styles.input}
+          value={draft}
+          rows={1}
+          placeholder={connected ? 'Describe a change' : 'Waiting for the agent server'}
+          disabled={!connected}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={onKeyDown}
+        />
+        {isWorking(status) ? (
+          <button
+            type="button"
+            className={styles.action}
+            aria-label="Stop"
+            disabled={status === 'stopping'}
+            onClick={() => agentClient.stop()}
+          >
+            <StopIcon />
+          </button>
+        ) : (
+          <button
+            type="submit"
+            className={styles.action}
+            aria-label="Send"
+            disabled={!connected || draft.trim() === ''}
+          >
+            <SendIcon />
+          </button>
+        )}
+      </div>
+    </form>
+  )
+}
+
+/**
+ * The card itself, mounted only while it is open.
+ *
+ * The transcript is the expensive thing to render and it is the thing that changes most, so
+ * everything that changes on its own schedule sits below this rather than above it: the
+ * draft per keystroke, the reconnect countdown per second. Mounting on open is the same
+ * rule applied to the card as a whole, since a turn running behind a closed card appends a
+ * step per tool call and none of them are on screen.
+ */
+function Card(): ReactElement {
+  const status = useAgent((state) => state.status)
+  const items = useAgent((state) => state.items)
+  const setOpen = useAgent((state) => state.setOpen)
+  const setDraft = useAgent((state) => state.setDraft)
+  const openForInput = useAgent((state) => state.openForInput)
+  const listRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLElement>(null)
   const rows = useMemo(() => toRows(items), [items])
-  // Only while the card is open: a closed panel counting seconds nobody can read is a
-  // render a second for nothing.
-  const seconds = useCountdown(open && status === 'offline' ? nextAttemptAt : null)
 
   /*
    * Whether the transcript is following the newest message. A ref rather than state because
@@ -166,12 +286,6 @@ export function AgentPanel(): ReactElement {
     return () => observer.disconnect()
   }, [])
 
-  // Whatever asked for the caret gets it, however the card was already standing: the token
-  // changes even when `open` does not, which is what makes the shortcut work twice.
-  useEffect(() => {
-    if (focusToken > 0) inputRef.current?.focus()
-  }, [focusToken])
-
   // Pinned to the newest message, but only while it is the one being read. A transcript that
   // pinned unconditionally could not be scrolled back during a turn: every arriving step
   // would drag it down again, which is exactly when there is most to read.
@@ -180,66 +294,9 @@ export function AgentPanel(): ReactElement {
     if (list && pinned.current) list.scrollTop = list.scrollHeight
   }, [items])
 
-  if (!open) {
-    return (
-      <button
-        type="button"
-        className={styles.opener}
-        aria-label="Assistant"
-        title="Assistant"
-        data-busy={status === 'busy' || status === 'stopping'}
-        onClick={() => setOpen(true)}
-      >
-        <AssistantIcon size={18} />
-      </button>
-    )
-  }
-
-  const connected = status === 'idle' || status === 'busy' || status === 'stopping'
-
-  const submit = (event: SyntheticEvent): void => {
-    event.preventDefault()
-    const text = draft.trim()
-    if (!text || status !== 'idle') return
-    // The draft is cleared only once the socket has taken it. A message the server never
-    // heard would otherwise vanish from the composer and from the transcript alike.
-    if (agentClient.send(text)) setDraft('')
-  }
-
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
-    /*
-     * The shortcut closes from in here, because the window handler will never see it: its
-     * first line hands every keystroke in a text field back to the field. Escape does the
-     * same, matching what Escape means everywhere else in the editor, and both stop here so
-     * the canvas does not also act on them.
-     */
-    if (isAssistantShortcut(event) || event.key === 'Escape') {
-      event.preventDefault()
-      event.stopPropagation()
-      setOpen(false)
-      return
-    }
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault()
-      submit(event)
-    }
-  }
-
   return (
-    <section
-      ref={panelRef}
-      className={styles.panel}
-      aria-label="Assistant"
-      aria-busy={status === 'busy' || status === 'stopping'}
-    >
-      <CornerGrip
-        targetRef={panelRef}
-        widthVar="--agent-card-width"
-        heightVar="--agent-card-height"
-        widthKey="figma-canvas:agent-width"
-        heightKey="figma-canvas:agent-height"
-        label="Resize assistant"
-      />
+    <section ref={panelRef} className={styles.panel} aria-label="Assistant" aria-busy={isWorking(status)}>
+      <CornerGrip targetRef={panelRef} />
       <header className={styles.header}>
         <span className={styles.status} data-status={status} />
         <h2 className={styles.title}>Assistant</h2>
@@ -288,9 +345,11 @@ export function AgentPanel(): ReactElement {
                   className={styles.suggestion}
                   // Into the composer rather than straight to the server: a suggestion is a
                   // starting point, and the person should get to change it before it is sent.
+                  // The caret is asked for through the same token the shortcut uses, since
+                  // the field itself is a component away from here.
                   onClick={() => {
                     setDraft(suggestion)
-                    inputRef.current?.focus()
+                    openForInput()
                   }}
                 >
                   {suggestion}
@@ -303,9 +362,7 @@ export function AgentPanel(): ReactElement {
               <Steps
                 key={row.key}
                 items={row.items}
-                live={
-                  (status === 'busy' || status === 'stopping') && index === rows.length - 1
-                }
+                live={isWorking(status) && index === rows.length - 1}
               />
             ) : (
               <Item key={row.key} item={row.item} />
@@ -319,60 +376,38 @@ export function AgentPanel(): ReactElement {
         )}
       </div>
 
-      {!connected && (
-        <div className={styles.connection}>
-          <span className={styles.connectionText}>
-            {status === 'connecting'
-              ? 'Connecting to the agent server'
-              : seconds === null
-                ? 'Agent server offline'
-                : `Agent server offline. Retrying in ${seconds}s`}
-          </span>
-          <button
-            type="button"
-            className={styles.retry}
-            disabled={status === 'connecting'}
-            onClick={() => agentClient.reconnect()}
-          >
-            Retry
-          </button>
-        </div>
-      )}
-
-      <form className={styles.composer} onSubmit={submit}>
-        <div className={styles.field}>
-          <textarea
-            ref={inputRef}
-            className={styles.input}
-            value={draft}
-            rows={1}
-            placeholder={connected ? 'Describe a change' : 'Waiting for the agent server'}
-            disabled={!connected}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={onKeyDown}
-          />
-          {status === 'busy' || status === 'stopping' ? (
-            <button
-              type="button"
-              className={styles.action}
-              aria-label="Stop"
-              disabled={status === 'stopping'}
-              onClick={() => agentClient.stop()}
-            >
-              <StopIcon />
-            </button>
-          ) : (
-            <button
-              type="submit"
-              className={styles.action}
-              aria-label="Send"
-              disabled={!connected || draft.trim() === ''}
-            >
-              <SendIcon />
-            </button>
-          )}
-        </div>
-      </form>
+      <ConnectionStrip />
+      <Composer />
     </section>
   )
+}
+
+/**
+ * The assistant, which is a button until it is a card.
+ *
+ * This reads `open` and `status` and nothing else, so a turn running behind a closed card
+ * costs one render of one button per status change rather than a render of the transcript
+ * per step.
+ */
+export function AgentPanel(): ReactElement {
+  const open = useAgent((state) => state.open)
+  const setOpen = useAgent((state) => state.setOpen)
+  const status = useAgent((state) => state.status)
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className={styles.opener}
+        aria-label="Assistant"
+        title="Assistant"
+        data-busy={isWorking(status)}
+        onClick={() => setOpen(true)}
+      >
+        <AssistantIcon size={18} />
+      </button>
+    )
+  }
+
+  return <Card />
 }

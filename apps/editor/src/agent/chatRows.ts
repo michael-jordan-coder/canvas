@@ -6,11 +6,6 @@ import type { ChatItem } from './agentStore'
  * answers how they should be laid out.
  */
 
-/** A tool name the model saw, as a line a person can read: "create_frame" to "create frame". */
-export function humanize(name: string): string {
-  return name.replaceAll('_', ' ')
-}
-
 /**
  * Tool calls, thinking and failed steps are process, not conversation, so a consecutive run
  * of them folds into one row. The items stay flat in the store; the fold is purely
@@ -39,13 +34,10 @@ export function toRows(items: readonly ChatItem[]): Row[] {
 }
 
 /**
- * Whether a fold hides a failure. A closed run reads as "12 steps" and would otherwise say
- * nothing about a tool that did not work, which is exactly the thing worth opening it for.
+ * How many of a fold's steps failed, and so also whether any did. A closed run reads as
+ * "12 steps" and would otherwise say nothing about a tool that did not work, which is
+ * exactly the thing worth opening it for. One walk answers both questions the chip asks.
  */
-export function hasFailure(items: readonly ChatItem[]): boolean {
-  return items.some((item) => item.kind === 'tool-error')
-}
-
 export function failureCount(items: readonly ChatItem[]): number {
   return items.reduce((count, item) => (item.kind === 'tool-error' ? count + 1 : count), 0)
 }
@@ -58,13 +50,28 @@ export function failureCount(items: readonly ChatItem[]): number {
  * the end is what lets someone read the middle of a run without fighting it. The slack
  * covers a fractional scroll height, which a zoomed page and a scaled display both produce.
  */
-export const PIN_SLACK = 32
+const PIN_SLACK = 32
 
 export function isNearBottom(
   scrollTop: number,
   scrollHeight: number,
   clientHeight: number,
-  slack: number = PIN_SLACK,
 ): boolean {
-  return scrollHeight - clientHeight - scrollTop <= slack
+  return scrollHeight - clientHeight - scrollTop <= PIN_SLACK
+}
+
+/**
+ * What a folded run says on its closed line.
+ *
+ * Two orthogonal questions, which is why it is not one expression: a growing run shows the
+ * step it is on, so the live line doubles as the activity readout, and a settled one shows
+ * how much it did and whether any of it failed. Thinking has no object to name, so it says
+ * only that.
+ */
+export function stepsLabel(items: readonly ChatItem[], live: boolean): string {
+  const latest = items[items.length - 1]
+  if (live && latest) return latest.kind === 'thinking' ? 'Thinking' : latest.text
+  const count = `${items.length} ${items.length === 1 ? 'step' : 'steps'}`
+  const failures = failureCount(items)
+  return failures > 0 ? `${count}, ${failures} failed` : count
 }

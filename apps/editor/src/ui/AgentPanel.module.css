@@ -43,13 +43,15 @@
   translate: 0 -1px;
 }
 
+/* The ring itself is `base.css`'s, for every focusable thing in the app. Only the offset
+   changes: these are round or nearly round, and an inset outline cuts across the shape
+   rather than tracing it. */
 .opener:focus-visible,
 .iconButton:focus-visible,
 .retry:focus-visible,
 .jump:focus-visible,
 .suggestion:focus-visible,
 .action:focus-visible {
-  outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
@@ -453,9 +455,9 @@
 }
 
 /* The border lives on this wrapper rather than on the textarea, so the send button sits
-   inside the field. The focus ring is the accent's own halo, which is how every other field
-   in the app says it has the keyboard, only larger because this one is the size of a
-   paragraph rather than of a number. */
+   inside the field. Nothing about it changes on focus: the caret is already in it, blinking,
+   and this is the one field on screen someone can be typing in, so an accent ring around it
+   is the interface pointing at what the person is already looking at. */
 .field {
   display: flex;
   align-items: flex-end;
@@ -464,14 +466,6 @@
   background: var(--field);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  transition:
-    border-color var(--duration) var(--ease),
-    box-shadow var(--duration) var(--ease);
-}
-
-.field:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-subtle);
 }
 
 .input {

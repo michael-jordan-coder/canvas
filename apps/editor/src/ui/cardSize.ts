@@ -11,8 +11,22 @@ export const CARD_MIN_WIDTH = 300
 export const CARD_MAX_WIDTH = 560
 export const CARD_MIN_HEIGHT = 260
 export const CARD_MAX_HEIGHT = 760
-/** One arrow press. The same step the panel resizer takes. */
-export const CARD_NUDGE = 16
+/**
+ * One arrow press, for both resizers. The card and the docked panels step by the same
+ * amount because they are the same gesture on different chrome, and a comment claiming
+ * that is not the same as the two reading one number.
+ */
+export const PANEL_NUDGE = 16
+
+/**
+ * Where the card's size is written and where it is remembered, beside the numbers that
+ * bound it. The vocabulary of the card's size is one thing, so it lives in one file rather
+ * than as string literals threaded through the JSX of whatever happens to render the grip.
+ */
+export const CARD_WIDTH_VAR = '--agent-card-width'
+export const CARD_HEIGHT_VAR = '--agent-card-height'
+export const CARD_WIDTH_KEY = 'figma-canvas:agent-width'
+export const CARD_HEIGHT_KEY = 'figma-canvas:agent-height'
 
 export interface CardSize {
   width: number

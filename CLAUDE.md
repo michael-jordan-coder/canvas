@@ -127,8 +127,17 @@ subscribe to it, so swapping in a new instance would leave them all watching an 
 writes to. Loading also pushes the id generator past every id in the file, since a loaded document
 keeps its ids and the next node created would otherwise collide with one of them.
 
-`figma-canvas:agent-chat` holds the assistant's transcript under the same rules, and
-`figma-canvas:layers-width` and `figma-canvas:properties-width` the panel widths.
+`figma-canvas:agent-chat` holds the assistant's transcript under the same rules;
+`figma-canvas:layers-width` and `figma-canvas:properties-width` the panel widths; and
+`figma-canvas:agent-width` and `figma-canvas:agent-height` the assistant card's size.
+
+Every access goes through `readStored`/`writeStored` in `state/localStorage.ts`, because
+storage can throw rather than merely fail: Safari private mode and storage-blocked embeds
+raise on access, and a second private copy of that try/catch is a second place to forget it.
+The debounce that all of it is written on is one function there too, `startDebouncedSave`,
+since the document and the transcript both want a timer, a `pagehide` flush and a symmetric
+disposer, and written twice the half that drifts is the tab-close path, which is the half
+nobody notices is broken.
 
 The editor autosaves to `localStorage` 600ms after edits stop, and flushes on `pagehide` so a tab
 close does not drop the pending write. A save that will not parse is moved to
@@ -773,10 +782,33 @@ its top left and dragging away from the anchor grows it. `CornerGrip` takes `Pan
 idioms rather than its code, since that one is a single axis on a docked grid column and
 widening it would double every branch it has for its one caller: refs for the live numbers,
 a layout effect to restore, a write on release, a double click for the default, arrow keys
-with the event stopped. The size goes on `--agent-card-width` and `--agent-card-height` on
-the root rather than on the card, because the card unmounts when the panel closes and a
-property set on it would be gone on every reopen. The clamp is split: TypeScript holds the
-minimum and maximum, CSS holds the viewport bound, so neither restates the other.
+with the event stopped. What it shares outright with `PanelResizer` is the one function
+with no drag in it, `setRootLength`, and the nudge step, which a comment used to claim the
+two had in common while each held its own literal.
+
+The size goes on `--agent-card-width` and `--agent-card-height` on the root rather than on
+the card, because the card unmounts when the panel closes and a property set on it would be
+gone on every reopen. Those names, the two storage keys and the bounds are all in
+`cardSize.ts`, so the card's size has one vocabulary rather than a set of numbers in a
+module and a set of strings in the JSX beside it.
+
+The clamp is split: TypeScript holds the minimum and maximum, CSS holds the viewport bound,
+so neither restates the other. **What is remembered is the size the grip computed, not the
+size the element measured**, since the two are different exactly when the CSS bound bit: a
+card sized on a short window would otherwise store the cut-down height and come back shrunk
+on a screen with room for it, the CSS clamp having laundered itself into the value
+TypeScript owns. Nothing is written until a gesture has actually set a size, so a press
+that never moved leaves the stored one alone, which is the slop rule in a smaller place.
+
+**The transcript is the expensive thing to draw, so nothing that changes on its own
+schedule sits above it.** `AgentPanel` reads `open` and `status` and nothing else, and is a
+button until it is a card; `Card` mounts on open and owns the rows; `Composer` and
+`ConnectionStrip` are below it. Each boundary is one subscription that used to re-render
+every row of the conversation: the draft on every keystroke, the reconnect countdown once a
+second, and the whole transcript rebuilt behind a **closed** card for every step of a
+running turn. A suggestion asks for the caret through `openForInput`'s token rather than
+through a ref, since the field is now a component away, which is the same mechanism the
+shortcut already used to focus a card that was open.
 
 The transcript follows the newest message only while it is the one being read. Pinning
 unconditionally meant it could not be scrolled back during a turn, since every arriving step

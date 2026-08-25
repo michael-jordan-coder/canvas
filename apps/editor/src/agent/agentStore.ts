@@ -16,6 +16,24 @@ import { create } from 'zustand'
  */
 export type AgentStatus = 'offline' | 'connecting' | 'idle' | 'busy' | 'stopping'
 
+/**
+ * The two questions the union is actually asked, beside the union itself, the way
+ * `clipsChildren` sits beside the node kinds it answers for.
+ *
+ * Every affordance in the panel wants one of these rather than the status itself: the
+ * composer and the send button want `isConnected`, the stop button, the status dot, the
+ * live steps chip and the opener's badge want `isWorking`. Spelled out at the call site
+ * they are a disjunction to keep in step across two files, and this union has already grown
+ * once, from three values to five.
+ */
+export function isWorking(status: AgentStatus): boolean {
+  return status === 'busy' || status === 'stopping'
+}
+
+export function isConnected(status: AgentStatus): boolean {
+  return status === 'idle' || isWorking(status)
+}
+
 export interface ChatItem {
   id: number
   /**

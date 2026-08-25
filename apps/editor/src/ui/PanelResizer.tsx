@@ -1,5 +1,7 @@
 import { useLayoutEffect, useRef, useState, type ReactElement } from 'react'
 import { readStored, writeStored } from '../state/localStorage'
+import { PANEL_NUDGE } from './cardSize'
+import { setRootLength } from './rootLength'
 import styles from './PanelResizer.module.css'
 
 /** How wide a panel is allowed to be dragged, and where a double click puts it back. */
@@ -17,19 +19,6 @@ interface PanelResizerProps {
   /** Where the width survives a reload. */
   storageKey: string
   label: string
-}
-
-/**
- * The width lives on a root custom property rather than a style prop, the same shape the
- * scrub cursor takes: the stylesheet stays the only place a component's CSS is written,
- * and the app grid reads the token without knowing the panel resizes at all.
- */
-const applyWidth = (cssVar: string, width: number | null): void => {
-  if (width === null) {
-    document.documentElement.style.removeProperty(cssVar)
-  } else {
-    document.documentElement.style.setProperty(cssVar, `${width}px`)
-  }
 }
 
 /**
@@ -53,13 +42,13 @@ export function PanelResizer({ side, cssVar, storageKey, label }: PanelResizerPr
     const saved = Number.parseFloat(readStored(storageKey) ?? '')
     if (Number.isFinite(saved)) {
       width.current = clampWidth(saved)
-      applyWidth(cssVar, width.current)
+      setRootLength(cssVar, width.current)
     }
   }, [cssVar, storageKey])
 
   const setWidth = (next: number | null): void => {
     width.current = next
-    applyWidth(cssVar, next)
+    setRootLength(cssVar, next)
   }
 
   const persist = (): void => {
@@ -120,7 +109,7 @@ export function PanelResizer({ side, cssVar, storageKey, label }: PanelResizerPr
         // whatever is selected on the canvas one step per repeat.
         event.preventDefault()
         event.stopPropagation()
-        nudge(event.key === grow ? 16 : -16)
+        nudge(event.key === grow ? PANEL_NUDGE : -PANEL_NUDGE)
       }}
     />
   )

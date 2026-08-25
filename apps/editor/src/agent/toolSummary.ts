@@ -1,5 +1,4 @@
 import type { CommandName } from '@canvas/agent-server/protocol'
-import { humanize } from './chatRows'
 
 /**
  * A tool call as one line a person can read.
@@ -66,7 +65,7 @@ function truncate(value: string): string {
 
 /** The command's own name, as a sentence opener: "set_corner_radii" to "Set corner radii". */
 export function humanizeCommand(name: string): string {
-  const words = humanize(name)
+  const words = name.replaceAll('_', ' ')
   return words.charAt(0).toUpperCase() + words.slice(1)
 }
 
