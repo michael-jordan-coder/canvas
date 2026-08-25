@@ -66,6 +66,12 @@
   --radius-md: 8px;
   --radius-lg: 12px;
 
+  /* The one shadow in the app, and it says one thing: this surface floats over the canvas
+     rather than being docked to it. Docked chrome meets the canvas along a hairline and gets
+     no shadow, so an elevation here always means the same thing it does in Figma. Two
+     layers: a wide soft one for the lift, a tight one for the contact edge. */
+  --shadow-card: 0 12px 32px rgb(0 0 0 / 0.1), 0 2px 6px rgb(0 0 0 / 0.06);
+
   --duration: 90ms;
   --ease: cubic-bezier(0.2, 0, 0, 1);
 }
@@ -94,6 +100,10 @@
 
   /* Lifted the way the accent is: the same red on a dark panel reads almost brown. */
   --danger: #ff6b60;
+
+  /* Deeper and tighter: on a dark surround a soft light shadow reads as fog, and what
+     separates the card from the canvas is the darkness directly under it. */
+  --shadow-card: 0 12px 32px rgb(0 0 0 / 0.44), 0 2px 6px rgb(0 0 0 / 0.32);
 }
 
 @media (prefers-reduced-motion: reduce) {

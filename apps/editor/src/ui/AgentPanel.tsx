@@ -59,10 +59,12 @@ function Steps({ items, live }: { items: ChatItem[]; live: boolean }): ReactElem
         data-open={open}
         data-live={live}
         data-failed={failed}
+        aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <ChevronIcon size={12} />
+        <span className={styles.pip} />
         {label}
+        <ChevronIcon size={12} />
       </button>
       {open && (
         <div className={styles.stepsBody}>
@@ -90,6 +92,17 @@ function Item({ item }: { item: ChatItem }): ReactElement {
     </p>
   )
 }
+
+/**
+ * What an empty card offers. Three, because a list long enough to browse is a menu, and a
+ * menu is a different promise from a conversation. Each one is a real request this canvas
+ * can answer, and the last is there to say that code is on the table at all.
+ */
+const SUGGESTIONS: readonly string[] = [
+  'Design a sign in screen',
+  'Make a pricing card with three tiers',
+  'Build a counter I can click, with code',
+]
 
 /** Seconds until the next automatic reconnect, or null when none is scheduled. */
 function useCountdown(at: number | null): number | null {
@@ -173,10 +186,11 @@ export function AgentPanel(): ReactElement {
         type="button"
         className={styles.opener}
         aria-label="Assistant"
+        title="Assistant"
         data-busy={status === 'busy' || status === 'stopping'}
         onClick={() => setOpen(true)}
       >
-        <AssistantIcon />
+        <AssistantIcon size={18} />
       </button>
     )
   }
@@ -212,7 +226,12 @@ export function AgentPanel(): ReactElement {
   }
 
   return (
-    <section ref={panelRef} className={styles.panel} aria-label="Assistant">
+    <section
+      ref={panelRef}
+      className={styles.panel}
+      aria-label="Assistant"
+      aria-busy={status === 'busy' || status === 'stopping'}
+    >
       <CornerGrip
         targetRef={panelRef}
         widthVar="--agent-card-width"
@@ -228,6 +247,7 @@ export function AgentPanel(): ReactElement {
           type="button"
           className={styles.iconButton}
           aria-label="New chat"
+          title="New chat"
           onClick={() => agentClient.reset()}
         >
           <PlusIcon />
@@ -236,6 +256,7 @@ export function AgentPanel(): ReactElement {
           type="button"
           className={styles.iconButton}
           aria-label="Close"
+          title="Close"
           onClick={() => setOpen(false)}
         >
           <CloseIcon />
@@ -246,6 +267,9 @@ export function AgentPanel(): ReactElement {
         <div
           ref={listRef}
           className={styles.list}
+          role="log"
+          aria-live="polite"
+          aria-label="Conversation"
           onScroll={() => {
             const list = listRef.current
             if (!list) return
@@ -254,7 +278,26 @@ export function AgentPanel(): ReactElement {
             setDetached(!near)
           }}
         >
-          {rows.length === 0 && <p className={styles.empty}>Ask for a change</p>}
+          {rows.length === 0 && (
+            <div className={styles.empty}>
+              <p className={styles.emptyTitle}>Ask for a change, or start from one of these.</p>
+              {SUGGESTIONS.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  className={styles.suggestion}
+                  // Into the composer rather than straight to the server: a suggestion is a
+                  // starting point, and the person should get to change it before it is sent.
+                  onClick={() => {
+                    setDraft(suggestion)
+                    inputRef.current?.focus()
+                  }}
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          )}
           {rows.map((row, index) =>
             row.kind === 'steps' ? (
               <Steps

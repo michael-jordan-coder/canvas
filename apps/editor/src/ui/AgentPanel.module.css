@@ -1,5 +1,18 @@
-/* Bottom-right of the viewport, over the canvas. The card and the opener share the spot,
-   so opening reads as the button becoming the panel rather than something new arriving. */
+/*
+ * The assistant, as a card that floats over the canvas.
+ *
+ * Everything else in this editor is docked chrome: panels that meet the canvas along a
+ * hairline, at 11 and 12 pixels, packed tight because they are dense controls. A
+ * conversation is the opposite kind of surface. It is read rather than operated, it sits on
+ * top of artwork rather than beside it, and at the density of the properties panel it reads
+ * as a log rather than as something someone said. So this file breaks with the panels on
+ * three counts and only three: the body is 13px with a reading line height, the padding is
+ * 12 and 16 rather than 4 and 8, and the card is lifted off the canvas by a shadow instead
+ * of a hairline. Colour, radii and motion stay exactly the app's.
+ */
+
+/* The card and the opener share the corner, so opening reads as the button becoming the
+   panel rather than as something new arriving. */
 .opener,
 .panel {
   position: absolute;
@@ -10,23 +23,37 @@
 .opener {
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
   color: var(--text-secondary);
   transition:
     color var(--duration) var(--ease),
-    background var(--duration) var(--ease);
+    background var(--duration) var(--ease),
+    translate var(--duration) var(--ease);
 }
 
 .opener:hover {
   color: var(--text);
   background: var(--hover);
+  /* A pixel of lift, which is the only affordance a round button has room for. */
+  translate: 0 -1px;
 }
 
-/* Working while closed: the accent is the one color that means active. */
+.opener:focus-visible,
+.iconButton:focus-visible,
+.retry:focus-visible,
+.jump:focus-visible,
+.suggestion:focus-visible,
+.action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Working while closed: the accent is the one colour that means active. */
 .opener[data-busy='true'] {
   color: var(--accent);
 }
@@ -37,14 +64,26 @@
   /* Written by the corner grip onto the root, so a resized card is the right size in its
      first frame after being reopened. The viewport bound stays in CSS, which is the only
      place that knows how much room there is. */
-  width: var(--agent-card-width, 320px);
-  height: var(--agent-card-height, 360px);
+  width: var(--agent-card-width, 380px);
+  height: var(--agent-card-height, 520px);
   max-width: calc(100% - var(--space-4) * 2);
   max-height: calc(100% - var(--space-4) * 2);
   overflow: hidden;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  /* Out of the corner it sits in, so the card grows from the button it replaced. Reduced
+     motion zeroes --duration, which ends the animation before it can be seen. */
+  transform-origin: 100% 100%;
+  animation: cardIn var(--duration) var(--ease);
+}
+
+@keyframes cardIn {
+  from {
+    opacity: 0;
+    scale: 0.97;
+  }
 }
 
 .header {
@@ -52,18 +91,19 @@
   align-items: center;
   gap: var(--space-3);
   flex: none;
-  height: 32px;
-  /* Wider on the left than on the right: the corner grip sits in that space, and a status
-     dot underneath it would take the press meant for the grip. */
-  padding: 0 var(--space-3) 0 var(--space-5);
+  height: 40px;
+  /* Wider on the left than on the right: the corner grip sits in that space, and anything
+     underneath it would take the press meant for the grip. */
+  padding: 0 var(--space-2) 0 var(--space-5);
   border-bottom: 1px solid var(--line);
 }
 
 .title {
   flex: 1;
   font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--text-secondary);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text);
 }
 
 /* Hollow when there is no server, filled when there is, accent while working. */
@@ -80,13 +120,9 @@
   background: var(--line-strong);
 }
 
-/* Connecting is a wait, not a state of the agent, so it reads as neither on nor off. */
+/* Connecting is a wait rather than a state of the agent, so it reads as neither on nor off. */
 .status[data-status='connecting'] {
-  background: repeating-linear-gradient(
-    45deg,
-    var(--line-strong) 0 1px,
-    transparent 1px 2px
-  );
+  background: repeating-linear-gradient(45deg, var(--line-strong) 0 1px, transparent 1px 2px);
 }
 
 .status[data-status='busy'],
@@ -95,18 +131,28 @@
   border-color: var(--accent);
 }
 
+.status[data-status='busy'] {
+  animation: breathe 1.6s var(--ease) infinite;
+}
+
 /* Winding down: the same dot, dimmed, so stopping is visibly between busy and idle. */
 .status[data-status='stopping'] {
   opacity: 0.5;
+}
+
+@keyframes breathe {
+  50% {
+    opacity: 0.35;
+  }
 }
 
 .iconButton {
   display: grid;
   place-items: center;
   flex: none;
-  width: 20px;
-  height: 20px;
-  border-radius: var(--radius);
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-field);
   color: var(--text-secondary);
   transition:
     color var(--duration) var(--ease),
@@ -118,8 +164,8 @@
   background: var(--hover);
 }
 
-/* The list and the control that sits over its foot. The wrapper is what the jump button is
-   positioned against, so it can float above the newest message without scrolling with it. */
+/* The list and the control that floats over its foot, which is why the wrapper exists: the
+   jump control has to sit above the newest message without scrolling away with it. */
 .transcript {
   position: relative;
   display: flex;
@@ -128,17 +174,31 @@
   flex: 1;
 }
 
+.list {
+  flex: 1;
+  /* Zero, not a floor: the card has a real height, and a scroller that refuses to shrink
+     pushes the composer off the bottom of it. */
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-4);
+}
+
 .jump {
   position: absolute;
   left: 50%;
   bottom: var(--space-3);
   translate: -50% 0;
-  padding: var(--space-1) var(--space-3);
+  padding: var(--space-2) var(--space-4);
   font-size: var(--text-xs);
   color: var(--text-secondary);
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
   transition:
     color var(--duration) var(--ease),
     border-color var(--duration) var(--ease);
@@ -149,84 +209,99 @@
   border-color: var(--line-strong);
 }
 
-.list {
-  flex: 1;
-  /* Zero, not a floor: the card has a real height now, and a scroller that refuses to
-     shrink pushes the composer off the bottom of it. */
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-3);
-}
-
 .message {
   white-space: pre-wrap;
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
+  font-size: var(--text-md);
+  line-height: 1.55;
   color: var(--text);
 }
 
-/* The person's own words, set off as a block the way every chat marks the asking side.
-   The space above it is what separates one turn from the last: a question, then everything
-   that answered it, with no divider needed to say so. */
+/*
+ * The person's own words, in the one bubble this design has. --field rather than the sunken
+ * grey: on the dark theme the sunken tone is darker than the card and reads as a hole cut in
+ * it, while the field tone reads as something resting on top, which is what a message is.
+ * The tight corner on the anchored side is the oldest cue in chat for whose turn it is.
+ */
 .message[data-kind='user'] {
   align-self: flex-end;
-  max-width: 85%;
-  margin-top: var(--space-4);
-  padding: var(--space-2) var(--space-3);
-  background: var(--panel-sunken);
-  border-radius: var(--radius-md);
+  max-width: 88%;
+  padding: var(--space-3) var(--space-4);
+  background: var(--field);
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-field) var(--radius-lg);
 }
 
-.message[data-kind='user']:first-child {
+/* A turn opens with the question, so the space above it is what separates one turn from the
+   last. No divider: the rhythm says it, the way it does in every chat worth reading. */
+.list > .message[data-kind='user'] {
+  margin-top: var(--space-5);
+}
+
+.list > .message[data-kind='user']:first-child {
   margin-top: 0;
 }
 
-/* The answer, a step up in size from the process that produced it. */
-.message[data-kind='assistant'] {
-  font-size: var(--text-md);
+/* The answer, bound to the run of steps that produced it rather than floating free of it. */
+.steps + .message[data-kind='assistant'] {
+  margin-top: calc(var(--space-2) * -1);
 }
 
+/* A failure, marked by a rule rather than by a fill: red enough to find, quiet enough to sit
+   in a conversation. */
 .message[data-kind='error'] {
+  align-self: stretch;
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--danger);
+  font-size: var(--text-sm);
   color: var(--danger);
 }
 
-/* The panel talking about itself: quieter than either side of the conversation. */
+/* The panel talking about itself, which is neither side of the conversation and reads as
+   neither: centred, small, and quiet. */
 .message[data-kind='notice'] {
+  align-self: center;
+  max-width: 90%;
+  text-align: center;
   font-size: var(--text-xs);
+  line-height: 1.4;
   color: var(--text-disabled);
 }
 
-/* One quiet line, the tone the layers panel's own empty state sets: the interface explains
-   itself, so there is no helper paragraph telling someone what an assistant is. */
-.empty {
-  margin: auto 0;
-  color: var(--text-secondary);
-}
-
-/* A folded run of tool calls and thinking: one quiet line until it is asked to open. */
+/*
+ * A run of tool calls and thinking, folded into one chip. A chip rather than a line of grey
+ * text, because the steps are the machine's own record: they belong in a container that says
+ * "this is not the conversation" at a glance, and they have to be openable without being
+ * read first.
+ */
 .steps {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  align-items: flex-start;
+  gap: var(--space-3);
 }
 
 .stepsToggle {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  align-self: flex-start;
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-2);
   font-size: var(--text-xs);
-  color: var(--text-disabled);
-  transition: color var(--duration) var(--ease);
+  color: var(--text-secondary);
+  background: var(--panel-sunken);
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  transition:
+    color var(--duration) var(--ease),
+    border-color var(--duration) var(--ease);
 }
 
 .stepsToggle:hover {
-  color: var(--text-secondary);
+  color: var(--text);
+  border-color: var(--line);
 }
 
 .stepsToggle svg {
+  flex: none;
   transition: transform var(--duration) var(--ease);
 }
 
@@ -234,48 +309,112 @@
   transform: rotate(90deg);
 }
 
-/* The step in progress reads a shade stronger than a settled count. */
+/* The step in progress, and the run that hides a failure, are the two the eye should catch. */
 .stepsToggle[data-live='true'] {
-  color: var(--text-secondary);
+  color: var(--text);
 }
 
-/* Indented under the toggle, with a rule standing in for the fold. */
+.stepsToggle[data-failed='true'] {
+  color: var(--danger);
+}
+
+/* The one moving thing in the panel, and only while something is actually happening. */
+.pip {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  margin-left: var(--space-1);
+  border-radius: 50%;
+  background: var(--text-disabled);
+}
+
+.stepsToggle[data-live='true'] .pip {
+  background: var(--accent);
+  animation: breathe 1.2s var(--ease) infinite;
+}
+
+.stepsToggle[data-failed='true'] .pip {
+  background: var(--danger);
+  animation: none;
+}
+
+/* Indented under the chip, with a rule standing in for the fold. */
 .stepsBody {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  margin-left: 5px;
-  padding-left: var(--space-3);
+  margin-left: var(--space-4);
+  padding-left: var(--space-4);
   border-left: 1px solid var(--line);
 }
 
 .step {
   font-size: var(--text-xs);
-  color: var(--text-disabled);
+  line-height: 1.5;
+  color: var(--text-secondary);
 }
 
-/* A step that failed, and the closed run that hides one. A fold reading "12 steps" would
-   otherwise say nothing about the one step worth opening it for. */
-.step[data-failed='true'],
-.stepsToggle[data-failed='true'] {
+.step[data-failed='true'] {
   color: var(--danger);
 }
 
 .thought {
   font-size: var(--text-xs);
-  color: var(--text-secondary);
+  line-height: 1.5;
+  color: var(--text-disabled);
   white-space: pre-wrap;
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
 }
 
-/* Not a line in the transcript: a strip between it and the composer, because it is about
-   the connection rather than about anything that was said. */
+/*
+ * The empty card. The rule elsewhere in this app is that the interface explains itself and
+ * needs no helper text, and it holds everywhere a person can see what a control does. It
+ * cannot hold here: nothing on screen says what this assistant is able to do, and an empty
+ * box asking for a sentence is the hardest prompt in software. The examples are the
+ * explanation, and they are clickable because reading one and then typing it out would be
+ * the joke version of an assistant.
+ */
+.empty {
+  margin: auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+}
+
+.emptyTitle {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.suggestion {
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  color: var(--text);
+  background: var(--panel-sunken);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  transition:
+    border-color var(--duration) var(--ease),
+    background var(--duration) var(--ease);
+}
+
+.suggestion:hover {
+  background: var(--panel);
+  border-color: var(--line-strong);
+}
+
+/* Not a line in the transcript: a strip between it and the composer, because it is about the
+   connection rather than about anything that was said. */
 .connection {
   display: flex;
   align-items: center;
   gap: var(--space-3);
   flex: none;
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  background: var(--panel-sunken);
   border-top: 1px solid var(--line);
 }
 
@@ -287,9 +426,10 @@
 
 .retry {
   flex: none;
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-1) var(--space-3);
   font-size: var(--text-xs);
   color: var(--text-secondary);
+  background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius-field);
   transition:
@@ -308,32 +448,39 @@
 
 .composer {
   flex: none;
-  padding: var(--space-3);
-  border-top: 1px solid var(--line);
+  padding: var(--space-4);
+  padding-top: 0;
 }
 
-/* The border lives on this wrapper, not the textarea, so the send button sits inside the
-   field. 16px keeps a one line field a pill and a grown one a rounded box. */
+/* The border lives on this wrapper rather than on the textarea, so the send button sits
+   inside the field. The focus ring is the accent's own halo, which is how every other field
+   in the app says it has the keyboard, only larger because this one is the size of a
+   paragraph rather than of a number. */
 .field {
   display: flex;
   align-items: flex-end;
   gap: var(--space-2);
-  padding: var(--space-1);
+  padding: var(--space-2);
   background: var(--field);
   border: 1px solid var(--line);
-  border-radius: 16px;
-  transition: border-color var(--duration) var(--ease);
+  border-radius: var(--radius-lg);
+  transition:
+    border-color var(--duration) var(--ease),
+    box-shadow var(--duration) var(--ease);
 }
 
 .field:focus-within {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
 }
 
 .input {
   flex: 1;
   min-width: 0;
-  max-height: 96px;
+  max-height: 132px;
   padding: var(--space-2) 0 var(--space-2) var(--space-3);
+  font-size: var(--text-md);
+  line-height: 1.5;
   background: none;
   border: none;
   outline: none;
@@ -350,20 +497,29 @@
   display: grid;
   place-items: center;
   flex: none;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   background: var(--accent);
   color: var(--on-accent);
-  transition: background var(--duration) var(--ease);
+  transition:
+    background var(--duration) var(--ease),
+    color var(--duration) var(--ease);
 }
 
-.action:hover {
+.action:hover:not(:disabled) {
   background: var(--accent-hover);
 }
 
 /* Nothing to send yet: present but quiet, and the field beside it says why. */
 .action:disabled {
-  background: var(--panel-sunken);
+  background: transparent;
   color: var(--text-disabled);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status,
+  .pip {
+    animation: none;
+  }
 }

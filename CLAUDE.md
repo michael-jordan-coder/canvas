@@ -749,6 +749,25 @@ in a text field back to the field. Focus travels as a token rather than a flag, 
 same shortcut pressed twice has to focus twice and `open` will not have changed the second
 time.
 
+**The card is the one surface in this app that is not docked chrome, and it is designed as
+one.** Every panel here meets the canvas along a hairline at 11 and 12 pixels, packed tight
+because it is dense controls; a conversation is read rather than operated, and at that
+density it looked like a log rather than like something someone said. The assistant breaks
+with the panels on exactly three counts: a 13px body with a reading line height, padding of
+12 and 16 rather than 4 and 8, and `--shadow-card` instead of a hairline, which is the one
+shadow in the app and means only ever "this floats over the canvas". Colour, radii and
+motion stay the app's own. The person's words are the single bubble, in `--field` rather
+than the sunken grey because on the dark theme the sunken tone is darker than the card and
+reads as a hole cut in it. A run of steps is a chip rather than a line of grey text, since
+it is the machine's record and has to be openable without being read first, and the pip on
+it is the only moving thing in the panel.
+
+**An empty card offers three things to press.** That is a deliberate exception to the rule
+that the interface explains itself and carries no helper text, and the exception is narrow:
+the rule holds wherever a person can see what a control does, and nothing on screen says
+what an assistant is able to do. A suggestion fills the composer rather than sending, since
+it is a starting point and not a command.
+
 **The card is sized from its free corner.** It is anchored bottom right, so the grip is at
 its top left and dragging away from the anchor grows it. `CornerGrip` takes `PanelResizer`'s
 idioms rather than its code, since that one is a single axis on a docked grid column and
