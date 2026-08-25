@@ -9,7 +9,7 @@ import {
 } from 'react'
 import { agentClient } from '../agent/connection'
 import { useAgent, type ChatItem } from '../agent/agentStore'
-import { hasFailure, humanize, isNearBottom, toRows } from '../agent/chatRows'
+import { hasFailure, isNearBottom, toRows } from '../agent/chatRows'
 import { AssistantIcon, ChevronIcon, CloseIcon, PlusIcon, SendIcon, StopIcon } from './icons'
 import styles from './AgentPanel.module.css'
 
@@ -36,7 +36,7 @@ function Steps({ items, live }: { items: ChatItem[]; live: boolean }): ReactElem
     live && latest
       ? latest.kind === 'thinking'
         ? 'Thinking'
-        : humanize(latest.text)
+        : latest.text
       : failed
         ? `${count}, one failed`
         : count
@@ -63,7 +63,7 @@ function Steps({ items, live }: { items: ChatItem[]; live: boolean }): ReactElem
               </p>
             ) : (
               <p key={item.id} className={styles.step} data-failed={item.kind === 'tool-error'}>
-                {item.kind === 'tool-error' ? item.text : humanize(item.text)}
+                {item.text}
               </p>
             ),
           )}
@@ -196,6 +196,7 @@ export function AgentPanel(): ReactElement {
             setDetached(!near)
           }}
         >
+          {rows.length === 0 && <p className={styles.empty}>Ask for a change</p>}
           {rows.map((row, index) =>
             row.kind === 'steps' ? (
               <Steps

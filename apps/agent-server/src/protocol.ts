@@ -231,7 +231,12 @@ export type ServerMessage =
   | { type: 'turn_start' }
   | { type: 'assistant'; text: string }
   | { type: 'thinking'; text: string }
-  | { type: 'tool'; name: CommandName }
+  /**
+   * A tool call starting. The args ride along so the editor can say what it is about:
+   * "Create frame Header" rather than "create frame". It is display only; the `command`
+   * that follows is what actually runs, and the editor answers that one.
+   */
+  | { type: 'tool'; name: CommandName; args: unknown }
   | { type: 'command'; id: number; name: CommandName; args: unknown }
   /**
    * `stopped` is the person having asked, which the editor renders as a state rather than

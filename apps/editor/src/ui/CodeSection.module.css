@@ -51,10 +51,10 @@
   font-size: var(--text-sm);
 }
 
-/* The same quiet voice every other error in the app speaks in. */
+/* The same voice every other failure in the app speaks in. */
 .error {
   margin: 0;
-  color: var(--text-secondary);
+  color: var(--danger);
   font-size: var(--text-xs);
   white-space: pre-wrap;
   word-break: break-word;

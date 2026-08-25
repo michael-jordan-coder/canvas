@@ -158,23 +158,42 @@
   color: var(--text);
 }
 
-/* The person's own words, set off as a block the way every chat marks the asking side. */
+/* The person's own words, set off as a block the way every chat marks the asking side.
+   The space above it is what separates one turn from the last: a question, then everything
+   that answered it, with no divider needed to say so. */
 .message[data-kind='user'] {
   align-self: flex-end;
   max-width: 85%;
+  margin-top: var(--space-4);
   padding: var(--space-2) var(--space-3);
   background: var(--panel-sunken);
   border-radius: var(--radius-md);
 }
 
+.message[data-kind='user']:first-child {
+  margin-top: 0;
+}
+
+/* The answer, a step up in size from the process that produced it. */
+.message[data-kind='assistant'] {
+  font-size: var(--text-md);
+}
+
 .message[data-kind='error'] {
-  color: var(--text-secondary);
+  color: var(--danger);
 }
 
 /* The panel talking about itself: quieter than either side of the conversation. */
 .message[data-kind='notice'] {
   font-size: var(--text-xs);
   color: var(--text-disabled);
+}
+
+/* One quiet line, the tone the layers panel's own empty state sets: the interface explains
+   itself, so there is no helper paragraph telling someone what an assistant is. */
+.empty {
+  margin: auto 0;
+  color: var(--text-secondary);
 }
 
 /* A folded run of tool calls and thinking: one quiet line until it is asked to open. */
@@ -226,12 +245,11 @@
   color: var(--text-disabled);
 }
 
-/* A step that failed, and the closed run that hides one: both read a shade stronger than
-   the steps around them, since a fold saying "12 steps" would otherwise hide the one thing
-   worth opening it for. */
+/* A step that failed, and the closed run that hides one. A fold reading "12 steps" would
+   otherwise say nothing about the one step worth opening it for. */
 .step[data-failed='true'],
 .stepsToggle[data-failed='true'] {
-  color: var(--text-secondary);
+  color: var(--danger);
 }
 
 .thought {

@@ -202,7 +202,9 @@ and silently land on each other's ports. This one stays out of that fight.
   attribute (see the fill swatch in `PropertiesPanel`), not on a `style` prop.
 - Design tokens live in `apps/editor/src/styles/tokens.css`. Light is the default because artwork
   has to be judged against a neutral surround. Dark is `data-theme="dark"` on `<html>`. Greys are
-  true neutral so the one accent always means something: selected, active, focused.
+  true neutral so the one accent always means something: selected, active, focused. `--danger` is
+  the single exception to that, for text and hairlines only and never a fill: a failure has to be
+  legible before it is read, and desaturated it looked like a caption.
 - WGSL shaders are separate `.wgsl` files imported with `?raw`. No shader source inside a `.ts`
   string literal, because that loses syntax highlighting and makes diffs unreadable.
 - No em dashes anywhere: UI copy, comments, commit messages, docs.
@@ -707,6 +709,13 @@ answers the model with the error so it can recover, and appends a line to the tr
 folds in with the run of steps, because a tool the model will retry is process rather than an
 answer, but a closed run says one of its steps failed: a turn that quietly failed half its
 edits must not read as a turn that worked.
+
+**A tool line names its object.** "Create frame" says nothing during a run of fifteen steps,
+so the `tool` message carries the args the `command` after it is about to run, and
+`toolSummary` turns them into "Create frame Header". A table of which field carries the
+object, with dotted paths so a fill's colour is reachable, and the command's own name when
+nothing does. The summary is made where the message arrives rather than in the panel, because
+the item's text is what a saved transcript holds and the args are not saved with it.
 
 The transcript follows the newest message only while it is the one being read. Pinning
 unconditionally meant it could not be scrolled back during a turn, since every arriving step

@@ -5,6 +5,11 @@
  *
  * Greys are true neutral (equal channels) on purpose. That is what leaves the accent as the
  * only chromatic thing on screen, so color always means selected, active or focused.
+ *
+ * The one other chromatic thing is --danger, and it earns the exception: a failure has to be
+ * legible before it is read, and desaturating it made a failed tool call and an ordinary
+ * caption look alike. It is text and hairlines only, never a fill, so it never competes with
+ * the accent for what the eye lands on first.
  */
 :root {
   color-scheme: light;
@@ -29,6 +34,8 @@
   --accent-hover: #0069e0;
   --on-accent: #ffffff;
   --accent-subtle: rgb(10 124 255 / 0.12);
+
+  --danger: #d0342c;
 
   /* The surround the artwork sits on. Mid grey in both themes so a fill is judged against
      a constant, not against the chrome. */
@@ -84,6 +91,9 @@
   --accent-hover: #5aacff;
   --on-accent: #08121c;
   --accent-subtle: rgb(59 157 255 / 0.18);
+
+  /* Lifted the way the accent is: the same red on a dark panel reads almost brown. */
+  --danger: #ff6b60;
 }
 
 @media (prefers-reduced-motion: reduce) {

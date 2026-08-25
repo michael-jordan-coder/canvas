@@ -72,7 +72,7 @@ function forward(name: CommandName, args: unknown): Promise<unknown> {
       reject(new Error(`The editor did not answer ${name} within ${COMMAND_TIMEOUT_MS / 1000}s.`))
     }, COMMAND_TIMEOUT_MS)
     pending.set(id, { resolve, reject, timer })
-    send({ type: 'tool', name })
+    send({ type: 'tool', name, args })
     send({ type: 'command', id, name, args })
   })
 }

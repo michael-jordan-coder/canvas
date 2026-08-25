@@ -2,7 +2,7 @@ import { AGENT_PORT } from '@canvas/agent-server/protocol'
 import type { ClientMessage, ServerMessage } from '@canvas/agent-server/protocol'
 import { scene } from '../state/scene'
 import { useAgent } from './agentStore'
-import { humanize } from './chatRows'
+import { humanizeCommand, toolSummary } from './toolSummary'
 import { executeCommand } from './executor'
 
 /**
@@ -53,7 +53,7 @@ async function runCommand(id: number, name: string, args: unknown): Promise<void
     // The model is told, and so is the person. It recovers from most of these on its own,
     // which is why this folds in with the steps rather than interrupting the conversation,
     // but a turn that quietly failed half its edits must not look like a turn that worked.
-    useAgent.getState().append('tool-error', `${humanize(name)} failed: ${message}`)
+    useAgent.getState().append('tool-error', `${humanizeCommand(name)} failed: ${message}`)
   }
 }
 
@@ -77,7 +77,9 @@ function onMessage(message: ServerMessage): void {
       agent.append('thinking', message.text)
       return
     case 'tool':
-      agent.append('tool', message.name)
+      // Summarised here rather than in the panel: the item's text is what a restored
+      // transcript holds, and the args are not saved with it.
+      agent.append('tool', toolSummary(message.name, message.args))
       return
     case 'command':
       void runCommand(message.id, message.name, message.args)
