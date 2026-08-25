@@ -1,7 +1,8 @@
 import { AGENT_PORT } from '@canvas/agent-server/protocol'
 import type { ClientMessage, ServerMessage } from '@canvas/agent-server/protocol'
 import { scene } from '../state/scene'
-import { useAgent } from './agentStore'
+import { isWorking, useAgent } from './agentStore'
+import { turnEndItem } from './turnEnd'
 import { clearSavedTranscript } from './chatStorage'
 import { reconnectDelay } from './reconnect'
 import { humanizeCommand, toolSummary } from './toolSummary'
@@ -106,15 +107,15 @@ function onMessage(message: ServerMessage): void {
     case 'command':
       void runCommand(message.id, message.name, message.args)
       return
-    case 'turn_end':
+    case 'turn_end': {
       closeTurn()
       agent.setStatus('idle')
-      // A stop is a state the person put the turn in, so it reads as one. The server tells
-      // us which it was, because the SDK reports an interrupt as an unsuccessful result and
-      // the text would otherwise arrive here as "The agent stopped: <subtype>".
-      if (message.stopped) agent.append('notice', 'Stopped.')
-      else if (message.error) agent.append('error', message.error)
+      // The server sends why, which is the part only it can know; what that reads as is
+      // decided here, with the rest of the assistant's copy.
+      const ending = turnEndItem(message.reason, message.detail)
+      if (ending) agent.append(ending.kind, ending.text)
       return
+    }
     case 'rejected':
       // Back into the composer, where it can be sent again once the turn ends.
       agent.setDraft(message.text)
@@ -212,7 +213,7 @@ export const agentClient = {
   },
   reset(): void {
     const agent = useAgent.getState()
-    if (agent.status === 'busy' || agent.status === 'stopping') return
+    if (isWorking(agent.status)) return
     agent.clear()
     // Cleared on disk in the same call, or a reload a moment later would restore it from a
     // debounce that had not fired yet.

@@ -708,8 +708,15 @@ happening: `connecting` (with the countdown to the next automatic attempt, and a
 skips it) and `stopping`, which covers the gap between the stop reaching the server and the
 model noticing it between tool calls. A stop is not a failure, and the server says which it
 was: the SDK reports an interrupted turn as an unsuccessful result, indistinguishable from
-the turn cap, so `turn_end` carries `stopped` and the only thing that knows is the code that
-asked for the interrupt.
+the turn cap, and the only thing that knows is the code that asked for the interrupt.
+
+**`turn_end` carries a reason, not a sentence.** `ok`, `stopped`, `max_turns`, `error`, with
+a `detail` for what the reason cannot hold: an unmapped SDK subtype, or a thrown message.
+Only the server can tell the three apart, and only the panel can act on the difference, so
+the mapping from subtype to reason is the server's and the words are the editor's, beside
+"Stopped." and the rest of the assistant's copy. It buys the distinction the flattened
+string could not express: a stop and the step cap are notices, because both are states a
+conversation carries on from, and only a real failure is an error.
 
 **A message the server will not run says so.** A chat arriving mid-turn used to be dropped
 where it landed, so the person watched a message that had been typed, sent, and forgotten by
@@ -730,9 +737,14 @@ edits must not read as a turn that worked.
 
 **A tool line names its object.** "Create frame" says nothing during a run of fifteen steps,
 so the `tool` message carries the args the `command` after it is about to run, and
-`toolSummary` turns them into "Create frame Header". A table of which field carries the
-object, with dotted paths so a fill's colour is reachable, and the command's own name when
-nothing does. The summary is made where the message arrives rather than in the panel, because
+`toolSummary` turns them into "Create frame Header". A table of accessors, one per command,
+each returning the fields that might name the object in the order they should be tried, and
+the command's own name when nothing does. **Accessors rather than dotted paths, so the
+compiler sees the field**: the paths this replaced were unchecked strings, and one of them
+named `fills.0.color` on a paint whose field is `hex`, so every fill summary had quietly
+fallen back to "Set fills" while the test covering it hand-built the args and stayed green.
+That is the drift `protocol.ts` exists to make impossible, and a table of strings opted out
+of it. The summary is made where the message arrives rather than in the panel, because
 the item's text is what a saved transcript holds and the args are not saved with it.
 
 **New chat is a promise about the server, not about the panel.** The conversation lives in

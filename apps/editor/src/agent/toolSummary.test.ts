@@ -7,8 +7,11 @@ describe('toolSummary', () => {
     expect(toolSummary('rename_node', { nodeId: 'n1', name: 'Price' })).toBe('Rename node Price')
   })
 
-  it('reads a field out of an array through a dotted path', () => {
-    expect(toolSummary('set_fills', { nodeId: 'n1', fills: [{ color: '#0a7cff' }] })).toBe(
+  it('reaches the colour inside the first paint, without unpacking the paint', () => {
+    // `hex` is the field `AgentPaint` actually has. The dotted-path table this replaced
+    // named `color`, so every fill summary fell back to "Set fills" while a test that
+    // hand-built the args passed.
+    expect(toolSummary('set_fills', { nodeId: 'n1', fills: [{ hex: '#0a7cff' }] })).toBe(
       'Set fills #0a7cff',
     )
   })

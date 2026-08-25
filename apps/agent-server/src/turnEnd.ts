@@ -1,19 +1,24 @@
+import type { TurnEndReason } from './protocol.ts'
+
 /**
- * How a turn that did not simply finish is described to the person.
+ * The SDK's result subtype as a reason the protocol names.
  *
  * The SDK reports an unsuccessful turn as an enum: `error_max_turns`,
  * `error_during_execution`. Those are the right words for a log and the wrong ones for a
- * chat window, and passing them through was the only thing the editor had to show. Kept in
- * its own module because importing `index.ts` binds the port, so nothing there is testable.
+ * chat window, but the mapping is still the server's job, because the subtype only exists
+ * here. What the person reads is the editor's, beside the rest of the assistant's copy.
+ *
+ * Kept in its own module because importing `index.ts` binds the port, so nothing there is
+ * testable.
  */
-export function describeResult(subtype: string): string {
+export function resultReason(subtype: string): { reason: TurnEndReason; detail?: string } {
   switch (subtype) {
     case 'error_max_turns':
-      return 'The assistant reached its limit of steps for one turn.'
+      return { reason: 'max_turns' }
     case 'error_during_execution':
-      return 'The assistant hit an error partway through.'
+      return { reason: 'error' }
     default:
       // The subtype is kept, because an unmapped one is the only clue about what happened.
-      return `The assistant stopped before finishing (${subtype}).`
+      return { reason: 'error', detail: subtype }
   }
 }

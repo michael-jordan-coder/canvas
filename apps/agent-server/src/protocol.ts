@@ -226,6 +226,9 @@ export type CommandName = keyof CommandMap
 
 // Messages -------------------------------------------------------------------------------
 
+/** Why a turn ended. `ok` is the ordinary case and says nothing to the person. */
+export type TurnEndReason = 'ok' | 'stopped' | 'max_turns' | 'error'
+
 export type ServerMessage =
   /**
    * `session` is whether the server still holds the conversation. It restarts often under
@@ -245,11 +248,19 @@ export type ServerMessage =
   | { type: 'tool'; name: CommandName; args: unknown }
   | { type: 'command'; id: number; name: CommandName; args: unknown }
   /**
-   * `stopped` is the person having asked, which the editor renders as a state rather than
-   * as a failure. The SDK reports an interrupted turn as an unsuccessful result, so without
-   * this the only thing the editor could show for a stop is an error line.
+   * How the turn ended, as a reason rather than as a sentence.
+   *
+   * The distinctions matter to the panel and only it can act on them: a stop is the person
+   * having asked, so it reads as a state rather than as a failure, and the step cap is
+   * process the same turn can be asked to continue past, which a real error is not. The
+   * SDK reports all three as an unsuccessful result, so the server is the only thing that
+   * can tell them apart, and the words for them belong with the rest of the assistant's
+   * copy in the editor.
+   *
+   * `detail` is whatever the reason cannot carry: an unmapped SDK subtype, or the message
+   * of a thrown error. It is the only clue about what happened, so it is never dropped.
    */
-  | { type: 'turn_end'; error?: string; stopped?: true }
+  | { type: 'turn_end'; reason: TurnEndReason; detail?: string }
   /**
    * A message the server refused rather than ran, with the text handed back so the editor
    * can return it to the composer. The editor guards against sending while busy, but it

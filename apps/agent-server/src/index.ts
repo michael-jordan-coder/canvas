@@ -1,9 +1,15 @@
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { WebSocketServer, WebSocket } from 'ws'
-import { AGENT_PORT, type ClientMessage, type CommandName, type ServerMessage } from './protocol.ts'
+import {
+  AGENT_PORT,
+  type ClientMessage,
+  type CommandName,
+  type ServerMessage,
+  type TurnEndReason,
+} from './protocol.ts'
 import { createCanvasMcpServer } from './tools.ts'
 import { SYSTEM_PROMPT } from './prompt.ts'
-import { describeResult } from './turnEnd.ts'
+import { resultReason } from './turnEnd.ts'
 
 /**
  * The agent sidecar: Claude with hands on the canvas.
@@ -84,7 +90,8 @@ async function runChat(text: string): Promise<void> {
   busy = true
   interrupted = false
   send({ type: 'turn_start' })
-  let error: string | undefined
+  // How the turn ended, kept as a reason the protocol names rather than as a sentence.
+  let ending: { reason: TurnEndReason; detail?: string } = { reason: 'ok' }
 
   try {
     const q = query({
@@ -114,16 +121,20 @@ async function runChat(text: string): Promise<void> {
       }
       if (msg.type === 'result') {
         sessionId = 'session_id' in msg ? msg.session_id : sessionId
-        if (msg.subtype !== 'success') error = describeResult(msg.subtype)
+        if (msg.subtype !== 'success') ending = resultReason(msg.subtype)
       }
     }
   } catch (cause) {
-    error = cause instanceof Error ? cause.message : 'The agent failed.'
+    ending = {
+      reason: 'error',
+      ...(cause instanceof Error && cause.message ? { detail: cause.message } : {}),
+    }
   } finally {
     activeQuery = null
     busy = false
-    if (interrupted) send({ type: 'turn_end', stopped: true })
-    else send({ type: 'turn_end', ...(error ? { error } : {}) })
+    // A stop wins over whatever the SDK called the turn it cut short: the person asked.
+    if (interrupted) send({ type: 'turn_end', reason: 'stopped' })
+    else send({ type: 'turn_end', ...ending })
   }
 }
 

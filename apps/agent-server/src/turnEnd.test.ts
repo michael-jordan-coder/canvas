@@ -1,22 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { describeResult } from './turnEnd.ts'
+import { resultReason } from './turnEnd.ts'
 
-describe('describeResult', () => {
-  it('says what the turn cap is in words', () => {
-    expect(describeResult('error_max_turns')).toBe(
-      'The assistant reached its limit of steps for one turn.',
-    )
+describe('resultReason', () => {
+  it('names the turn cap as its own reason, since it is process rather than failure', () => {
+    expect(resultReason('error_max_turns')).toEqual({ reason: 'max_turns' })
   })
 
-  it('says a failure happened without pretending to know which', () => {
-    expect(describeResult('error_during_execution')).toBe(
-      'The assistant hit an error partway through.',
-    )
+  it('reports a failure without pretending to know which', () => {
+    expect(resultReason('error_during_execution')).toEqual({ reason: 'error' })
   })
 
-  it('keeps an unmapped subtype, since it is the only clue left', () => {
-    expect(describeResult('error_something_new')).toBe(
-      'The assistant stopped before finishing (error_something_new).',
-    )
+  it('keeps an unmapped subtype as the detail, since it is the only clue left', () => {
+    expect(resultReason('error_something_new')).toEqual({
+      reason: 'error',
+      detail: 'error_something_new',
+    })
   })
 })
