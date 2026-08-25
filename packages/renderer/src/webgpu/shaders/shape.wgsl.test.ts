@@ -10,10 +10,10 @@ import source from './shape.wgsl?raw'
  */
 describe('shape.wgsl', () => {
   it('returns a premultiplied colour, which the pipeline blend state assumes', () => {
-    expect(source).toContain('return vec4f(in.color.rgb * a, a);')
+    expect(source).toContain('return vec4f(rgba.rgb * a, a);')
   })
 
   it('folds coverage into that alpha rather than into the colour separately', () => {
-    expect(source).toContain('let a = in.color.a * coverage;')
+    expect(source).toContain('let a = rgba.a * coverage;')
   })
 })

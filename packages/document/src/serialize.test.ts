@@ -10,7 +10,7 @@ import {
   type SceneNode,
   type TextNode,
 } from './node.js'
-import { fromHex, type Paint } from './paint.js'
+import { MAX_GRADIENT_STOPS, fromHex, type GradientPaint, type Paint } from './paint.js'
 import { uniformCornerRadii } from './sdf.js'
 
 /**
@@ -271,7 +271,7 @@ describe('the text node on disk', () => {
   it('is written at the current schema version', () => {
     const { document } = withText()
     expect(serializeDocument(document).version).toBe(SCHEMA_VERSION)
-    expect(SCHEMA_VERSION).toBe(5)
+    expect(SCHEMA_VERSION).toBe(6)
   })
 
   /*
@@ -569,5 +569,150 @@ describe('paint opacity and visibility on disk', () => {
       opacity: 0.5,
       visible: false,
     })
+  })
+})
+
+/*
+ * Version 6: gradients and drop shadows. The round trips go through real JSON like every
+ * other test here, and the rejections pin the validations the shader walk depends on: a
+ * ramp with no stops has no colour to draw, and an unsorted or unbounded one reads as a
+ * scrambled ramp that looks like a shader bug and is not one.
+ */
+describe('gradients and effects on disk', () => {
+  const gradient = (): GradientPaint => ({
+    type: 'linear',
+    from: { x: 0.5, y: 0 },
+    to: { x: 0.5, y: 1 },
+    stops: [
+      { position: 0, color: { r: 1, g: 0, b: 0, a: 1 } },
+      { position: 1, color: { r: 0, g: 0, b: 1, a: 0 } },
+    ],
+  })
+
+  const rectangleOf = (document: SceneDocument): RectangleNode => {
+    for (const node of document.walk()) {
+      if (node.type === 'rectangle') return node
+    }
+    throw new Error('no rectangle in the document')
+  }
+
+  it('round trips a gradient fill exactly', () => {
+    const document = new SceneDocument()
+    document.insert(createRectangle({ name: 'R', fills: [gradient()] }))
+    expect(rectangleOf(roundTrip(document)).fills[0]).toEqual(gradient())
+  })
+
+  it('round trips a one stop gradient, the smallest legal one', () => {
+    const document = new SceneDocument()
+    const one = { ...gradient(), stops: [{ position: 0.5, color: { r: 0, g: 1, b: 0, a: 1 } }] }
+    document.insert(createRectangle({ name: 'R', fills: [one] }))
+    expect(rectangleOf(roundTrip(document)).fills[0]).toEqual(one)
+  })
+
+  it('round trips a drop shadow, and absence stays absent', () => {
+    const document = new SceneDocument()
+    const shadow = {
+      offset: { x: 4, y: 8 },
+      blur: 12,
+      spread: 2,
+      color: { r: 0, g: 0, b: 0, a: 0.25 },
+    }
+    document.insert(createRectangle({ name: 'R', effects: [shadow] }))
+    document.insert(createRectangle({ name: 'Plain' }))
+
+    const loaded = roundTrip(document)
+    const nodes = [...loaded.walk()].filter((node) => node.type === 'rectangle')
+    expect(nodes.find((node) => node.name === 'R')).toMatchObject({ effects: [shadow] })
+    expect(nodes.find((node) => node.name === 'Plain')).not.toHaveProperty('effects')
+  })
+
+  const fileWith = (fill: unknown): unknown => ({
+    kind: 'figma-canvas/document',
+    version: SCHEMA_VERSION,
+    root: 'n1',
+    nodes: [
+      {
+        id: 'n1',
+        type: 'page',
+        name: 'p',
+        visible: true,
+        locked: false,
+        opacity: 1,
+        parent: null,
+        children: ['n2'],
+        transform: { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 },
+        size: { width: 0, height: 0 },
+      },
+      {
+        id: 'n2',
+        type: 'rectangle',
+        name: 'r',
+        visible: true,
+        locked: false,
+        opacity: 1,
+        parent: 'n1',
+        children: [],
+        transform: { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 },
+        size: { width: 10, height: 10 },
+        cornerRadii: { topLeft: 0, topRight: 0, bottomRight: 0, bottomLeft: 0 },
+        fills: [fill],
+        strokes: [],
+      },
+    ],
+  })
+
+  it('sorts stops on the way in, making order an invariant rather than a hope', () => {
+    const parsed = parseDocument(
+      fileWith({
+        ...gradient(),
+        stops: [
+          { position: 1, color: { r: 0, g: 0, b: 1, a: 1 } },
+          { position: 0, color: { r: 1, g: 0, b: 0, a: 1 } },
+        ],
+      }),
+    )
+    const rectangle = parsed.nodes.find((node) => node.id === 'n2')
+    if (rectangle?.type !== 'rectangle') throw new Error('expected the rectangle')
+    const fill = rectangle.fills[0]
+    if (fill?.type !== 'linear') throw new Error('expected the gradient')
+    expect(fill.stops.map((stop) => stop.position)).toEqual([0, 1])
+  })
+
+  it('rejects a gradient with no stops', () => {
+    expect(() => parseDocument(fileWith({ ...gradient(), stops: [] }))).toThrow(
+      /fills\[0\]\.stops is empty/,
+    )
+  })
+
+  it('rejects a stop position outside 0..1', () => {
+    expect(() =>
+      parseDocument(
+        fileWith({ ...gradient(), stops: [{ position: 2, color: { r: 0, g: 0, b: 0, a: 1 } }] }),
+      ),
+    ).toThrow(/stops\[0\]\.position is not in 0\.\.1/)
+  })
+
+  it('rejects a gradient missing a point', () => {
+    const broken = gradient() as unknown as Record<string, unknown>
+    delete broken['to']
+    expect(() => parseDocument(fileWith(broken))).toThrow(/fills\[0\]\.to is not an object/)
+  })
+
+  it('rejects more stops than the shader will walk', () => {
+    const stops = Array.from({ length: MAX_GRADIENT_STOPS + 1 }, (_, index) => ({
+      position: index / MAX_GRADIENT_STOPS,
+      color: { r: 0, g: 0, b: 0, a: 1 },
+    }))
+    expect(() => parseDocument(fileWith({ ...gradient(), stops }))).toThrow(/more than/)
+  })
+
+  it('rejects a negative blur', () => {
+    const file = fileWith({ type: 'solid', color: { r: 0, g: 0, b: 0, a: 1 } }) as {
+      nodes: Record<string, unknown>[]
+    }
+    file.nodes[1]!['effects'] = [
+      { offset: { x: 0, y: 0 }, blur: -1, spread: 0, color: { r: 0, g: 0, b: 0, a: 1 } },
+    ]
+    expect(() => parseDocument(file)).toThrow(/effects\[0\]\.blur is negative/)
   })
 })

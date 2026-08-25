@@ -200,6 +200,29 @@
   width: 52px;
 }
 
+/*
+ * The gradient ramp: an SVG because its colours are data, and the convention keeps dynamic
+ * colour on presentation attributes. Tall enough that the stop handles are grabbable.
+ */
+.ramp {
+  display: block;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--field);
+  cursor: pointer;
+}
+
+.rampBody {
+  pointer-events: none;
+}
+
+/* A stop handle: filled with its own stop's colour, ringed so it reads on any ramp. */
+.rampStop {
+  stroke: var(--panel);
+  stroke-width: 2;
+  cursor: ew-resize;
+}
+
 /* Turns one paint of the stack off without removing it, the same eye the layer tree uses. */
 .eye {
   display: grid;

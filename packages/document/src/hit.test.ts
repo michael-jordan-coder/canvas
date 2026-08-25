@@ -444,3 +444,27 @@ describe('hitTest, on a text node', () => {
     expect(hitTest(document, { x: 150, y: 50 })).toBeNull()
   })
 })
+
+/*
+ * A drop shadow is drawn but deliberately not clickable, in Figma either: `strokesOutset`
+ * stays the only thing that grows a node's clickable area. The selection bounds follow the
+ * same rule, since they are computed from `size`, which a shadow never touches.
+ */
+describe('drop shadows and hit testing', () => {
+  it('does not select a node by its shadow', () => {
+    const document = new SceneDocument()
+    const node = document.insert(
+      createRectangle({
+        size: { width: 100, height: 100 },
+        fills: [fromHex('#0a7cff')],
+        effects: [
+          { offset: { x: 40, y: 0 }, blur: 20, spread: 0, color: { r: 0, g: 0, b: 0, a: 1 } },
+        ],
+      }),
+    )
+
+    // Well inside the shadow, outside the node.
+    expect(hitTest(document, { x: 130, y: 50 })).toBeNull()
+    expect(hitTest(document, { x: 90, y: 50 })?.id).toBe(node.id)
+  })
+})

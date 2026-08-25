@@ -3,7 +3,12 @@ import { clipMatrix, pixelsToClip, type Viewport } from '../camera.js'
 import type { Renderer, RendererInit, RendererStats, ViewState } from '../Renderer.js'
 import { createGPUSurface, onDeviceLost, releaseGPUSurface, type GPUSurface } from './device.js'
 import { MatrixUniform, createMatrixBindGroupLayout } from './MatrixUniform.js'
-import { ClipRegions, createClipBindGroupLayout } from './ClipRegions.js'
+import {
+  ClipRegions,
+  createStorageBindGroup,
+  createStorageBindGroupLayout,
+} from './ClipRegions.js'
+import { GradientRamps } from './GradientRamps.js'
 import {
   GlyphAtlas,
   createAtlasBindGroupLayout,
@@ -31,11 +36,20 @@ class WebGPURenderer implements Renderer {
   #pixelsToClip: MatrixUniform
 
   #clips: ClipRegions
+  #ramps: GradientRamps
   #atlas: GlyphAtlas
   #shapes: ShapeInstances
   #overlay: OverlayInstances
   #shapePipeline: GPURenderPipeline
   #overlayPipeline: GPURenderPipeline
+
+  #storageLayout: GPUBindGroupLayout
+  /**
+   * The group naming the clip and ramp buffers, rebuilt when either one has grown into a
+   * new buffer. Memoised on the buffers' identity rather than owned by either table,
+   * because both live in the one group and each grows on its own schedule.
+   */
+  #storage: { group: GPUBindGroup; clips: GPUBuffer; ramps: GPUBuffer } | null = null
 
   /** CSS pixels. The matrix works in these, the backing store works in device pixels. */
   #viewport: Viewport = { width: 1, height: 1 }
@@ -56,13 +70,20 @@ class WebGPURenderer implements Renderer {
     this.#worldToClip = new MatrixUniform(surface.device, layout, 'world to clip')
     this.#pixelsToClip = new MatrixUniform(surface.device, layout, 'pixels to clip')
 
-    const clipLayout = createClipBindGroupLayout(surface.device)
-    this.#clips = new ClipRegions(surface.device, clipLayout)
+    this.#storageLayout = createStorageBindGroupLayout(surface.device)
+    this.#clips = new ClipRegions(surface.device)
+    this.#ramps = new GradientRamps(surface.device)
 
     const atlasLayout = createAtlasBindGroupLayout(surface.device)
     this.#atlas = new GlyphAtlas(surface.device, atlasLayout, atlas)
 
-    this.#shapes = new ShapeInstances(surface.device, this.#clips, this.#atlas.metrics, layouts)
+    this.#shapes = new ShapeInstances(
+      surface.device,
+      this.#clips,
+      this.#ramps,
+      this.#atlas.metrics,
+      layouts,
+    )
     this.#overlay = new OverlayInstances(surface.device, this.#atlas.metrics, layouts)
 
     // Built once at startup. Compiling a pipeline mid frame is the classic way to produce
@@ -71,7 +92,7 @@ class WebGPURenderer implements Renderer {
       surface.device,
       surface.format,
       layout,
-      clipLayout,
+      this.#storageLayout,
       atlasLayout,
     )
     this.#overlayPipeline = createOverlayPipeline(surface.device, surface.format, layout)
@@ -139,11 +160,11 @@ class WebGPURenderer implements Renderer {
     })
 
     const shapes = this.#shapes.buffer
-    const clips = this.#clips.bindGroup
-    if (shapes && clips && this.#shapes.count > 0) {
+    const storage = this.#storageBindGroup()
+    if (shapes && storage && this.#shapes.count > 0) {
       pass.setPipeline(this.#shapePipeline)
       pass.setBindGroup(0, this.#worldToClip.bindGroup)
-      pass.setBindGroup(1, clips)
+      pass.setBindGroup(1, storage)
       pass.setBindGroup(2, this.#atlas.bindGroup)
       pass.setVertexBuffer(0, shapes)
       // Four corners, one instance per shape and one per glyph. The whole document, text
@@ -165,6 +186,20 @@ class WebGPURenderer implements Renderer {
     device.queue.submit([encoder.finish()])
   }
 
+  #storageBindGroup(): GPUBindGroup | null {
+    const clips = this.#clips.buffer
+    const ramps = this.#ramps.buffer
+    if (!clips || !ramps) return null
+    if (!this.#storage || this.#storage.clips !== clips || this.#storage.ramps !== ramps) {
+      this.#storage = {
+        group: createStorageBindGroup(this.#surface.device, this.#storageLayout, clips, ramps),
+        clips,
+        ramps,
+      }
+    }
+    return this.#storage.group
+  }
+
   /** What the last frame actually submitted. Read by the editor's performance readout. */
   get stats(): RendererStats {
     return { instances: this.#shapes.count, culled: this.#shapes.culled }
@@ -177,6 +212,8 @@ class WebGPURenderer implements Renderer {
     this.#pixelsToClip.destroy()
     this.#shapes.destroy()
     this.#clips.destroy()
+    this.#ramps.destroy()
+    this.#storage = null
     this.#atlas.destroy()
     this.#overlay.destroy()
     releaseGPUSurface(this.#surface)

@@ -1,19 +1,27 @@
-import { useRef, useState, type ComponentType, type ReactElement } from 'react'
+import { useId, useRef, useState, type ComponentType, type ReactElement } from 'react'
 import {
   angleOf,
   degrees,
   fromHex,
   DEFAULT_PAGE_BACKGROUND,
   isAutoLayoutFrame,
+  isEffectVisible,
   isPainted,
   isPaintVisible,
   normalizeDegrees,
+  paintColor,
   paintOpacity,
+  toHex,
   radians,
   uniformCornerRadii,
   CORNER_ORDER,
+  MAX_GRADIENT_STOPS,
+  type DropShadow,
+  type EllipseNode,
   type FrameLayout,
   type FrameNode,
+  type GradientPaint,
+  type GradientStop,
   type LayoutAlign,
   type LayoutDirection,
   type NodeId,
@@ -376,6 +384,10 @@ function NodeProperties({ node }: { node: SceneNode }): ReactElement {
         * offering the control would be offering a setting with no effect.
         */}
       {isPainted(node) && node.type !== 'text' && <StrokeSection node={node} />}
+      {/* Text has no effects at all in the model, so the guard is the same one strokes use. */}
+      {(node.type === 'frame' || node.type === 'rectangle' || node.type === 'ellipse') && (
+        <EffectsSection node={node} />
+      )}
     </>
   )
 }
@@ -722,7 +734,229 @@ const defaultFillFor = (node: PaintedNode): Paint =>
   fromHex(node.type === 'frame' ? '#ffffff' : '#c4c4c4')
 
 /**
- * One paint of a stack: its colour, its own opacity, whether it draws, and a way out.
+ * Converting between paint kinds keeps what the kinds share and invents the least it can
+ * for the rest. Solid to gradient starts as the Figma default, the colour fading to its own
+ * transparent, so the change is visible without being a surprise. Gradient to solid keeps
+ * the first stop, the one colour that stands for the paint everywhere else. Linear and
+ * radial swap freely, reading the same two points each in their own way, so a round trip
+ * between them loses nothing.
+ */
+function convertPaint(paint: Paint, kind: Paint['type']): Paint {
+  if (kind === paint.type) return paint
+  const base = {
+    ...(paint.opacity !== undefined ? { opacity: paint.opacity } : {}),
+    ...(paint.visible !== undefined ? { visible: paint.visible } : {}),
+  }
+  if (kind === 'solid') return { type: 'solid', color: { ...paintColor(paint) }, ...base }
+  if (paint.type !== 'solid') {
+    return { ...paint, type: kind, stops: paint.stops.map((stop) => ({ ...stop, color: { ...stop.color } })) }
+  }
+  const stops: GradientStop[] = [
+    { position: 0, color: { ...paint.color } },
+    { position: 1, color: { ...paint.color, a: 0 } },
+  ]
+  return kind === 'linear'
+    ? { type: 'linear', from: { x: 0.5, y: 0 }, to: { x: 0.5, y: 1 }, stops, ...base }
+    : { type: 'radial', from: { x: 0.5, y: 0.5 }, to: { x: 1, y: 0.5 }, stops, ...base }
+}
+
+/**
+ * The ramp and its stops, drawn as SVG because the preview is a dynamic set of colours and
+ * the convention keeps those on presentation attributes rather than style props.
+ *
+ * Dragging a stop clamps it between its neighbours instead of re-sorting past them, which
+ * keeps the index under the pointer stable for the whole gesture and keeps the stops array
+ * sorted by construction, the invariant the shader walk depends on. The drag is one history
+ * group, the same shape the colour picker's session is.
+ */
+function GradientRamp({
+  paint,
+  onChange,
+}: {
+  paint: GradientPaint
+  onChange: (paint: GradientPaint) => void
+}): ReactElement {
+  const id = useId()
+  const svgRef = useRef<SVGSVGElement>(null)
+  const grouped = useRef(false)
+
+  const moveStop = (index: number, clientX: number): void => {
+    const rect = svgRef.current?.getBoundingClientRect()
+    if (!rect || rect.width === 0) return
+    const t = (clientX - rect.left) / rect.width
+    const low = paint.stops[index - 1]?.position ?? 0
+    const high = paint.stops[index + 1]?.position ?? 1
+    const position = Math.min(high, Math.max(low, Math.min(1, Math.max(0, t))))
+    onChange({
+      ...paint,
+      stops: paint.stops.map((stop, i) => (i === index ? { ...stop, position } : stop)),
+    })
+  }
+
+  return (
+    <svg ref={svgRef} className={styles.ramp} aria-label="Gradient ramp">
+      <defs>
+        {/* Always left to right: this previews the ramp, not the node's geometry. */}
+        <linearGradient id={id} x1="0" y1="0" x2="1" y2="0">
+          {paint.stops.map((stop, index) => (
+            <stop
+              key={index}
+              offset={stop.position}
+              stopColor={toHex(stop.color)}
+              stopOpacity={stop.color.a}
+            />
+          ))}
+        </linearGradient>
+      </defs>
+      <rect className={styles.rampBody} width="100%" height="100%" rx="4" fill={`url(#${id})`} />
+      {paint.stops.map((stop, index) => (
+        <circle
+          key={index}
+          className={styles.rampStop}
+          cx={`${stop.position * 100}%`}
+          cy="50%"
+          r="5"
+          fill={toHex(stop.color)}
+          onPointerDown={(event) => {
+            event.preventDefault()
+            event.currentTarget.setPointerCapture(event.pointerId)
+            if (!grouped.current) {
+              scene.beginHistoryGroup()
+              grouped.current = true
+            }
+          }}
+          onPointerMove={(event) => {
+            if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+            moveStop(index, event.clientX)
+          }}
+          onPointerUp={() => {
+            if (!grouped.current) return
+            grouped.current = false
+            scene.endHistoryGroup()
+          }}
+        />
+      ))}
+    </svg>
+  )
+}
+
+/** The largest gap between neighbouring stops, so a new stop lands where there is room. */
+function widestGapMidpoint(stops: readonly GradientStop[]): number {
+  let at = 0.5
+  let widest = -1
+  for (let index = 0; index < stops.length - 1; index += 1) {
+    const gap = stops[index + 1]!.position - stops[index]!.position
+    if (gap > widest) {
+      widest = gap
+      at = stops[index]!.position + gap / 2
+    }
+  }
+  return at
+}
+
+function GradientEditor({
+  paint,
+  onChange,
+}: {
+  paint: GradientPaint
+  onChange: (paint: GradientPaint) => void
+}): ReactElement {
+  const setStop = (index: number, next: Partial<GradientStop>): void =>
+    onChange({
+      ...paint,
+      stops: paint.stops.map((stop, i) => (i === index ? { ...stop, ...next } : stop)),
+    })
+
+  const addStop = (): void => {
+    if (paint.stops.length >= MAX_GRADIENT_STOPS) return
+    const position = widestGapMidpoint(paint.stops)
+    const index = paint.stops.findIndex((stop) => stop.position > position)
+    const nearest = paint.stops[index === -1 ? paint.stops.length - 1 : Math.max(0, index - 1)]
+    const stop: GradientStop = { position, color: { ...(nearest?.color ?? { r: 0, g: 0, b: 0, a: 1 }) } }
+    const at = index === -1 ? paint.stops.length : index
+    onChange({ ...paint, stops: [...paint.stops.slice(0, at), stop, ...paint.stops.slice(at)] })
+  }
+
+  // The axis's angle in box space, for the numeric field below. On-canvas handles for the
+  // two points are a separate pass; the angle covers the common ask until then.
+  const setAngle = (value: number): void => {
+    const cx = (paint.from.x + paint.to.x) / 2
+    const cy = (paint.from.y + paint.to.y) / 2
+    const half =
+      Math.hypot(paint.to.x - paint.from.x, paint.to.y - paint.from.y) / 2 || 0.5
+    const rad = radians(value)
+    const dx = Math.cos(rad) * half
+    const dy = Math.sin(rad) * half
+    onChange({ ...paint, from: { x: cx - dx, y: cy - dy }, to: { x: cx + dx, y: cy + dy } })
+  }
+
+  return (
+    <>
+      <div className={styles.headed}>
+        <GradientRamp paint={paint} onChange={onChange} />
+        <button
+          type="button"
+          className={styles.iconButton}
+          aria-label="Add stop"
+          disabled={paint.stops.length >= MAX_GRADIENT_STOPS}
+          onClick={addStop}
+        >
+          <PlusIcon size={14} />
+        </button>
+      </div>
+      {paint.type === 'linear' && (
+        <NumberField
+          wide
+          label="Angle"
+          icon={<AngleIcon size={14} />}
+          value={Math.round(
+            normalizeDegrees(
+              degrees(Math.atan2(paint.to.y - paint.from.y, paint.to.x - paint.from.x)),
+            ),
+          )}
+          onCommit={setAngle}
+        />
+      )}
+      {paint.stops.map((stop, index) => (
+        <div className={styles.headed} key={index}>
+          <ColorField
+            label="Stop"
+            color={stop.color}
+            onChange={(color: RGBA) => setStop(index, { color })}
+          />
+          {/* The stop's own alpha. The picker cannot edit it, so it gets a field the way a
+            * paint's opacity does; the two multiply rather than replace each other. */}
+          <div className={styles.paintOpacity}>
+            <NumberField
+              label="A"
+              value={Math.round(stop.color.a * 100)}
+              onCommit={(percent) =>
+                setStop(index, {
+                  color: { ...stop.color, a: Math.min(1, Math.max(0, percent / 100)) },
+                })
+              }
+            />
+          </div>
+          <button
+            type="button"
+            className={styles.iconButton}
+            aria-label="Remove stop"
+            disabled={paint.stops.length <= 1}
+            onClick={() =>
+              onChange({ ...paint, stops: paint.stops.filter((_, i) => i !== index) })
+            }
+          >
+            <MinusIcon size={14} />
+          </button>
+        </div>
+      ))}
+    </>
+  )
+}
+
+/**
+ * One paint of a stack: its kind, its own opacity, whether it draws, and a way out, with
+ * the kind's own editor beneath: a colour well for a solid, the ramp for a gradient.
  *
  * The row is the same for a fill and for a stroke, because a stroke's paint is a paint. What
  * differs is what sits beneath it, which is the caller's business.
@@ -741,41 +975,64 @@ function PaintRow({
   const visible = isPaintVisible(paint)
 
   return (
-    <div className={styles.headed}>
-      <ColorField
-        label={label}
-        color={paint.color}
-        onChange={(color: RGBA) => onChange({ ...paint, color })}
-      />
-      {/*
-        * Its own opacity, which multiplies with the colour's alpha and with the node's
-        * rather than replacing either. Whole percent, the same units the node's O field uses.
-        */}
-      <div className={styles.paintOpacity}>
-        <NumberField
-          label="%"
-          value={Math.round(paintOpacity(paint) * 100)}
-          onCommit={(percent) =>
-            onChange({ ...paint, opacity: Math.min(1, Math.max(0, percent / 100)) })
-          }
-        />
+    <div className={styles.paintGroup}>
+      <div className={styles.headed}>
+        <div className={styles.selectWrap}>
+          <select
+            className={styles.select}
+            aria-label={`${label} type`}
+            value={paint.type}
+            onChange={(event) =>
+              onChange(convertPaint(paint, event.target.value as Paint['type']))
+            }
+          >
+            <option value="solid">Solid</option>
+            <option value="linear">Linear</option>
+            <option value="radial">Radial</option>
+          </select>
+          <span className={styles.selectChevron} aria-hidden="true">
+            <ChevronIcon size={12} />
+          </span>
+        </div>
+        {/*
+          * Its own opacity, which multiplies with the colour's alpha and with the node's
+          * rather than replacing either. Whole percent, the same units the node's O field uses.
+          */}
+        <div className={styles.paintOpacity}>
+          <NumberField
+            label="%"
+            value={Math.round(paintOpacity(paint) * 100)}
+            onCommit={(percent) =>
+              onChange({ ...paint, opacity: Math.min(1, Math.max(0, percent / 100)) })
+            }
+          />
+        </div>
+        <button
+          type="button"
+          className={styles.eye}
+          aria-label={visible ? `Hide ${label}` : `Show ${label}`}
+          onClick={() => onChange({ ...paint, visible: !visible })}
+        >
+          {visible ? <VisibleIcon size={12} /> : <HiddenIcon size={12} />}
+        </button>
+        <button
+          type="button"
+          className={styles.iconButton}
+          aria-label={`Remove ${label}`}
+          onClick={onRemove}
+        >
+          <MinusIcon size={14} />
+        </button>
       </div>
-      <button
-        type="button"
-        className={styles.eye}
-        aria-label={visible ? `Hide ${label}` : `Show ${label}`}
-        onClick={() => onChange({ ...paint, visible: !visible })}
-      >
-        {visible ? <VisibleIcon size={12} /> : <HiddenIcon size={12} />}
-      </button>
-      <button
-        type="button"
-        className={styles.iconButton}
-        aria-label={`Remove ${label}`}
-        onClick={onRemove}
-      >
-        <MinusIcon size={14} />
-      </button>
+      {paint.type === 'solid' ? (
+        <ColorField
+          label={label}
+          color={paint.color}
+          onChange={(color: RGBA) => onChange({ ...paint, color })}
+        />
+      ) : (
+        <GradientEditor paint={paint} onChange={onChange} />
+      )}
     </div>
   )
 }
@@ -881,6 +1138,116 @@ function StrokeSection({ node }: { node: PaintedNode }): ReactElement {
               />
             </div>
           ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+/** The nodes that can carry a shadow: every box. Text is out of scope, see the model. */
+type EffectNode = FrameNode | RectangleNode | EllipseNode
+
+/** Figma's own default shadow: a soft quarter-black drop, four units down. */
+const defaultShadow = (): DropShadow => ({
+  offset: { x: 0, y: 4 },
+  blur: 4,
+  spread: 0,
+  color: { r: 0, g: 0, b: 0, a: 0.25 },
+})
+
+/**
+ * Drop shadows, as a stack the way fills and strokes are. The colour well edits the shadow's
+ * RGB and the % beside it the alpha, which is where a shadow's softness usually lives.
+ */
+function EffectsSection({ node }: { node: EffectNode }): ReactElement {
+  const effects = node.effects ?? []
+  const setEffects = (next: DropShadow[]): void => {
+    scene.update<EffectNode>(node.id, { effects: next })
+  }
+  const set = (index: number, next: Partial<DropShadow>): void =>
+    setEffects(effects.map((effect, i) => (i === index ? { ...effect, ...next } : effect)))
+
+  return (
+    <section className={styles.section}>
+      <div className={styles.sectionHeader}>
+        <h3 className={styles.title}>Drop shadow</h3>
+        <button
+          type="button"
+          className={styles.iconButton}
+          aria-label="Add drop shadow"
+          onClick={() => setEffects([defaultShadow(), ...effects])}
+        >
+          <PlusIcon size={14} />
+        </button>
+      </div>
+      {effects.length > 0 && (
+        <div className={styles.paintGroups}>
+          {effects.map((effect, index) => {
+            const visible = isEffectVisible(effect)
+            return (
+              <div className={styles.paintGroup} key={index}>
+                <div className={styles.headed}>
+                  <ColorField
+                    label="Shadow"
+                    color={effect.color}
+                    onChange={(color: RGBA) => set(index, { color })}
+                  />
+                  <div className={styles.paintOpacity}>
+                    <NumberField
+                      label="%"
+                      value={Math.round(effect.color.a * 100)}
+                      onCommit={(percent) =>
+                        set(index, {
+                          color: {
+                            ...effect.color,
+                            a: Math.min(1, Math.max(0, percent / 100)),
+                          },
+                        })
+                      }
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    className={styles.eye}
+                    aria-label={visible ? 'Hide shadow' : 'Show shadow'}
+                    onClick={() => set(index, { visible: !visible })}
+                  >
+                    {visible ? <VisibleIcon size={12} /> : <HiddenIcon size={12} />}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.iconButton}
+                    aria-label="Remove shadow"
+                    onClick={() => setEffects(effects.filter((_, i) => i !== index))}
+                  >
+                    <MinusIcon size={14} />
+                  </button>
+                </div>
+                <div className={styles.grid}>
+                  <NumberField
+                    label="X"
+                    value={effect.offset.x}
+                    onCommit={(x) => set(index, { offset: { ...effect.offset, x } })}
+                  />
+                  <NumberField
+                    label="Y"
+                    value={effect.offset.y}
+                    onCommit={(y) => set(index, { offset: { ...effect.offset, y } })}
+                  />
+                  <NumberField
+                    label="B"
+                    value={effect.blur}
+                    onCommit={(blur) => set(index, { blur: Math.max(0, blur) })}
+                  />
+                  <NumberField
+                    label="S"
+                    value={effect.spread}
+                    onCommit={(spread) => set(index, { spread })}
+                  />
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
     </section>

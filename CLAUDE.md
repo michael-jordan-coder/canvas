@@ -266,6 +266,46 @@ Built:
   reimplementations of one clamp. In the shader the corner is chosen by the sign of `p` **before**
   the `abs`, since that fold maps all four quadrants onto one and takes the evidence with it.
 
+- Gradient paints, linear and radial. `Paint` was already a union, so the type slotted in;
+  what stops cannot do is fit in an instance, being variable length, so they live in a second
+  storage buffer at `@group(1) @binding(1)` beside the clip table, following the `ClipRegions`
+  precedent (`GradientRamps.ts`). A gradient is a header record and its stops as a contiguous
+  stream of 8 float records; the instance carries the header's index in `params.x` (`-1` for a
+  solid) and bit 0 of the `flags.w` bitfield. The two points live in the node's 0..1 box space,
+  so a gradient survives a resize untouched, and the shader samples with `in.local / in.size`
+  rather than the padded quad position, so a gradient on a stroke ramps across the node, not
+  the band. The stop walk mixes through the list with each step clamped, which evaluates the
+  piecewise ramp exactly and bounds the loop the way `MAX_CLIP_DEPTH` does; the parser refuses
+  more than `MAX_GRADIENT_STOPS` and sorts on the way in, making stop order an invariant. The
+  instance's colour slot still carries the first stop with the inherited alpha alone, so the
+  slot means something on every instance and the stop's own alpha composes in the shader. The
+  two tables share one bind group, which neither can own since either buffer growing
+  invalidates it: the renderer memoises it on the buffers' identities. Since both tables need
+  the group, growing either is watched per frame rather than signalled. Glyphs have nowhere to
+  put an index, their spare slots being atlas coordinates, so a gradient fill on text draws as
+  its first stop.
+
+- Drop shadows, as `effects: DropShadow[]` on the box nodes: optional with absence meaning
+  none, so old files need no field, and a list so a second shadow later is not a schema
+  change. Text deliberately has no `effects`, because a glyph's coverage comes from the atlas
+  rather than the box SDF and a text shadow is a different feature; the type system is the
+  guard. A shadow is a third instance kind beside fill and stroke, emitted before the fill so
+  painter's order puts it behind the node and over what the node sits on: same size, same
+  radii, bit 1 set, blur and spread in the two `flags` slots a box never used, and coverage is
+  the same signed distance pushed out by the spread and smoothed over the blur, so there is no
+  second pass, no offscreen target and no kernel. A zero blur falls through to the sharp
+  coverage path, since `smoothstep` with equal edges is undefined, which is also what makes a
+  spread-only shadow a clean glow. **The offset rides in the instance's transform, not the
+  quad padding**: both padding computations assume uniform four-side padding, and the offset
+  is directional, so it is folded through the world's linear part instead, in the node's own
+  units, turning and scaling with the node. `hit.ts` deliberately does not grow for a shadow
+  and neither do the selection bounds, matching Figma: `strokesOutset` stays the only thing
+  that widens what a click can reach.
+
+- Schema version 6 covers both. Not for migration, since absence means the same thing in a
+  version 5 file, but so a build from before either feature refuses a version 6 file rather
+  than silently dropping fills and shadows and then overwriting the save without them.
+
 - Premultiplied alpha out of the shape shader, with `one / one-minus-src-alpha` on both colour and
   alpha. Byte identical to straight alpha here, because the surface is `alphaMode: 'opaque'` and
   the pass clears to `a = 1`, so destination alpha is 1 for the whole pass and the two agree. It

@@ -11,6 +11,7 @@ import {
   radians,
   toHex,
   uniformCornerRadii,
+  paintColor,
   paintOpacity,
   type CornerRadii,
   type FrameNode,
@@ -101,8 +102,11 @@ function toStroke(stroke: AgentStroke): Stroke {
 }
 
 function fromPaint(paint: Paint): AgentPaint {
-  const opacity = paintOpacity(paint) * paint.color.a
-  return { hex: toHex(paint.color), ...(opacity < 1 ? { opacity } : {}) }
+  // The protocol speaks in single hex colours, so a gradient reports as its first stop.
+  // The agent cannot author gradients yet either; that is a protocol change for later.
+  const color = paintColor(paint)
+  const opacity = paintOpacity(paint) * color.a
+  return { hex: toHex(color), ...(opacity < 1 ? { opacity } : {}) }
 }
 
 function fromStroke(stroke: Stroke): AgentStroke {

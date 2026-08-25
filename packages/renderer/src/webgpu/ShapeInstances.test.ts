@@ -9,8 +9,10 @@ import {
   translation,
   uniformCornerRadii,
   type CornerRadii,
+  type DropShadow,
   type FontMetrics,
   type GlyphMetrics,
+  type GradientPaint,
   type Paint,
   type RectangleNode,
   type Size,
@@ -18,7 +20,8 @@ import {
   TextLayoutCache,
 } from '@canvas/document'
 import type { Camera, Viewport } from '../camera.js'
-import { ClipRegions, createClipBindGroupLayout } from './ClipRegions.js'
+import { ClipRegions } from './ClipRegions.js'
+import { GradientRamps } from './GradientRamps.js'
 import { FLOATS_PER_INSTANCE } from './instanceLayout.js'
 import { ShapeInstances } from './ShapeInstances.js'
 import { createStubDevice, instanceAt, type StubDevice } from './testing/stubDevice.js'
@@ -50,10 +53,11 @@ const METRICS: FontMetrics = {
   ]),
 }
 
-/** The builder needs somewhere to record clipping frames, whether or not the scene has any. */
+/** The builder needs both tables to record into, whether or not the scene uses either. */
 function build(stubbed: StubDevice): ShapeInstances {
-  const clips = new ClipRegions(stubbed.device, createClipBindGroupLayout(stubbed.device))
-  return new ShapeInstances(stubbed.device, clips, METRICS, new TextLayoutCache())
+  const clips = new ClipRegions(stubbed.device)
+  const ramps = new GradientRamps(stubbed.device)
+  return new ShapeInstances(stubbed.device, clips, ramps, METRICS, new TextLayoutCache())
 }
 
 /**
@@ -83,6 +87,8 @@ const FIELD = {
   strokeWeight: 14,
   strokeOffset: 15,
   clip: 16,
+  shadowBlur: 17,
+  shadowSpread: 18,
   bits: 19,
   radiusTopLeft: 20,
   radiusTopRight: 21,
@@ -170,12 +176,12 @@ describe('ShapeInstances', () => {
     expect(FLOATS_PER_INSTANCE).toBe(STRIDE)
   })
 
-  // The two slots the corner radii vacated and nothing has claimed. Pinned at zero so the
-  // first thing to write one of them has to say so here.
-  it('leaves the reserved slots clear, since no instance uses a feature yet', () => {
+  // A plain solid uses no feature: the bitfield is zero and the gradient slot says "none"
+  // explicitly, which is -1 rather than 0 because 0 is a real index into the ramps table.
+  it('marks a solid as using no feature', () => {
     expect(field(0, FIELD.bits)).toBe(0)
     expect(field(1, FIELD.bits)).toBe(0)
-    expect(field(1, FIELD.gradient)).toBe(0)
+    expect(field(1, FIELD.gradient)).toBe(-1)
   })
 
   it('writes colour channels as 0 to 1, not 0 to 255', () => {
@@ -979,5 +985,115 @@ describe('a stack of paints', () => {
     expect([at(2, FIELD.red), at(3, FIELD.red)]).toEqual([1, 1])
     expect(at(0, FIELD.alpha)).toBeCloseTo(0.5, 6)
     expect(at(2, FIELD.alpha)).toBe(1)
+  })
+})
+
+/*
+ * Gradient packing: the instance carries an index into the ramps table, bit 0 of the
+ * bitfield, and the first stop's colour as its fallback, with the inherited alpha alone in
+ * the alpha slot because each stop's own alpha rides in the ramp.
+ */
+describe('gradient packing', () => {
+  const gradient = (): GradientPaint => ({
+    type: 'linear',
+    from: { x: 0, y: 0 },
+    to: { x: 1, y: 0 },
+    stops: [
+      { position: 0, color: { r: 1, g: 0, b: 0, a: 0.5 } },
+      { position: 1, color: { r: 0, g: 0, b: 1, a: 1 } },
+    ],
+  })
+
+  it('writes the ramp index, sets bit 0, and keeps the first stop as the colour', () => {
+    world.document.update<RectangleNode>(world.rectangle.id, { fills: [gradient()] })
+    instances.sync(world.document, camera, viewport)
+
+    expect(field(1, FIELD.gradient)).toBe(0)
+    expect(field(1, FIELD.bits)).toBe(1)
+    expect(field(1, FIELD.red)).toBe(1)
+    expect(field(1, FIELD.blue)).toBe(0)
+    // The inherited alpha alone. The stop's own 0.5 lives in the ramp, and the shader
+    // multiplies the two, the same composition a solid gets at pack time.
+    expect(field(1, FIELD.alpha)).toBe(1)
+    // The solid neighbours are untouched.
+    expect(field(0, FIELD.gradient)).toBe(-1)
+    expect(field(0, FIELD.bits)).toBe(0)
+  })
+
+  it('gives every gradient its own run of the table', () => {
+    world.document.transact(() => {
+      world.document.update<RectangleNode>(world.rectangle.id, { fills: [gradient()] })
+      world.document.update<RectangleNode>(world.ellipse.id, { fills: [gradient()] })
+    })
+    instances.sync(world.document, camera, viewport)
+
+    // A header plus two stops is three 8 float records, which is six vec4s.
+    expect(field(1, FIELD.gradient)).toBe(0)
+    expect(field(2, FIELD.gradient)).toBe(6)
+  })
+})
+
+/*
+ * Drop shadow packing: a third instance kind, emitted before the fill so painter's order
+ * puts it behind the node, with the offset in its transform and blur and spread in the two
+ * flags slots a box instance never used.
+ */
+describe('drop shadow packing', () => {
+  const shadow = (): DropShadow => ({
+    offset: { x: 10, y: 20 },
+    blur: 5,
+    spread: 2,
+    color: { r: 0, g: 0, b: 0, a: 0.5 },
+  })
+
+  it('emits the shadow before the fill, with the offset in its transform', () => {
+    world.document.update<RectangleNode>(world.rectangle.id, { effects: [shadow()] })
+    instances.sync(world.document, camera, viewport)
+
+    // Frame fill, rectangle shadow, rectangle fill, ellipse fill.
+    expect(instances.count).toBe(4)
+    expect(field(1, FIELD.bits)).toBe(2)
+    expect(field(2, FIELD.bits)).toBe(0)
+
+    // The rectangle sits at (24, 24) in a frame at (-160, -120); the shadow is that world
+    // position moved by the offset, while the node's own instance stays put.
+    expect(field(1, FIELD.originX)).toBe(-126)
+    expect(field(1, FIELD.originY)).toBe(-76)
+    expect(field(2, FIELD.originX)).toBe(-136)
+    expect(field(2, FIELD.originY)).toBe(-96)
+
+    // Size is the node's own; the reach is quad padding in the vertex stage, not geometry.
+    expect(field(1, FIELD.width)).toBe(140)
+    expect(field(1, FIELD.shadowBlur)).toBe(5)
+    expect(field(1, FIELD.shadowSpread)).toBe(2)
+    expect(field(1, FIELD.alpha)).toBe(0.5)
+    // A shadow has no gradient and no stroke.
+    expect(field(1, FIELD.gradient)).toBe(-1)
+    expect(field(1, FIELD.strokeWeight)).toBe(0)
+    // It keeps the node's radii, so it follows a rounded corner.
+    expect(radiiOf(field, 1)).toEqual([4, 4, 4, 4])
+  })
+
+  it('carries the offset in the node own units, not world axes', () => {
+    world.document.transact(() => {
+      world.document.update(world.frame.id, {
+        transform: { a: 2, b: 0, c: 0, d: 2, tx: -160, ty: -120 },
+      })
+      world.document.update<RectangleNode>(world.rectangle.id, { effects: [shadow()] })
+    })
+    instances.sync(world.document, camera, viewport)
+
+    // The frame scales everything inside it by two, offset included: the shadow's world
+    // origin is the node's, (-112, -72), plus twice the offset.
+    expect(field(1, FIELD.originX)).toBe(-92)
+    expect(field(1, FIELD.originY)).toBe(-32)
+  })
+
+  it('keeps a hidden shadow in the model but out of the buffer', () => {
+    world.document.update<RectangleNode>(world.rectangle.id, {
+      effects: [{ ...shadow(), visible: false }],
+    })
+    instances.sync(world.document, camera, viewport)
+    expect(instances.count).toBe(3)
   })
 })

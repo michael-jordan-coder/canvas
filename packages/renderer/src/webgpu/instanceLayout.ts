@@ -32,3 +32,11 @@ export const SHAPE_ATTRIBUTES: readonly GPUVertexAttribute[] = [
   { shaderLocation: 4, offset: 64, format: 'float32x4' },
   { shaderLocation: 5, offset: 80, format: 'float32x4' },
 ]
+
+/**
+ * The feature bitfield at float 19 (`flags.w`), carried as a small exact float and read as
+ * a u32 by the shader. A solid, unshadowed instance is 0, which is what every instance
+ * wrote before either feature existed.
+ */
+export const BIT_GRADIENT = 1
+export const BIT_SHADOW = 2
