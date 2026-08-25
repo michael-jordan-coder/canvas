@@ -9,6 +9,7 @@ import {
 } from 'react'
 import { agentClient } from '../agent/connection'
 import { useAgent, type ChatItem } from '../agent/agentStore'
+import { hasFailure, humanize, isNearBottom, toRows } from '../agent/chatRows'
 import { AssistantIcon, ChevronIcon, CloseIcon, PlusIcon, SendIcon, StopIcon } from './icons'
 import styles from './AgentPanel.module.css'
 
@@ -21,48 +22,24 @@ import styles from './AgentPanel.module.css'
  * agent store; this component never touches the socket beyond `agentClient`.
  */
 
-/** A tool name the model saw, as a line a person can read: "create_frame" to "create frame". */
-function humanize(name: string): string {
-  return name.replaceAll('_', ' ')
-}
-
-/**
- * Tool calls and thinking are process, not conversation, so a consecutive run of them folds
- * into one row. The messages stay flat in the store; the fold is purely presentational.
- */
-type Row =
-  | { key: string; kind: 'item'; item: ChatItem }
-  | { key: string; kind: 'steps'; items: ChatItem[] }
-
-function toRows(items: ChatItem[]): Row[] {
-  const rows: Row[] = []
-  for (const item of items) {
-    const folds = item.kind === 'tool' || item.kind === 'thinking'
-    const last = rows[rows.length - 1]
-    if (folds && last?.kind === 'steps') {
-      last.items.push(item)
-    } else if (folds) {
-      rows.push({ key: `steps-${item.id}`, kind: 'steps', items: [item] })
-    } else {
-      rows.push({ key: `item-${item.id}`, kind: 'item', item })
-    }
-  }
-  return rows
-}
-
 /**
  * One folded run. Closed it is a single line: the step count once done, or the step in
  * progress while the run is still growing, so the live line doubles as the activity readout.
+ * A run holding a failed step says so, since that is the one reason to open a settled run.
  */
 function Steps({ items, live }: { items: ChatItem[]; live: boolean }): ReactElement {
   const [open, setOpen] = useState(false)
   const latest = items[items.length - 1]
+  const failed = hasFailure(items)
+  const count = `${items.length} ${items.length === 1 ? 'step' : 'steps'}`
   const label =
     live && latest
       ? latest.kind === 'thinking'
         ? 'Thinking'
         : humanize(latest.text)
-      : `${items.length} ${items.length === 1 ? 'step' : 'steps'}`
+      : failed
+        ? `${count}, one failed`
+        : count
 
   return (
     <div className={styles.steps}>
@@ -71,6 +48,7 @@ function Steps({ items, live }: { items: ChatItem[]; live: boolean }): ReactElem
         className={styles.stepsToggle}
         data-open={open}
         data-live={live}
+        data-failed={failed}
         onClick={() => setOpen((value) => !value)}
       >
         <ChevronIcon size={12} />
@@ -84,8 +62,8 @@ function Steps({ items, live }: { items: ChatItem[]; live: boolean }): ReactElem
                 {item.text}
               </p>
             ) : (
-              <p key={item.id} className={styles.step}>
-                {humanize(item.text)}
+              <p key={item.id} className={styles.step} data-failed={item.kind === 'tool-error'}>
+                {item.kind === 'tool-error' ? item.text : humanize(item.text)}
               </p>
             ),
           )}
@@ -103,20 +81,52 @@ function Item({ item }: { item: ChatItem }): ReactElement {
   )
 }
 
+/** Seconds until the next automatic reconnect, or null when none is scheduled. */
+function useCountdown(at: number | null): number | null {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (at === null) return
+    // A second is the resolution the text shows, so nothing finer is worth a render.
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [at])
+  if (at === null) return null
+  return Math.max(0, Math.ceil((at - now) / 1000))
+}
+
 export function AgentPanel(): ReactElement {
   const open = useAgent((state) => state.open)
   const setOpen = useAgent((state) => state.setOpen)
   const status = useAgent((state) => state.status)
   const items = useAgent((state) => state.items)
+  const nextAttemptAt = useAgent((state) => state.nextAttemptAt)
   const [draft, setDraft] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
   const rows = useMemo(() => toRows(items), [items])
+  const seconds = useCountdown(status === 'offline' ? nextAttemptAt : null)
 
-  // Pinned to the newest message. The transcript grows from the bottom the way every chat
-  // does, so anything else would hide exactly what just happened.
+  /*
+   * Whether the transcript is following the newest message. A ref rather than state because
+   * the scroll handler runs at scroll rate and only the jump control renders from it, which
+   * is why the boolean is mirrored into state separately and only when it flips.
+   */
+  const pinned = useRef(true)
+  const [detached, setDetached] = useState(false)
+
+  const toBottom = (): void => {
+    const list = listRef.current
+    if (!list) return
+    list.scrollTop = list.scrollHeight
+    pinned.current = true
+    setDetached(false)
+  }
+
+  // Pinned to the newest message, but only while it is the one being read. A transcript that
+  // pinned unconditionally could not be scrolled back during a turn: every arriving step
+  // would drag it down again, which is exactly when there is most to read.
   useEffect(() => {
     const list = listRef.current
-    if (list) list.scrollTop = list.scrollHeight
+    if (list && pinned.current) list.scrollTop = list.scrollHeight
   }, [items])
 
   if (!open) {
@@ -125,7 +135,7 @@ export function AgentPanel(): ReactElement {
         type="button"
         className={styles.opener}
         aria-label="Assistant"
-        data-busy={status === 'busy'}
+        data-busy={status === 'busy' || status === 'stopping'}
         onClick={() => setOpen(true)}
       >
         <AssistantIcon />
@@ -133,12 +143,15 @@ export function AgentPanel(): ReactElement {
     )
   }
 
+  const connected = status === 'idle' || status === 'busy' || status === 'stopping'
+
   const submit = (event: SyntheticEvent): void => {
     event.preventDefault()
     const text = draft.trim()
     if (!text || status !== 'idle') return
-    agentClient.send(text)
-    setDraft('')
+    // The draft is cleared only once the socket has taken it. A message the server never
+    // heard would otherwise vanish from the composer and from the transcript alike.
+    if (agentClient.send(text)) setDraft('')
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -171,20 +184,58 @@ export function AgentPanel(): ReactElement {
         </button>
       </header>
 
-      <div ref={listRef} className={styles.list}>
-        {status === 'offline' && <p className={styles.offline}>Agent server offline.</p>}
-        {rows.map((row, index) =>
-          row.kind === 'steps' ? (
-            <Steps
-              key={row.key}
-              items={row.items}
-              live={status === 'busy' && index === rows.length - 1}
-            />
-          ) : (
-            <Item key={row.key} item={row.item} />
-          ),
+      <div className={styles.transcript}>
+        <div
+          ref={listRef}
+          className={styles.list}
+          onScroll={() => {
+            const list = listRef.current
+            if (!list) return
+            const near = isNearBottom(list.scrollTop, list.scrollHeight, list.clientHeight)
+            pinned.current = near
+            setDetached(!near)
+          }}
+        >
+          {rows.map((row, index) =>
+            row.kind === 'steps' ? (
+              <Steps
+                key={row.key}
+                items={row.items}
+                live={
+                  (status === 'busy' || status === 'stopping') && index === rows.length - 1
+                }
+              />
+            ) : (
+              <Item key={row.key} item={row.item} />
+            ),
+          )}
+        </div>
+        {detached && (
+          <button type="button" className={styles.jump} onClick={toBottom}>
+            Jump to latest
+          </button>
         )}
       </div>
+
+      {!connected && (
+        <div className={styles.connection}>
+          <span className={styles.connectionText}>
+            {status === 'connecting'
+              ? 'Connecting to the agent server'
+              : seconds === null
+                ? 'Agent server offline'
+                : `Agent server offline. Retrying in ${seconds}s`}
+          </span>
+          <button
+            type="button"
+            className={styles.retry}
+            disabled={status === 'connecting'}
+            onClick={() => agentClient.reconnect()}
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       <form className={styles.composer} onSubmit={submit}>
         <div className={styles.field}>
@@ -192,16 +243,17 @@ export function AgentPanel(): ReactElement {
             className={styles.input}
             value={draft}
             rows={1}
-            placeholder="Describe a change"
-            disabled={status === 'offline'}
+            placeholder={connected ? 'Describe a change' : 'Waiting for the agent server'}
+            disabled={!connected}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={onKeyDown}
           />
-          {status === 'busy' ? (
+          {status === 'busy' || status === 'stopping' ? (
             <button
               type="button"
               className={styles.action}
               aria-label="Stop"
+              disabled={status === 'stopping'}
               onClick={() => agentClient.stop()}
             >
               <StopIcon />
@@ -211,7 +263,7 @@ export function AgentPanel(): ReactElement {
               type="submit"
               className={styles.action}
               aria-label="Send"
-              disabled={status === 'offline' || draft.trim() === ''}
+              disabled={!connected || draft.trim() === ''}
             >
               <SendIcon />
             </button>

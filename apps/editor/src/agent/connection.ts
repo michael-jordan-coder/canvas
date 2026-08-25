@@ -2,6 +2,7 @@ import { AGENT_PORT } from '@canvas/agent-server/protocol'
 import type { ClientMessage, ServerMessage } from '@canvas/agent-server/protocol'
 import { scene } from '../state/scene'
 import { useAgent } from './agentStore'
+import { humanize } from './chatRows'
 import { executeCommand } from './executor'
 
 /**
@@ -22,9 +23,18 @@ const RECONNECT_DELAY_MS = 2000
 
 let socket: WebSocket | null = null
 let turnOpen = false
+/** Set while a connection is alive, so the panel's Retry can skip the backoff wait. */
+let connectNow: (() => void) | null = null
 
-function send(message: ClientMessage): void {
-  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message))
+/**
+ * Whether the socket took the message. The caller has to know: the panel used to append the
+ * person's message and go busy before finding out, which left it waiting on a reply that
+ * was never asked for and no way back short of a reload.
+ */
+function send(message: ClientMessage): boolean {
+  if (socket?.readyState !== WebSocket.OPEN) return false
+  socket.send(JSON.stringify(message))
+  return true
 }
 
 function closeTurn(): void {
@@ -40,6 +50,10 @@ async function runCommand(id: number, name: string, args: unknown): Promise<void
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     send({ type: 'result', id, ok: false, error: message })
+    // The model is told, and so is the person. It recovers from most of these on its own,
+    // which is why this folds in with the steps rather than interrupting the conversation,
+    // but a turn that quietly failed half its edits must not look like a turn that worked.
+    useAgent.getState().append('tool-error', `${humanize(name)} failed: ${message}`)
   }
 }
 
@@ -71,7 +85,11 @@ function onMessage(message: ServerMessage): void {
     case 'turn_end':
       closeTurn()
       agent.setStatus('idle')
-      if (message.error) agent.append('error', message.error)
+      // A stop is a state the person put the turn in, so it reads as one. The server tells
+      // us which it was, because the SDK reports an interrupt as an unsuccessful result and
+      // the text would otherwise arrive here as "The agent stopped: <subtype>".
+      if (message.stopped) agent.append('notice', 'Stopped.')
+      else if (message.error) agent.append('error', message.error)
       return
   }
 }
@@ -82,6 +100,11 @@ export function createAgentConnection(): () => void {
 
   const connect = (): void => {
     if (disposed) return
+    window.clearTimeout(timer)
+    const agent = useAgent.getState()
+    agent.setStatus('connecting')
+    agent.setNextAttemptAt(null)
+
     const ws = new WebSocket(`ws://localhost:${AGENT_PORT}`)
     socket = ws
 
@@ -99,17 +122,24 @@ export function createAgentConnection(): () => void {
       if (socket !== ws) return
       socket = null
       closeTurn()
-      useAgent.getState().setStatus('offline')
-      if (!disposed) timer = window.setTimeout(connect, RECONNECT_DELAY_MS)
+      const state = useAgent.getState()
+      state.setStatus('offline')
+      if (disposed) return
+      timer = window.setTimeout(connect, RECONNECT_DELAY_MS)
+      // The panel counts down from this rather than showing a spinner that means nothing:
+      // an offline state that says when it will try again is a state, not a dead end.
+      state.setNextAttemptAt(Date.now() + RECONNECT_DELAY_MS)
     }
     // The close handler fires after an error too, so this only silences the console.
     ws.onerror = () => {}
   }
 
+  connectNow = connect
   connect()
 
   return () => {
     disposed = true
+    connectNow = null
     window.clearTimeout(timer)
     closeTurn()
     socket?.close()
@@ -119,21 +149,37 @@ export function createAgentConnection(): () => void {
 
 /** What the panel calls. Module level so the panel needs no handle threaded through props. */
 export const agentClient = {
-  send(text: string): void {
+  /**
+   * Sends, and answers whether it went. False leaves the transcript untouched, so the panel
+   * can keep the draft in the composer: a message nobody received must not look sent.
+   */
+  send(text: string): boolean {
     const agent = useAgent.getState()
-    if (agent.status !== 'idle') return
+    if (agent.status !== 'idle') return false
+    if (!send({ type: 'chat', text })) {
+      agent.append('notice', 'Not sent: the agent server is not connected.')
+      return false
+    }
     agent.append('user', text)
     // Optimistic: the server's turn_start confirms it, but the input should lock now.
     agent.setStatus('busy')
-    send({ type: 'chat', text })
+    return true
   },
   stop(): void {
-    send({ type: 'stop' })
+    const agent = useAgent.getState()
+    if (agent.status !== 'busy') return
+    // Stopping is its own state: the interrupt reaches the model between tool calls, so the
+    // turn can take a moment to end and the button must not look like it did nothing.
+    if (send({ type: 'stop' })) agent.setStatus('stopping')
   },
   reset(): void {
     const agent = useAgent.getState()
-    if (agent.status === 'busy') return
+    if (agent.status === 'busy' || agent.status === 'stopping') return
     agent.clear()
     send({ type: 'reset' })
+  },
+  /** Retry now, instead of waiting out the backoff. */
+  reconnect(): void {
+    connectNow?.()
   },
 }

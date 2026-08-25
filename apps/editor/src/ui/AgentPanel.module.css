@@ -73,9 +73,24 @@
   background: var(--line-strong);
 }
 
-.status[data-status='busy'] {
+/* Connecting is a wait, not a state of the agent, so it reads as neither on nor off. */
+.status[data-status='connecting'] {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--line-strong) 0 1px,
+    transparent 1px 2px
+  );
+}
+
+.status[data-status='busy'],
+.status[data-status='stopping'] {
   background: var(--accent);
   border-color: var(--accent);
+}
+
+/* Winding down: the same dot, dimmed, so stopping is visibly between busy and idle. */
+.status[data-status='stopping'] {
+  opacity: 0.5;
 }
 
 .iconButton {
@@ -94,6 +109,37 @@
 .iconButton:hover {
   color: var(--text);
   background: var(--hover);
+}
+
+/* The list and the control that sits over its foot. The wrapper is what the jump button is
+   positioned against, so it can float above the newest message without scrolling with it. */
+.transcript {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.jump {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-3);
+  translate: -50% 0;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  transition:
+    color var(--duration) var(--ease),
+    border-color var(--duration) var(--ease);
+}
+
+.jump:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
 }
 
 .list {
@@ -123,6 +169,12 @@
 
 .message[data-kind='error'] {
   color: var(--text-secondary);
+}
+
+/* The panel talking about itself: quieter than either side of the conversation. */
+.message[data-kind='notice'] {
+  font-size: var(--text-xs);
+  color: var(--text-disabled);
 }
 
 /* A folded run of tool calls and thinking: one quiet line until it is asked to open. */
@@ -174,6 +226,14 @@
   color: var(--text-disabled);
 }
 
+/* A step that failed, and the closed run that hides one: both read a shade stronger than
+   the steps around them, since a fold saying "12 steps" would otherwise hide the one thing
+   worth opening it for. */
+.step[data-failed='true'],
+.stepsToggle[data-failed='true'] {
+  color: var(--text-secondary);
+}
+
 .thought {
   font-size: var(--text-xs);
   color: var(--text-secondary);
@@ -181,8 +241,42 @@
   overflow-wrap: break-word;
 }
 
-.offline {
+/* Not a line in the transcript: a strip between it and the composer, because it is about
+   the connection rather than about anything that was said. */
+.connection {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: none;
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--line);
+}
+
+.connectionText {
+  flex: 1;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
+}
+
+.retry {
+  flex: none;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-field);
+  transition:
+    color var(--duration) var(--ease),
+    border-color var(--duration) var(--ease);
+}
+
+.retry:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+.retry:disabled {
+  color: var(--text-disabled);
 }
 
 .composer {

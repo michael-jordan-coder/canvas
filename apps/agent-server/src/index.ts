@@ -32,6 +32,12 @@ let editor: WebSocket | null = null
 let busy = false
 /** The running query, kept so a stop request can interrupt it mid-turn. */
 let activeQuery: { interrupt: () => Promise<unknown> } | null = null
+/**
+ * Whether the turn now ending was interrupted on request. The SDK reports an interrupt as a
+ * result with an unsuccessful subtype, indistinguishable from the turn cap or a real
+ * failure, so the one thing that knows a stop happened is the code that asked for it.
+ */
+let interrupted = false
 /** Multi-turn memory: the SDK session resumed on the next message. Reset starts fresh. */
 let sessionId: string | undefined
 
@@ -75,6 +81,7 @@ const canvas = createCanvasMcpServer(forward)
 
 async function runChat(text: string): Promise<void> {
   busy = true
+  interrupted = false
   send({ type: 'turn_start' })
   let error: string | undefined
 
@@ -114,7 +121,8 @@ async function runChat(text: string): Promise<void> {
   } finally {
     activeQuery = null
     busy = false
-    send({ type: 'turn_end', ...(error ? { error } : {}) })
+    if (interrupted) send({ type: 'turn_end', stopped: true })
+    else send({ type: 'turn_end', ...(error ? { error } : {}) })
   }
 }
 
@@ -134,6 +142,7 @@ function onMessage(raw: string): void {
       return
     }
     case 'stop': {
+      if (activeQuery) interrupted = true
       void activeQuery?.interrupt().catch(() => {
         // Interrupting a query that just finished on its own is not a failure.
       })

@@ -669,6 +669,49 @@ Daniel's condition for the whole feature is that code written here translates to
 later, so every prop is chosen to have a direct CSS equivalent and the instantiator owns the
 mapping into canvas vocabulary.
 
+## The assistant
+
+Claude with hands on the canvas, and the only part of this project that is not in the browser.
+
+`apps/agent-server` is a Node sidecar on 5174, because the Agent SDK runs in Node and
+authenticates through the Claude Code login on this machine: there is no key anywhere in the
+editor, and no key in this process either. The document lives in the tab, so the server never
+holds one. Every tool call travels back over the same WebSocket as a command the editor
+executes against the live document, which is why the agent's edits are real edits, visible as
+they happen and undoable by the person who watched them.
+
+`protocol.ts` is the contract and it is compile enforced in both directions: `CommandMap`
+names every command with its args and its result, the editor's `executor.ts` implements
+`Handlers` over that same map, and a tool added on one side without the other does not build.
+
+**A turn is one history step.** `turn_start` opens a history group and `turn_end` closes it,
+so fifty node edits undo together, the same shape a nudge burst has. A socket that dies
+mid-turn force closes the group, because nothing else ever would.
+
+**Every state the person waits in has a name.** `offline`, `connecting`, `idle`, `busy`,
+`stopping`. Two of them are waits the person started and would otherwise look like nothing
+happening: `connecting` (with the countdown to the next automatic attempt, and a retry that
+skips it) and `stopping`, which covers the gap between the stop reaching the server and the
+model noticing it between tool calls. A stop is not a failure, and the server says which it
+was: the SDK reports an interrupted turn as an unsuccessful result, indistinguishable from
+the turn cap, so `turn_end` carries `stopped` and the only thing that knows is the code that
+asked for the interrupt.
+
+**Nothing is sent optimistically.** The socket answers whether it took the message, and a
+message it did not take leaves the transcript untouched and the draft in the composer. The
+panel used to append the person's words and go busy before finding out, which left it waiting
+forever on a reply nobody had been asked for.
+
+**What the model is told about a failure, the person is told too.** A command that throws
+answers the model with the error so it can recover, and appends a line to the transcript. It
+folds in with the run of steps, because a tool the model will retry is process rather than an
+answer, but a closed run says one of its steps failed: a turn that quietly failed half its
+edits must not read as a turn that worked.
+
+The transcript follows the newest message only while it is the one being read. Pinning
+unconditionally meant it could not be scrolled back during a turn, since every arriving step
+dragged it down again, which is exactly when there is most to read.
+
 ## Rotation, and the one rule it added
 
 `SelectionBox` is an upright rect plus an angle, not four corner points. Everything asking where

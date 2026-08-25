@@ -233,7 +233,12 @@ export type ServerMessage =
   | { type: 'thinking'; text: string }
   | { type: 'tool'; name: CommandName }
   | { type: 'command'; id: number; name: CommandName; args: unknown }
-  | { type: 'turn_end'; error?: string }
+  /**
+   * `stopped` is the person having asked, which the editor renders as a state rather than
+   * as a failure. The SDK reports an interrupted turn as an unsuccessful result, so without
+   * this the only thing the editor could show for a stop is an error line.
+   */
+  | { type: 'turn_end'; error?: string; stopped?: true }
 
 export type ClientMessage =
   | { type: 'chat'; text: string }
