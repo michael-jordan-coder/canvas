@@ -146,6 +146,40 @@ describe('renderTree', () => {
     expect(outer).toEqual([2, 2])
   })
 
+  it('escapes a separator inside a key so paths stay one level per element', () => {
+    const App: ComponentFn = () =>
+      __jsx(
+        Frame,
+        null,
+        ['docs/readme', 'a%b'].map((key) => __jsx(Rectangle, { key })),
+      )
+    const ids = renderTree(App, {}, session()).roots[0]?.children?.map((child) => child.id)
+    // One separator between parent and child, whatever the key holds: bubbling walks these
+    // paths by cutting at the last '/', so a raw one would name an ancestor that never was.
+    expect(ids).toEqual(['root/docs%2Freadme', 'root/a%25b'])
+  })
+
+  it('runs the cleanup of an effect the hook order drops', () => {
+    let torn = 0
+    const Flipping: ComponentFn = (props) => {
+      if (props['withState']) useState(0)
+      useEffect(() => () => {
+        torn += 1
+      }, [])
+      return __jsx(Rectangle, null)
+    }
+    const s = session()
+    const first = renderTree(Flipping, { withState: false }, s)
+    for (const task of first.effects) task.run()
+    // The extra hook shifts the effect's index, which resets the cells at and after it. The
+    // cleanup is the only reference to what the effect started, so it has to run on the way.
+    const second = renderTree(Flipping, { withState: true }, s)
+    expect(torn).toBe(1)
+    for (const task of second.effects) task.run()
+    disposeSession(s)
+    expect(torn).toBe(2)
+  })
+
   it('refuses hooks outside a render', () => {
     expect(() => useState(0)).toThrow(/while a component renders/)
   })

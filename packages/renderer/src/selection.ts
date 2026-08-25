@@ -336,6 +336,14 @@ export function handleScreenPoint(box: SelectionBox, handle: HandleId): Vec2 {
 const TEXT_HANDLES: readonly HandleId[] = ['e', 'w']
 
 /**
+ * A code node resizes not at all. Its `size` is the measured bounds of what the code
+ * produced, so a handle would offer an edit the next run erases, which is the same reason
+ * the properties panel holds its W and H read only. Rotation and dragging are untouched:
+ * where the node sits is the person's, what it is is the code's.
+ */
+const CODE_HANDLES: readonly HandleId[] = []
+
+/**
  * Which resize handles a selection offers.
  *
  * Asked in one place so the overlay and the input layer cannot disagree about what can be
@@ -346,7 +354,10 @@ export function resizeHandlesFor(
   selection: readonly NodeId[],
 ): readonly HandleId[] {
   const only = selection.length === 1 ? selection[0] : undefined
-  return only && document.getNode(only)?.type === 'text' ? TEXT_HANDLES : ALL_HANDLES
+  const type = only ? document.getNode(only)?.type : undefined
+  if (type === 'text') return TEXT_HANDLES
+  if (type === 'code') return CODE_HANDLES
+  return ALL_HANDLES
 }
 
 /** One CSS pixel wide at every zoom, the same rule the handles follow. */

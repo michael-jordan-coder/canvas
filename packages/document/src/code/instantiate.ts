@@ -133,6 +133,8 @@ interface Desired {
   clipsContent: boolean
   layout: FrameLayout | undefined
   layoutChild: LayoutChild | undefined
+  /** Which axes the element gave a size for. Absence is hug or measured, zero is a size. */
+  stated: { width: boolean; height: boolean }
   text: { characters: string; fontSize: number; autoWidth: boolean } | null
 }
 
@@ -151,6 +153,7 @@ function desiredOf(element: CodeElement, parentLayout: FrameLayout | undefined):
     clipsContent: props.overflow === 'hidden',
     layout: element.type === 'frame' ? layoutOf(props) : undefined,
     layoutChild: layoutChildOf(props, parentLayout),
+    stated: { width: props.width !== undefined, height: props.height !== undefined },
     text: isText
       ? {
           characters: element.text ?? '',
@@ -240,9 +243,11 @@ function patchFor(node: SceneNode, desired: Desired): Partial<SceneNode> | null 
   }
 
   // A hug axis and a measured text box own their size; writing 0 over it would fight the
-  // layout every run. Only a size the element actually stated is compared.
-  const sizedWidth = desired.text ? !desired.text.autoWidth : desired.size.width > 0
-  const sizedHeight = !desired.text && desired.size.height > 0
+  // layout every run. Only a size the element actually stated is compared, and stated is
+  // whether the prop was there: `width={0}` is a width, and reading it as an absent one
+  // would pin an animated bar at whatever it measured before it reached zero.
+  const sizedWidth = desired.text ? !desired.text.autoWidth : desired.stated.width
+  const sizedHeight = !desired.text && desired.stated.height
   const width = sizedWidth ? desired.size.width : node.size.width
   const height = sizedHeight ? desired.size.height : node.size.height
   if (!near(node.size.width, width) || !near(node.size.height, height)) {

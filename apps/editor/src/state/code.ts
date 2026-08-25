@@ -98,6 +98,15 @@ function collectEvents(roots: readonly CodeElement[], into: Map<string, CodeElem
 }
 
 /**
+ * How many code runs are writing to the document right now. `rerunAllCodeNodes` reads it to
+ * tell its own writes from a person's while it waits for the worker.
+ */
+let applying = 0
+
+/** What an empty run leaves behind, so a code node producing nothing is still a box. */
+const EMPTY_CODE_SIZE = { width: 160, height: 120 }
+
+/**
  * Commits a validated tree: children reconciled, layout run, text measured, and the code
  * node's `size` refreshed from the output's bounds, all in one transaction. `extra` is how
  * a source edit rides in the same step.
@@ -110,15 +119,20 @@ function applyTree(id: NodeId, roots: CodeElement[], extra?: () => void): void {
   collectEvents(roots, events)
   eventsByNode.set(id, events)
 
-  scene.transact(() => {
-    extra?.()
-    const childIds = applyCodeTree(scene, id, roots, measureText)
-    relayout(scene, childIds.length > 0 ? childIds : [id])
-    const bounds = generatedBounds(scene, id)
-    if (bounds) {
+  applying += 1
+  try {
+    scene.transact(() => {
+      extra?.()
+      const childIds = applyCodeTree(scene, id, roots, measureText)
+      relayout(scene, childIds.length > 0 ? childIds : [id])
+      const bounds = generatedBounds(scene, id)
       // The origin stays the node's own: output at x 50 grows the box, it does not shift it.
-      const width = Math.max(0, bounds.x + bounds.width)
-      const height = Math.max(0, bounds.y + bounds.height)
+      // A run that produced nothing falls back to the empty box rather than keeping the size
+      // the last output measured, which would leave an invisible rectangle that still hit
+      // tests and still clips. Not zero, because a node nothing can point at is one only the
+      // layers panel can reach.
+      const width = bounds ? Math.max(0, bounds.x + bounds.width) : EMPTY_CODE_SIZE.width
+      const height = bounds ? Math.max(0, bounds.y + bounds.height) : EMPTY_CODE_SIZE.height
       const current = scene.expectNode(id)
       if (
         Math.abs(current.size.width - width) > 0.01 ||
@@ -126,8 +140,10 @@ function applyTree(id: NodeId, roots: CodeElement[], extra?: () => void): void {
       ) {
         scene.update(id, { size: { width, height } })
       }
-    }
-  })
+    })
+  } finally {
+    applying -= 1
+  }
 }
 
 async function execute(
@@ -140,8 +156,16 @@ async function execute(
 ): Promise<boolean> {
   const token = (runTokens.get(id) ?? 0) + 1
   runTokens.set(id, token)
+  /*
+   * A node that is playing runs live whatever the caller asked for. Callers are not all in a
+   * position to know: the panel commits pending keystrokes as its editor is torn down, which
+   * is exactly what entering play does to it, and that static run would land after the live
+   * one and leave the worker session static. The prototype would then look like it is
+   * playing and answer no event at all.
+   */
+  const runMode = useUI.getState().play === id ? 'live' : mode
   try {
-    const raw = await client.run(id, source, props, mode, fresh)
+    const raw = await client.run(id, source, props, runMode, fresh)
     if (runTokens.get(id) !== token) return false
     const roots = validateCodeTree(raw)
     applyTree(id, roots, extra)
@@ -231,6 +255,18 @@ export function rerunAllCodeNodes(): void {
   const ids: NodeId[] = []
   for (const node of scene.walk()) if (node.type === 'code') ids.push(node.id)
   if (ids.length === 0) return
+
+  /*
+   * The runs are a round trip to a worker that may still be starting, and the person can
+   * draw and move things while it does. Their steps are real history, so the clear at the
+   * end has to be able to tell them from the runs' own writes: anything notified while no
+   * run is applying is theirs, and it takes the clear off the table.
+   */
+  let edited = false
+  const stopWatching = scene.subscribe(() => {
+    if (applying === 0) edited = true
+  })
+
   void Promise.all(
     ids.map((id) => {
       const node = scene.getNode(id)
@@ -238,7 +274,8 @@ export function rerunAllCodeNodes(): void {
       return execute(id, node.source, node.props, 'static', true)
     }),
   ).then(() => {
-    scene.clearHistory()
+    stopWatching()
+    if (!edited) scene.clearHistory()
   })
 }
 
@@ -282,9 +319,11 @@ export function insertCodeNode(): void {
   const node = createCode({ source: STARTER_SOURCE, transform: translation(x, 60) })
   scene.transact(() => {
     scene.insert(node)
+    // In the step, not after it: the step's "after" selection is captured when it commits,
+    // so a selection written outside would leave redo restoring the one from before.
+    useUI.getState().setSelection([node.id])
+    useUI.getState().setContext(null)
   })
-  useUI.getState().setSelection([node.id])
-  useUI.getState().setContext(null)
   rerunCodeNode(node.id)
 }
 
@@ -298,12 +337,36 @@ export function insertCodeNode(): void {
  * real history is exactly as they left it. `abortHistoryGroup` exists for a cancelled
  * gesture, and a play session is that gesture at scale.
  */
+/**
+ * Bumped every time a session starts. The input layer keys its hover bookkeeping to it, so
+ * an element hovered in one session is not mistaken for the same element still being
+ * hovered in the next: the enter it is owed would otherwise be diffed away.
+ */
+let generation = 0
+
+export function playGeneration(): number {
+  return generation
+}
+
+/**
+ * True from the moment play starts until the exit's history group has actually been
+ * discarded, which is a worker round trip after `play` goes null. Undo asks this rather than
+ * the store, because the group is still open through that window and a step applied
+ * underneath it is the very thing the bracketing exists to prevent.
+ */
+let exiting = false
+
+export function isPlayLocked(): boolean {
+  return useUI.getState().play !== null || exiting
+}
+
 export function beginPlay(id: NodeId): void {
   const node = scene.getNode(id)
   if (node?.type !== 'code') return
   if (useUI.getState().play === id) return
   endPlay()
   endEditing()
+  generation += 1
   scene.beginHistoryGroup()
   useUI.getState().setPlay(id)
   useUI.getState().setSelection([id])
@@ -320,8 +383,10 @@ export function endPlay(): void {
     scene.abortHistoryGroup()
     return
   }
+  exiting = true
   void execute(id, node.source, node.props, 'static', true).finally(() => {
     scene.abortHistoryGroup()
+    exiting = false
   })
 }
 

@@ -79,6 +79,12 @@ function takeCell<T extends HookCell>(make: () => T, kind: T['kind']): T {
   ctx.index += 1
   const existing = ctx.cells[at]
   if (existing && existing.kind === kind) return existing as T
+  // The reset drops this cell and everything after it, and an effect cell holds the only
+  // reference to its own teardown. Dropping one without running it leaves the interval or
+  // the listener it registered alive for the rest of the session, with nothing left that
+  // could stop it.
+  if (existing) cleanupCells([existing])
+  cleanupCells(ctx.cells.slice(ctx.index))
   const cell = make()
   ctx.cells[at] = cell
   ctx.cells.length = ctx.index

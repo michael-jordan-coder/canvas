@@ -31,7 +31,7 @@ export interface CodeElementProps {
   /** Absent on a laid-out frame means hug, on text means size-to-words. */
   width?: number
   height?: number
-  /** Hex, `#rrggbb` or `#rrggbbaa`. */
+  /** Hex, `#rrggbb`. Alpha travels as `opacity`, which is what the validator enforces. */
   background?: string
   borderColor?: string
   borderWidth?: number

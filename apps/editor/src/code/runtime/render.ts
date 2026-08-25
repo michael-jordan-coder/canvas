@@ -165,8 +165,20 @@ function expandComponent(state: RenderState, element: VElement, path: string): C
   )
 }
 
+/**
+ * A path segment, with the separator escaped out of it. A key is the user's string and may
+ * hold anything, `key={file.path}` included, and a raw slash in one would read back as a
+ * level of nesting: bubbling walks a path by cutting at its last separator, so an element
+ * keyed "docs/readme" would send its clicks to an ancestor that does not exist. Percent
+ * encoding the two characters involved keeps every real separator the renderer's own.
+ */
+function escapeSegment(segment: string): string {
+  return segment.replace(/%/g, '%25').replace(/\//g, '%2F')
+}
+
 function childPath(parent: string, child: VElement | string | number, index: number): string {
-  const segment = isElement(child) && child.key !== undefined ? child.key : String(index)
+  const segment =
+    isElement(child) && child.key !== undefined ? escapeSegment(child.key) : String(index)
   return parent === '' ? segment : `${parent}/${segment}`
 }
 

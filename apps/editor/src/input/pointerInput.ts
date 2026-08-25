@@ -41,6 +41,7 @@ import {
 import { relayout } from '../state/autoLayout'
 import {
   endPlay,
+  playGeneration,
   playHitAt,
   playTargetAt,
   rerunCodeNodesIn,
@@ -253,6 +254,11 @@ export function createPointerInput(options: PointerInputOptions): () => void {
   // sends one leave and one enter rather than a stream of either.
   let playPress: { element: string | null } | null = null
   let playHover: string | null = null
+  // Which play session the hover above belongs to. A session ends in four places and only
+  // one of them is here, so rather than clearing the hover from each, it is compared: an id
+  // recorded under an older session is not a pointer still resting on that element, and the
+  // enter it is owed has to be sent again.
+  let playHoverAt = -1
 
   const viewportOf = (): Viewport => {
     const rect = canvas.getBoundingClientRect()
@@ -263,10 +269,12 @@ export function createPointerInput(options: PointerInputOptions): () => void {
   const routePlayHover = (playing: NodeId, world: Vec2): void => {
     const hit = playHitAt(playing, world)
     const element = hit?.elementId ?? null
-    if (element !== playHover) {
+    const generation = playGeneration()
+    const previous = playHoverAt === generation ? playHover : null
+    if (element !== previous) {
       const point = hit?.point ?? { x: 0, y: 0 }
-      if (playHover !== null) {
-        const leaveTarget = playTargetAt(playing, playHover, 'pointerLeave')
+      if (previous !== null) {
+        const leaveTarget = playTargetAt(playing, previous, 'pointerLeave')
         if (leaveTarget) sendPlayEvent(playing, leaveTarget, 'pointerLeave', point)
       }
       if (element !== null) {
@@ -274,6 +282,7 @@ export function createPointerInput(options: PointerInputOptions): () => void {
         if (enterTarget && hit) sendPlayEvent(playing, enterTarget, 'pointerEnter', hit.point)
       }
       playHover = element
+      playHoverAt = generation
     }
     // The editor's own affordances stand down while the prototype has the pointer.
     options.setHover(null)
@@ -1297,6 +1306,15 @@ export function createPointerInput(options: PointerInputOptions): () => void {
     if (drag) return
     lastPointerScreen = null
     options.setHover(null)
+    // The pointer left the canvas, so it left whatever it was over inside the prototype
+    // too. Without this the element it was on keeps its hover state until the pointer comes
+    // back and moves off it, which reads as a button stuck lit.
+    const playing = options.getPlay()
+    if (playing !== null && playHover !== null && playHoverAt === playGeneration()) {
+      const leaveTarget = playTargetAt(playing, playHover, 'pointerLeave')
+      if (leaveTarget) sendPlayEvent(playing, leaveTarget, 'pointerLeave', { x: 0, y: 0 })
+    }
+    playHover = null
   }
 
   /**

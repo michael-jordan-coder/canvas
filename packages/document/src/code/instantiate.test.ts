@@ -130,6 +130,29 @@ describe('applyCodeTree', () => {
     expect(text?.size).toEqual({ width: 55, height: 24 })
   })
 
+  it('writes a stated size of zero rather than keeping the last one', () => {
+    const { document, code } = withCode()
+    applyCodeTree(document, code.id, [el('bar', 'rectangle', { props: { width: 80, height: 8 } })])
+    // An animated value reaching zero is a width like any other; reading it as an absent one
+    // would pin the bar at the width it last measured.
+    applyCodeTree(document, code.id, [el('bar', 'rectangle', { props: { width: 0, height: 8 } })])
+    expect(document.getChildren(code.id)[0]?.size).toEqual({ width: 0, height: 8 })
+  })
+
+  it('leaves a hug axis alone when the element states no size', () => {
+    const { document, code } = withCode()
+    applyCodeTree(document, code.id, [
+      el('row', 'frame', { props: { direction: 'row', gap: 4 } }),
+    ])
+    const frame = document.getChildren(code.id)[0]
+    if (!frame) throw new Error('no frame')
+    document.update(frame.id, { size: { width: 120, height: 40 } })
+    applyCodeTree(document, code.id, [
+      el('row', 'frame', { props: { direction: 'row', gap: 4 } }),
+    ])
+    expect(document.expectNode(frame.id).size).toEqual({ width: 120, height: 40 })
+  })
+
   it('refuses a node that is not a code node', () => {
     const { document } = withCode()
     expect(() => applyCodeTree(document, document.rootId, [])).toThrow(/not a code node/)

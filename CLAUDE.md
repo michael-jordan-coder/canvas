@@ -620,6 +620,13 @@ relayout and the measured `size` in one synchronous transact. A failed run still
 source, keeps the previous output on canvas, and surfaces the failure in the panel; the
 node's `size` is a cache of the output bounds, under the text node's rule.
 
+**A code node has no resize handles at all**, the narrowing text made for one axis taken to
+both: its `size` is the measured bounds of the output, so a handle would offer an edit the
+next run erases. The properties panel holds W and H read only for the same reason, and
+`resizeHandlesFor` is what keeps the two from disagreeing. An empty run resizes it to a
+plain empty box rather than leaving the bounds the last output measured, which would be an
+invisible rectangle that still hit tests and still clips.
+
 **Play mode is the second half.** `play` in the UI store names the one running code node;
 `beginPlay` opens a history group, runs the code `live` (effects run there and only there,
 edit mode renders are deliberately effect free, the way a server render mounts nothing), and
@@ -629,7 +636,12 @@ thread, only `{elementId, kind, point}` does. State changes come back as `update
 validated and applied like any run, and ignored the moment play ends. Exit re-runs fresh,
 which deterministically restores the pre play tree, then `abortHistoryGroup` discards the
 whole session: the undo stack never learns play happened. Undo and redo are refused while
-playing, the CodeSection swaps its editor for a notice, and a click outside the node or
+playing and for the worker round trip the exit waits on, since the group is open for all of
+it and `play` goes null at the start of it: `isPlayLocked` is the question, not the store.
+A run for a node that is playing is forced live whatever the caller asked, because the panel
+commits its pending keystrokes as the editor is torn down, which is exactly what entering
+play does to it, and that static run would land last and leave the session answering no
+event. the CodeSection swaps its editor for a notice, and a click outside the node or
 Escape is the exit.
 
 **A code node selects in green**, not in the accent every other node uses, and Play sits on
