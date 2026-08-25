@@ -16,6 +16,14 @@
 /** One below the editor's 5173, and fixed for the same reason its strictPort is. */
 export const AGENT_PORT = 5174
 
+/**
+ * The close code the server sends when a newer editor connection replaces this one. The
+ * editor must not reconnect after it: a timed retry would steal the socket back, the other
+ * tab would retry in turn, and the two would trade it forever. Reconnecting again is a
+ * decision for the person, made by touching the assistant in that tab.
+ */
+export const CLOSE_SUPERSEDED = 4001
+
 // Values the tools traffic in ------------------------------------------------------------
 
 /** A paint as the agent speaks it: hex in, hex out. Topmost paint first, like the panel. */

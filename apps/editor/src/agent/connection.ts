@@ -1,4 +1,4 @@
-import { AGENT_PORT } from '@canvas/agent-server/protocol'
+import { AGENT_PORT, CLOSE_SUPERSEDED } from '@canvas/agent-server/protocol'
 import type { Attachment, ClientMessage, ServerMessage } from '@canvas/agent-server/protocol'
 import { scene } from '../state/scene'
 import { useAgent } from './agentStore'
@@ -8,6 +8,13 @@ import { executeCommand } from './executor'
  * The editor's end of the bridge: one WebSocket to the agent server, reconnecting quietly
  * for as long as the tab lives, since the server may start after the editor or restart
  * under `--watch` mid-session.
+ *
+ * One close is different: `CLOSE_SUPERSEDED` means a newer tab took the socket, and the
+ * timer must not answer it. The server keeps one editor and closes the previous, so two
+ * tabs both reconnecting on timers steal the connection from each other every two seconds,
+ * forever, with turn messages landing in whichever tab holds it at that instant. The
+ * superseded tab goes passive instead, and only `reconnect()`, called when the person
+ * touches the assistant in this tab, takes the socket back on purpose.
  *
  * Two responsibilities meet here and are deliberately kept together, because they share the
  * turn's lifecycle: relaying chat between the panel and the server, and executing the
@@ -22,6 +29,8 @@ const RECONNECT_DELAY_MS = 2000
 
 let socket: WebSocket | null = null
 let turnOpen = false
+/** Set by the live connection so the panel can reclaim a superseded socket on demand. */
+let reclaim: (() => void) | null = null
 
 function send(message: ClientMessage): void {
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message))
@@ -95,10 +104,14 @@ export function createAgentConnection(): () => void {
       onMessage(message)
     }
 
-    ws.onclose = () => {
+    ws.onclose = (event: CloseEvent) => {
       if (socket !== ws) return
       socket = null
       closeTurn()
+      if (event.code === CLOSE_SUPERSEDED) {
+        useAgent.getState().setStatus('superseded')
+        return
+      }
       useAgent.getState().setStatus('offline')
       if (!disposed) timer = window.setTimeout(connect, RECONNECT_DELAY_MS)
     }
@@ -107,9 +120,15 @@ export function createAgentConnection(): () => void {
   }
 
   connect()
+  reclaim = () => {
+    if (disposed || socket) return
+    window.clearTimeout(timer)
+    connect()
+  }
 
   return () => {
     disposed = true
+    reclaim = null
     window.clearTimeout(timer)
     closeTurn()
     socket?.close()
@@ -140,5 +159,14 @@ export const agentClient = {
     if (agent.status === 'busy') return
     agent.clear()
     send({ type: 'reset' })
+  },
+  /**
+   * Takes the socket back after another tab superseded this one. Guarded on the status so
+   * the panel can call it from any interaction without ever double-connecting: everywhere
+   * else the timer already owns reconnection.
+   */
+  reconnect(): void {
+    if (useAgent.getState().status !== 'superseded') return
+    reclaim?.()
   },
 }

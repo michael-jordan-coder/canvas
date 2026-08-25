@@ -185,6 +185,16 @@
   color: var(--text-secondary);
 }
 
+/* The way back after another tab took the socket: reconnecting here takes it on purpose. */
+.reclaim {
+  color: var(--accent);
+  transition: color var(--duration) var(--ease);
+}
+
+.reclaim:hover {
+  text-decoration: underline;
+}
+
 /* Thumbnails a user message carried, above its text. */
 .messageImages {
   display: flex;

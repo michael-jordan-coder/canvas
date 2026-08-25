@@ -2,6 +2,7 @@ import { query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { WebSocketServer, WebSocket } from 'ws'
 import {
   AGENT_PORT,
+  CLOSE_SUPERSEDED,
   MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BYTES,
   type Attachment,
@@ -200,7 +201,13 @@ function onMessage(raw: string): void {
 }
 
 wss.on('connection', (socket) => {
-  if (editor && editor !== socket) editor.close()
+  if (editor && editor !== socket) {
+    // Commands in flight were sent to the old tab, which will stop answering the moment it
+    // sees the close. Failing them now gives the model a readable error instead of a 30s
+    // timeout blaming the editor for a reply it was never going to send.
+    failPending('A newer editor connection took over.')
+    editor.close(CLOSE_SUPERSEDED, 'Another editor tab connected.')
+  }
   editor = socket
   send({ type: 'hello', busy })
 

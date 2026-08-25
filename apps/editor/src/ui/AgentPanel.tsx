@@ -143,6 +143,9 @@ export function AgentPanel(): ReactElement {
   const listRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const rows = useMemo(() => toRows(items), [items])
+  // Superseded disables everything offline does: there is no socket either way. The
+  // difference is the way back, a reclaim on the person's own gesture instead of a timer.
+  const detached = status === 'offline' || status === 'superseded'
 
   /**
    * The one funnel for paste, drop and the picker, so the type filter, the size limit and
@@ -196,7 +199,12 @@ export function AgentPanel(): ReactElement {
         className={styles.opener}
         aria-label="Assistant"
         data-busy={status === 'busy'}
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setOpen(true)
+          // Opening the assistant is the interaction that reclaims a superseded socket;
+          // a no-op in every other status.
+          agentClient.reconnect()
+        }}
       >
         <AssistantIcon />
       </button>
@@ -233,7 +241,7 @@ export function AgentPanel(): ReactElement {
 
   const onDrop = (event: DragEvent<HTMLElement>): void => {
     event.preventDefault()
-    if (status === 'offline') return
+    if (detached) return
     addFiles(event.dataTransfer.files)
   }
 
@@ -273,6 +281,18 @@ export function AgentPanel(): ReactElement {
 
       <div ref={listRef} className={styles.list}>
         {status === 'offline' && <p className={styles.offline}>Agent server offline.</p>}
+        {status === 'superseded' && (
+          <p className={styles.offline}>
+            Another tab is using the assistant.{' '}
+            <button
+              type="button"
+              className={styles.reclaim}
+              onClick={() => agentClient.reconnect()}
+            >
+              Use it here
+            </button>
+          </p>
+        )}
         {rows.map((row, index) =>
           row.kind === 'steps' ? (
             <Steps
@@ -312,7 +332,7 @@ export function AgentPanel(): ReactElement {
             value={draft}
             rows={1}
             placeholder="Describe a change"
-            disabled={status === 'offline'}
+            disabled={detached}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
@@ -329,7 +349,7 @@ export function AgentPanel(): ReactElement {
             type="button"
             className={styles.attach}
             aria-label="Attach image"
-            disabled={status === 'offline'}
+            disabled={detached}
             onClick={() => fileRef.current?.click()}
           >
             <PaperclipIcon />
@@ -348,9 +368,7 @@ export function AgentPanel(): ReactElement {
               type="submit"
               className={styles.action}
               aria-label="Send"
-              disabled={
-                status === 'offline' || (draft.trim() === '' && attachments.length === 0)
-              }
+              disabled={detached || (draft.trim() === '' && attachments.length === 0)}
             >
               <SendIcon />
             </button>

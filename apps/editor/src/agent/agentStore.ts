@@ -5,7 +5,12 @@ import { create } from 'zustand'
  * it is part of the document, and the transcript belongs to this tab, not to the file.
  */
 
-export type AgentStatus = 'offline' | 'idle' | 'busy'
+/**
+ * 'superseded' is offline by choice: another tab took the socket, and this tab stays out of
+ * its way until the person touches the assistant here again. It is what stops two open tabs
+ * trading the connection back and forth on their reconnect timers.
+ */
+export type AgentStatus = 'offline' | 'idle' | 'busy' | 'superseded'
 
 export interface ChatItem {
   id: number
