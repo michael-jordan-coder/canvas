@@ -39,6 +39,12 @@ const BYTES_PER_INSTANCE = FLOATS_PER_INSTANCE * 4
  * CSS. It will need passing in when the theme toggle exists, since dark uses a lighter blue.
  */
 const ACCENT = { r: 10 / 255, g: 124 / 255, b: 1, a: 1 }
+/**
+ * Code nodes get their own accent, the way a component instance does in Figma: what the
+ * outline says is not only "this is selected" but "this one is written, not drawn", and the
+ * handles around it edit a node whose children answer to its source.
+ */
+const CODE_ACCENT = { r: 34 / 255, g: 211 / 255, b: 116 / 255, a: 1 }
 const HANDLE_FILL = { r: 1, g: 1, b: 1, a: 1 }
 const TRANSPARENT = { r: 0, g: 0, b: 0, a: 0 }
 /** Faint enough to read what is underneath, which is the whole point of a rubber band. */
@@ -48,6 +54,21 @@ const MARQUEE_FILL = { r: 10 / 255, g: 124 / 255, b: 1, a: 0.1 }
  * enough to read them through. Matching --accent-subtle in the editor's tokens.
  */
 const TEXT_SELECTION_FILL = { r: 10 / 255, g: 124 / 255, b: 1, a: 0.25 }
+/**
+ * Which accent a box is drawn in. Green only when every node in the box is a code node: a
+ * mixed selection has no single story to tell, so it falls back to the ordinary one.
+ */
+function accentFor(
+  document: SceneDocument,
+  ids: readonly NodeId[],
+): { r: number; g: number; b: number; a: number } {
+  if (ids.length === 0) return ACCENT
+  for (const id of ids) {
+    if (document.getNode(id)?.type !== 'code') return ACCENT
+  }
+  return CODE_ACCENT
+}
+
 /** The caret is the one thing here that is not accent coloured: it stands in for the text. */
 const CARET_FILL = { r: 0.1, g: 0.1, b: 0.1, a: 1 }
 
@@ -144,7 +165,10 @@ export class OverlayInstances {
      */
     if (hover && !selection.includes(hover)) {
       const hovered = selectionBox(document, [hover], camera, viewport)
-      if (hovered) this.#push(hovered.rect, TRANSPARENT, ACCENT, OUTLINE_WIDTH, 0, hovered.angle)
+      if (hovered) {
+        const accent = accentFor(document, [hover])
+        this.#push(hovered.rect, TRANSPARENT, accent, OUTLINE_WIDTH, 0, hovered.angle)
+      }
     }
 
     // The same box the input layer hit tests against, so what you can grab is what you see.
@@ -155,7 +179,9 @@ export class OverlayInstances {
       return
     }
 
-    this.#push(box.rect, TRANSPARENT, ACCENT, OUTLINE_WIDTH, 0, box.angle)
+    const accent = accentFor(document, selection)
+
+    this.#push(box.rect, TRANSPARENT, accent, OUTLINE_WIDTH, 0, box.angle)
 
     // The stem first, so the round handle lands on top of the end of it rather than the
     // other way round. Each is centred in the box's frame, mapped to where that centre is
@@ -166,7 +192,7 @@ export class OverlayInstances {
       width: OUTLINE_WIDTH,
       height: box.rect.y - rotateAt.y,
     })
-    this.#push(stem, ACCENT, TRANSPARENT, 0, 0, box.angle)
+    this.#push(stem, accent, TRANSPARENT, 0, 0, box.angle)
 
     const knob = centredAt(fromBoxSpace(box, rotateAt), {
       width: ROTATE_HANDLE_SIZE,
@@ -174,7 +200,7 @@ export class OverlayInstances {
     })
     // A corner radius of half the side turns the rounded box into a circle, so the round
     // handle costs nothing beyond the number in that slot.
-    this.#push(knob, HANDLE_FILL, ACCENT, OUTLINE_WIDTH, ROTATE_HANDLE_SIZE / 2, box.angle)
+    this.#push(knob, HANDLE_FILL, accent, OUTLINE_WIDTH, ROTATE_HANDLE_SIZE / 2, box.angle)
 
     for (const point of handlePoints(box.rect, resizeHandlesFor(document, selection))) {
       // Handle centres come out in the box's own upright frame, so each one is placed where
@@ -190,7 +216,7 @@ export class OverlayInstances {
           height: HANDLE_SIZE,
         },
         HANDLE_FILL,
-        ACCENT,
+        accent,
         OUTLINE_WIDTH,
         1,
         // Turned with the box, so a handle reads as a corner of the shape rather than an

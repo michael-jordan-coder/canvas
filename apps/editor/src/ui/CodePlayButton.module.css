@@ -1,0 +1,44 @@
+/*
+ * Placed by the component, which writes --x and --y once per drawn frame. The offsets are
+ * the only thing that comes from JavaScript; everything about how it looks is here.
+ */
+.button {
+  position: absolute;
+  /* Shown only once the component has written a position onto it. */
+  visibility: hidden;
+  top: 0;
+  left: 0;
+  translate: var(--x, 0) var(--y, 0);
+  /* Sits on the frame's top edge rather than over its contents. */
+  transform: translateY(-100%);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 3px var(--space-2);
+  border: 0;
+  border-radius: var(--radius-field);
+  font-size: var(--text-sm);
+  line-height: 1;
+  color: #fff;
+  /* The code accent, the same green the selection outline uses for a code node. */
+  background: #22d374;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.button[data-placed] {
+  visibility: visible;
+}
+
+.button:hover {
+  filter: brightness(0.94);
+}
+
+.button[data-playing] {
+  background: var(--text);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

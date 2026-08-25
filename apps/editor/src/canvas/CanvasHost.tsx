@@ -20,6 +20,8 @@ import { beginEditing, endEditing } from '../state/textEditing'
 import { createPointerInput } from '../input/pointerInput'
 import { isEditingText } from '../input/isEditingText'
 import { registerCapture, type CaptureOptions, type CapturedImage } from '../agent/capture'
+import { publishCanvasView, registerCanvasDraw } from '../state/canvasView'
+import { CodePlayButton } from '../ui/CodePlayButton'
 import styles from './CanvasHost.module.css'
 
 /** Longest edge of an agent screenshot. Enough to judge layout, cheap to send as tokens. */
@@ -74,6 +76,19 @@ export function CanvasHost(): ReactElement {
       const { instances, culled } = renderer.stats
       frameStats.instances = instances
       frameStats.culled = culled
+
+      /*
+       * The camera, for the DOM overlays that follow a node across the canvas. Published
+       * from here rather than from wherever it is changed, because a frame is exactly when
+       * the pixels those overlays sit on top of moved, and `lastRect` is the size that frame
+       * was drawn at, so nothing here reads layout back.
+       */
+      if (lastRect) {
+        publishCanvasView({
+          camera: cameraRef.current,
+          viewport: { width: lastRect.width, height: lastRect.height },
+        })
+      }
     }
 
     const draw = (): void => {
@@ -271,6 +286,7 @@ export function CanvasHost(): ReactElement {
       return { mimeType: 'image/png', base64 }
     }
     const unregisterCapture = registerCapture(captureCanvas)
+    const unregisterDraw = registerCanvasDraw(draw)
 
     // devicePixelRatio changes when the window moves to a different display, and no resize
     // event fires for it. This media query is the only notification available.
@@ -310,6 +326,7 @@ export function CanvasHost(): ReactElement {
       disposed = true
       cancelAnimationFrame(frame)
       unregisterCapture()
+      unregisterDraw()
       observer.disconnect()
       unsubscribe()
       unsubscribeSelection()
@@ -326,6 +343,7 @@ export function CanvasHost(): ReactElement {
     <>
       <canvas ref={canvasRef} className={styles.canvas} />
       <TextEditor />
+      <CodePlayButton />
       {error && <p className={styles.error}>{error}</p>}
     </>
   )

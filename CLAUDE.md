@@ -632,6 +632,18 @@ whole session: the undo stack never learns play happened. Undo and redo are refu
 playing, the CodeSection swaps its editor for a notice, and a click outside the node or
 Escape is the exit.
 
+**A code node selects in green**, not in the accent every other node uses, and Play sits on
+the canvas above its frame rather than only in the panel. Both say the same thing: this one
+is written, not drawn, and its children answer to its source. The outline colour is decided
+by `accentFor` in `OverlayInstances`, green only when every node in the box is a code node,
+since a mixed selection has no single story. The button is the one piece of DOM that tracks
+a world position, and it moves itself: `state/canvasView.ts` publishes the camera once per
+drawn frame and the button writes its own offsets, because React state for a value that
+changes at pointer rate would put a render between the pointer and the pixels on every frame
+of a pan. Drawing is on demand, so a button that mounts while nothing is moving has no frame
+coming; it asks for one through `requestCanvasView` and stays hidden until it has been
+placed, an unplaced absolute element sitting over the toolbar rather than on the canvas.
+
 The panel is CodeMirror 6 in `CodeSection.tsx`, uncontrolled like the text editor's textarea
 and for the same reason, committing on 400ms idle, on blur and on Cmd+Enter through the same
 door. The agent has `create_code_node`, `get_code_source` and `set_code_source`; the run's
