@@ -14,7 +14,18 @@ import { create } from 'zustand'
  * between the stop reaching the server and the turn actually ending, which is however long
  * the model takes to notice.
  */
-export type AgentStatus = 'offline' | 'connecting' | 'idle' | 'busy' | 'stopping'
+export type AgentStatus =
+  | 'offline'
+  | 'connecting'
+  | 'idle'
+  | 'busy'
+  | 'stopping'
+  /**
+   * Open in another tab, which now holds the one editor the server keeps. The only state
+   * here that is not a wait: nothing is coming, and it ends when the person asks for the
+   * assistant back rather than when the network changes its mind.
+   */
+  | 'displaced'
 
 /**
  * The two questions the union is actually asked, beside the union itself, the way
@@ -24,7 +35,7 @@ export type AgentStatus = 'offline' | 'connecting' | 'idle' | 'busy' | 'stopping
  * composer and the send button want `isConnected`, the stop button, the status dot, the
  * live steps chip and the opener's badge want `isWorking`. Spelled out at the call site
  * they are a disjunction to keep in step across two files, and this union has already grown
- * once, from three values to five.
+ * twice, from three values to six.
  */
 export function isWorking(status: AgentStatus): boolean {
   return status === 'busy' || status === 'stopping'

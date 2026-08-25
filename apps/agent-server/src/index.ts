@@ -183,7 +183,16 @@ function onMessage(raw: string): void {
 }
 
 wss.on('connection', (socket) => {
-  if (editor && editor !== socket) editor.close()
+  if (editor && editor !== socket) {
+    // Told before it is closed, so it knows this was a handover rather than the server
+    // going away. A tab that cannot tell the two apart reconnects on its backoff and
+    // displaces this one straight back.
+    const displaced = editor
+    if (displaced.readyState === WebSocket.OPEN) {
+      displaced.send(JSON.stringify({ type: 'evicted' } satisfies ServerMessage))
+    }
+    displaced.close()
+  }
   editor = socket
   send({ type: 'hello', busy, session: sessionId !== undefined })
 

@@ -773,6 +773,16 @@ something that already happened, not someone's work. `hello` carries whether the
 still holds a session, and a restored transcript facing a server that does not gets one
 notice saying so, once per page.
 
+**The server keeps one editor, and the tab that loses it is told.** A turn edits one
+document and the person is looking at one of them, so a second tab displaces the first. The
+displacing is not the interesting part: without being told, the closed tab could not tell a
+handover from the server going away, so it reconnected on its backoff, displaced the other
+tab in turn, and the two evicted each other about once a second for as long as both were
+open, appending a notice on every cycle. `evicted` arrives just before the socket closes,
+and `displaced` is the one status here that is not a wait: nothing is coming, and it ends
+when the person asks for the assistant back rather than when the network changes its mind.
+The panel names the place rather than a fault, and its control says "Use it here".
+
 **Cmd/Ctrl+K opens the assistant and puts the caret in it.** Not Cmd+H, which never reaches
 a page on macOS: the system takes it to hide the application. Closing is the composer's own
 job rather than an exception in the window handler, whose first line hands every keystroke

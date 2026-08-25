@@ -258,6 +258,16 @@ export type ServerMessage =
    */
   | { type: 'turn_end'; reason: TurnEndReason; detail?: string }
   /**
+   * This editor has been displaced by another tab, sent just before its socket is closed.
+   *
+   * The server keeps one editor, because a turn edits one document and the person is
+   * looking at one of them. Without this the closed tab could not tell being displaced from
+   * the server going away, so it reconnected on its backoff, displaced the other tab in
+   * turn, and the two evicted each other about once a second for as long as both were open.
+   * Being told is what lets the loser stop and wait to be asked for.
+   */
+  | { type: 'evicted' }
+  /**
    * A message the server refused rather than ran, with the text handed back so the editor
    * can return it to the composer. The editor guards against sending while busy, but it
    * cannot always know: a second tab, or a send that crossed with a turn starting.

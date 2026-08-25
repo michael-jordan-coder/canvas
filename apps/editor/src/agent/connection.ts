@@ -24,6 +24,12 @@ import { executeCommand } from './executor'
 
 let socket: WebSocket | null = null
 let turnOpen = false
+/**
+ * Whether another tab took the editor. It suppresses the reconnect that would otherwise
+ * take it straight back, so the two tabs hand over once instead of trading it forever.
+ * Cleared by `connect`, which is the only thing that asks for it again.
+ */
+let displaced = false
 /** Set while a connection is alive, so the panel's Retry can skip the backoff wait. */
 let connectNow: (() => void) | null = null
 /**
@@ -116,6 +122,14 @@ function onMessage(message: ServerMessage): void {
       if (ending) agent.append(ending.kind, ending.text)
       return
     }
+    case 'evicted':
+      // Not an error and not a disconnection: the assistant is somewhere the person can
+      // still reach, so the panel says where rather than counting down to nothing.
+      displaced = true
+      closeTurn()
+      agent.setStatus('displaced')
+      agent.setNextAttemptAt(null)
+      return
     case 'rejected':
       // Back into the composer, where it can be sent again once the turn ends.
       agent.setDraft(message.text)
@@ -134,6 +148,7 @@ export function createAgentConnection(): () => void {
   const connect = (): void => {
     if (disposed) return
     window.clearTimeout(timer)
+    displaced = false
     const agent = useAgent.getState()
     agent.setStatus('connecting')
     agent.setNextAttemptAt(null)
@@ -160,6 +175,9 @@ export function createAgentConnection(): () => void {
       socket = null
       closeTurn()
       const state = useAgent.getState()
+      // Displaced keeps its own status: this close is the handover completing, not the
+      // server going away, and there is nothing to count down to.
+      if (displaced) return
       state.setStatus('offline')
       if (disposed) return
       const delay = reconnectDelay(attempts)

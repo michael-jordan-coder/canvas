@@ -484,13 +484,10 @@ Open:
       appears in the transcript and whether it is saved with it. Note the transcript's
       storage is capped at 64 kB and drops the oldest first, so images almost certainly must
       not go through `figma-canvas:agent-chat`.
-- [ ] Two editor tabs flap the agent socket forever. The server keeps one editor and closes
-      the previous socket when a new one connects (`apps/agent-server/src/index.ts:186`),
-      and each editor reconnects automatically on close, so two open tabs evict each other
-      about once a second and each cycle appends a notice to the transcript. The fix is
-      probably for the evicted tab to be told why and stop reconnecting, rather than for the
-      server to accept several editors: one document per tab means several editors is a
-      different feature, not a bug fix.
+- [x] Two editor tabs no longer flap the agent socket. The server sends `evicted` to the
+      tab it is about to close, and a displaced editor stops reconnecting instead of taking
+      the socket straight back. New `displaced` status, and the strip offers "Use it here".
+      `apps/agent-server/src/index.ts`, `apps/editor/src/agent/connection.ts`
 
 ## Backlog
 

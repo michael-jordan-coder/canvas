@@ -125,14 +125,20 @@ function ConnectionStrip(): ReactElement | null {
 
   if (isConnected(status)) return null
 
+  // Displaced is the one case here that is not a wait, so it names a place rather than a
+  // fault, and its control asks for the assistant back rather than trying again.
+  const displaced = status === 'displaced'
+
   return (
     <div className={styles.connection}>
       <span className={styles.connectionText}>
-        {status === 'connecting'
-          ? 'Connecting to the agent server'
-          : seconds === null
-            ? 'Agent server offline'
-            : `Agent server offline. Retrying in ${seconds}s`}
+        {displaced
+          ? 'The assistant is open in another tab'
+          : status === 'connecting'
+            ? 'Connecting to the agent server'
+            : seconds === null
+              ? 'Agent server offline'
+              : `Agent server offline. Retrying in ${seconds}s`}
       </span>
       <button
         type="button"
@@ -140,7 +146,7 @@ function ConnectionStrip(): ReactElement | null {
         disabled={status === 'connecting'}
         onClick={() => agentClient.reconnect()}
       >
-        Retry
+        {displaced ? 'Use it here' : 'Retry'}
       </button>
     </div>
   )
@@ -205,7 +211,13 @@ function Composer(): ReactElement {
           className={styles.input}
           value={draft}
           rows={1}
-          placeholder={connected ? 'Describe a change' : 'Waiting for the agent server'}
+          placeholder={
+            connected
+              ? 'Describe a change'
+              : status === 'displaced'
+                ? 'Open in another tab'
+                : 'Waiting for the agent server'
+          }
           disabled={!connected}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={onKeyDown}
