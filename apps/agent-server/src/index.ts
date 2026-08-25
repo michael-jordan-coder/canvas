@@ -174,7 +174,7 @@ function onMessage(raw: string): void {
 wss.on('connection', (socket) => {
   if (editor && editor !== socket) editor.close()
   editor = socket
-  send({ type: 'hello', busy })
+  send({ type: 'hello', busy, session: sessionId !== undefined })
 
   socket.on('message', (data) => {
     onMessage(typeof data === 'string' ? data : data.toString())

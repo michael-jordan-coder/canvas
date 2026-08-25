@@ -8,6 +8,7 @@ import { scene } from './state/scene'
 // Measures every text node once the font arrives. Imported for that effect.
 import './state/font'
 import { rerunAllCodeNodes } from './state/code'
+import { startTranscriptAutosave } from './agent/chatStorage'
 import { selectTool } from './state/textEditing'
 import { useUI } from './state/uiStore'
 import { showStatsFromLocation } from './state/stats'
@@ -38,10 +39,12 @@ export function App(): ReactElement {
     const disposeKeyboard = createKeyboardInput(wiring)
     const disposeClipboard = createClipboardInput(wiring)
     const disposeAgent = createAgentConnection()
+    const disposeTranscript = startTranscriptAutosave()
     return () => {
       disposeKeyboard()
       disposeClipboard()
       disposeAgent()
+      disposeTranscript()
     }
   }, [])
 

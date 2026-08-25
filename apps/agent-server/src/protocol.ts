@@ -227,7 +227,13 @@ export type CommandName = keyof CommandMap
 // Messages -------------------------------------------------------------------------------
 
 export type ServerMessage =
-  | { type: 'hello'; busy: boolean }
+  /**
+   * `session` is whether the server still holds the conversation. It restarts often under
+   * `--watch` and its session goes with it, so a transcript the editor restored can be one
+   * the model no longer remembers, and the editor says so rather than letting the person
+   * refer back to something that is no longer context.
+   */
+  | { type: 'hello'; busy: boolean; session: boolean }
   | { type: 'turn_start' }
   | { type: 'assistant'; text: string }
   | { type: 'thinking'; text: string }

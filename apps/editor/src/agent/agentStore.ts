@@ -49,7 +49,17 @@ interface AgentState {
   setOpen: (open: boolean) => void
   setNextAttemptAt: (at: number | null) => void
   append: (kind: ChatItem['kind'], text: string) => void
+  /**
+   * Replaces the transcript with a restored one, pushing the id generator past every id it
+   * holds. Without that a restored id and a fresh one collide, and two rows in the list end
+   * up sharing a key. The same rule `document.load` follows for node ids.
+   */
+  load: (items: readonly ChatItem[]) => void
   clear: () => void
+  /** Bumped by anything that wants the composer focused. The panel focuses on each change. */
+  focusToken: number
+  /** Open the card and put the caret in it, whether or not it was already open. */
+  openForInput: () => void
 }
 
 let nextItemId = 1
@@ -60,6 +70,7 @@ export const useAgent = create<AgentState>()((set) => ({
   items: [],
   draft: '',
   nextAttemptAt: null,
+  focusToken: 0,
   setStatus: (status) => set((state) => (state.status === status ? state : { status })),
   setDraft: (draft) => set((state) => (state.draft === draft ? state : { draft })),
   setOpen: (open) => set((state) => (state.open === open ? state : { open })),
@@ -70,5 +81,13 @@ export const useAgent = create<AgentState>()((set) => ({
       nextItemId += 1
       return { items: [...state.items, { id: nextItemId, kind, text }] }
     }),
+  load: (items) =>
+    set(() => {
+      for (const item of items) nextItemId = Math.max(nextItemId, item.id)
+      return { items: [...items] }
+    }),
   clear: () => set({ items: [] }),
+  // A token rather than a flag, because the same shortcut pressed twice has to focus twice
+  // and `open` will not have changed the second time.
+  openForInput: () => set((state) => ({ open: true, focusToken: state.focusToken + 1 })),
 }))

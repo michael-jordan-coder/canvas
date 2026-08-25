@@ -10,6 +10,7 @@ import {
 import { agentClient } from '../agent/connection'
 import { useAgent, type ChatItem } from '../agent/agentStore'
 import { failureCount, hasFailure, isNearBottom, toRows } from '../agent/chatRows'
+import { isAssistantShortcut } from '../input/assistantShortcut'
 import { AssistantIcon, ChevronIcon, CloseIcon, PlusIcon, SendIcon, StopIcon } from './icons'
 import styles from './AgentPanel.module.css'
 
@@ -110,7 +111,9 @@ export function AgentPanel(): ReactElement {
   const nextAttemptAt = useAgent((state) => state.nextAttemptAt)
   const draft = useAgent((state) => state.draft)
   const setDraft = useAgent((state) => state.setDraft)
+  const focusToken = useAgent((state) => state.focusToken)
   const listRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const rows = useMemo(() => toRows(items), [items])
   // Only while the card is open: a closed panel counting seconds nobody can read is a
   // render a second for nothing.
@@ -131,6 +134,12 @@ export function AgentPanel(): ReactElement {
     pinned.current = true
     setDetached(false)
   }
+
+  // Whatever asked for the caret gets it, however the card was already standing: the token
+  // changes even when `open` does not, which is what makes the shortcut work twice.
+  useEffect(() => {
+    if (focusToken > 0) inputRef.current?.focus()
+  }, [focusToken])
 
   // Pinned to the newest message, but only while it is the one being read. A transcript that
   // pinned unconditionally could not be scrolled back during a turn: every arriving step
@@ -166,6 +175,18 @@ export function AgentPanel(): ReactElement {
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    /*
+     * The shortcut closes from in here, because the window handler will never see it: its
+     * first line hands every keystroke in a text field back to the field. Escape does the
+     * same, matching what Escape means everywhere else in the editor, and both stop here so
+     * the canvas does not also act on them.
+     */
+    if (isAssistantShortcut(event) || event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      setOpen(false)
+      return
+    }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       submit(event)
@@ -252,6 +273,7 @@ export function AgentPanel(): ReactElement {
       <form className={styles.composer} onSubmit={submit}>
         <div className={styles.field}>
           <textarea
+            ref={inputRef}
             className={styles.input}
             value={draft}
             rows={1}

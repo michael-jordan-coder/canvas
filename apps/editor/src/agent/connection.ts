@@ -2,6 +2,7 @@ import { AGENT_PORT } from '@canvas/agent-server/protocol'
 import type { ClientMessage, ServerMessage } from '@canvas/agent-server/protocol'
 import { scene } from '../state/scene'
 import { useAgent } from './agentStore'
+import { clearSavedTranscript } from './chatStorage'
 import { reconnectDelay } from './reconnect'
 import { humanizeCommand, toolSummary } from './toolSummary'
 import { executeCommand } from './executor'
@@ -30,6 +31,12 @@ let connectNow: (() => void) | null = null
  * conversation the person believes they ended. It is sent the moment one is up.
  */
 let pendingReset = false
+/**
+ * Whether this page has already said that its restored transcript is only a record. Once is
+ * the right number: the server can restart several times in a session, and repeating it
+ * every reconnect would bury the conversation it is about.
+ */
+let staleNoticed = false
 
 /**
  * Whether the socket took the message. The caller has to know: the panel used to append the
@@ -69,6 +76,12 @@ function onMessage(message: ServerMessage): void {
       if (pendingReset) {
         pendingReset = false
         send({ type: 'reset' })
+      }
+      // A transcript restored from a previous page, against a server that no longer holds
+      // the conversation. It is still worth reading, but it is not what the model knows.
+      if (!message.session && !staleNoticed && agent.items.length > 0) {
+        staleNoticed = true
+        agent.append('notice', 'Earlier conversation. The assistant is starting fresh from here.')
       }
       agent.setStatus(message.busy ? 'busy' : 'idle')
       return
@@ -201,6 +214,9 @@ export const agentClient = {
     const agent = useAgent.getState()
     if (agent.status === 'busy' || agent.status === 'stopping') return
     agent.clear()
+    // Cleared on disk in the same call, or a reload a moment later would restore it from a
+    // debounce that had not fired yet.
+    clearSavedTranscript()
     if (!send({ type: 'reset' })) pendingReset = true
   },
   /** Retry now, instead of waiting out the backoff. */

@@ -12,6 +12,8 @@ import { relayout, toggleAutoLayout, wrapInAutoLayout } from '../state/autoLayou
 import { reorderSelection } from '../state/order'
 import { isPlayLocked } from '../state/code'
 import type { ToolId } from '../state/uiStore'
+import { useAgent } from '../agent/agentStore'
+import { isAssistantShortcut } from './assistantShortcut'
 import { isEditingText } from './isEditingText'
 
 export interface KeyboardInputOptions {
@@ -172,6 +174,15 @@ export function createKeyboardInput(options: KeyboardInputOptions): () => void {
         options.getSelection(),
         event.altKey ? (forward ? 'front' : 'back') : forward ? 'forward' : 'backward',
       )
+      return
+    }
+
+    if (isAssistantShortcut(event)) {
+      event.preventDefault()
+      if (event.repeat) return
+      // Opens and focuses. Closing is the composer's own job, because the guard above hands
+      // every keystroke in a text field back to the field, this one included.
+      useAgent.getState().openForInput()
       return
     }
 

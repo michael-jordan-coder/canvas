@@ -127,6 +127,9 @@ subscribe to it, so swapping in a new instance would leave them all watching an 
 writes to. Loading also pushes the id generator past every id in the file, since a loaded document
 keeps its ids and the next node created would otherwise collide with one of them.
 
+`figma-canvas:agent-chat` holds the assistant's transcript under the same rules, and
+`figma-canvas:layers-width` and `figma-canvas:properties-width` the panel widths.
+
 The editor autosaves to `localStorage` 600ms after edits stop, and flushes on `pagehide` so a tab
 close does not drop the pending write. A save that will not parse is moved to
 `figma-canvas:document.unreadable` rather than overwritten, because silently starting from a blank
@@ -727,6 +730,24 @@ the item's text is what a saved transcript holds and the args are not saved with
 the SDK session the server holds, so clearing the transcript while the socket is down would
 leave the next turn quietly resuming a conversation the person believes they ended. A reset
 that could not be delivered is held and sent when a connection comes up.
+
+**The transcript outlives the tab, and says when it is only a record.** It is saved to
+`figma-canvas:agent-chat` on the `state/persistence.ts` pattern, 600ms after it stops
+changing and flushed on `pagehide`, capped by count and by bytes because the document needs
+that quota more. It is worth keeping for a reason beyond convenience: the server holds the
+conversation as an SDK session that survives a reload, so without it the model remembers a
+conversation the person cannot see. An unreadable value is dropped rather than quarantined,
+which is the one deliberate difference from the document's rule: a chat is a record of
+something that already happened, not someone's work. `hello` carries whether the server
+still holds a session, and a restored transcript facing a server that does not gets one
+notice saying so, once per page.
+
+**Cmd/Ctrl+K opens the assistant and puts the caret in it.** Not Cmd+H, which never reaches
+a page on macOS: the system takes it to hide the application. Closing is the composer's own
+job rather than an exception in the window handler, whose first line hands every keystroke
+in a text field back to the field. Focus travels as a token rather than a flag, because the
+same shortcut pressed twice has to focus twice and `open` will not have changed the second
+time.
 
 The transcript follows the newest message only while it is the one being read. Pinning
 unconditionally meant it could not be scrolled back during a turn, since every arriving step
