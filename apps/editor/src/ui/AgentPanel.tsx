@@ -9,7 +9,7 @@ import {
 } from 'react'
 import { agentClient } from '../agent/connection'
 import { useAgent, type ChatItem } from '../agent/agentStore'
-import { hasFailure, isNearBottom, toRows } from '../agent/chatRows'
+import { failureCount, hasFailure, isNearBottom, toRows } from '../agent/chatRows'
 import { AssistantIcon, ChevronIcon, CloseIcon, PlusIcon, SendIcon, StopIcon } from './icons'
 import styles from './AgentPanel.module.css'
 
@@ -31,6 +31,7 @@ function Steps({ items, live }: { items: ChatItem[]; live: boolean }): ReactElem
   const [open, setOpen] = useState(false)
   const latest = items[items.length - 1]
   const failed = hasFailure(items)
+  const failures = failureCount(items)
   const count = `${items.length} ${items.length === 1 ? 'step' : 'steps'}`
   const label =
     live && latest
@@ -38,8 +39,15 @@ function Steps({ items, live }: { items: ChatItem[]; live: boolean }): ReactElem
         ? 'Thinking'
         : latest.text
       : failed
-        ? `${count}, one failed`
+        ? `${count}, ${failures} failed`
         : count
+
+  // A failure opens its own run. Everything else in here is process the person can ignore,
+  // which is the whole reason it folds; a step that did not work is the exception, and
+  // leaving it behind a click means it is found after the turn rather than during it.
+  useEffect(() => {
+    if (failed) setOpen(true)
+  }, [failed])
 
   return (
     <div className={styles.steps}>
@@ -100,10 +108,13 @@ export function AgentPanel(): ReactElement {
   const status = useAgent((state) => state.status)
   const items = useAgent((state) => state.items)
   const nextAttemptAt = useAgent((state) => state.nextAttemptAt)
-  const [draft, setDraft] = useState('')
+  const draft = useAgent((state) => state.draft)
+  const setDraft = useAgent((state) => state.setDraft)
   const listRef = useRef<HTMLDivElement>(null)
   const rows = useMemo(() => toRows(items), [items])
-  const seconds = useCountdown(status === 'offline' ? nextAttemptAt : null)
+  // Only while the card is open: a closed panel counting seconds nobody can read is a
+  // render a second for nothing.
+  const seconds = useCountdown(open && status === 'offline' ? nextAttemptAt : null)
 
   /*
    * Whether the transcript is following the newest message. A ref rather than state because

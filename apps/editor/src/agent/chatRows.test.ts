@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatItem } from './agentStore'
-import { hasFailure, humanize, isNearBottom, toRows } from './chatRows'
+import { failureCount, hasFailure, humanize, isNearBottom, toRows } from './chatRows'
 
 let id = 0
 function item(kind: ChatItem['kind'], text = ''): ChatItem {
@@ -39,6 +39,11 @@ describe('toRows', () => {
 
   it('leaves a run of clean steps reporting no failure', () => {
     expect(hasFailure([item('tool'), item('thinking')])).toBe(false)
+    expect(failureCount([item('tool'), item('thinking')])).toBe(0)
+  })
+
+  it('counts the failures rather than only noticing one', () => {
+    expect(failureCount([item('tool-error'), item('tool'), item('tool-error')])).toBe(2)
   })
 
   it('gives every row a key that survives the list growing', () => {

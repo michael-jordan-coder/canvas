@@ -28,7 +28,7 @@
 
 .error {
   margin-right: var(--space-3);
-  color: var(--text-secondary);
+  color: var(--danger);
 }
 
 /* Present for the file picker, never shown. The button opens it. */

@@ -2,6 +2,7 @@ import { AGENT_PORT } from '@canvas/agent-server/protocol'
 import type { ClientMessage, ServerMessage } from '@canvas/agent-server/protocol'
 import { scene } from '../state/scene'
 import { useAgent } from './agentStore'
+import { reconnectDelay } from './reconnect'
 import { humanizeCommand, toolSummary } from './toolSummary'
 import { executeCommand } from './executor'
 
@@ -19,12 +20,16 @@ import { executeCommand } from './executor'
  * one: nothing else ever would.
  */
 
-const RECONNECT_DELAY_MS = 2000
-
 let socket: WebSocket | null = null
 let turnOpen = false
 /** Set while a connection is alive, so the panel's Retry can skip the backoff wait. */
 let connectNow: (() => void) | null = null
+/**
+ * A New chat that could not be delivered. The server holds the conversation, so clearing
+ * the panel while the socket is down would leave the next turn quietly resuming a
+ * conversation the person believes they ended. It is sent the moment one is up.
+ */
+let pendingReset = false
 
 /**
  * Whether the socket took the message. The caller has to know: the panel used to append the
@@ -61,6 +66,10 @@ function onMessage(message: ServerMessage): void {
   const agent = useAgent.getState()
   switch (message.type) {
     case 'hello':
+      if (pendingReset) {
+        pendingReset = false
+        send({ type: 'reset' })
+      }
       agent.setStatus(message.busy ? 'busy' : 'idle')
       return
     case 'turn_start':
@@ -93,12 +102,20 @@ function onMessage(message: ServerMessage): void {
       if (message.stopped) agent.append('notice', 'Stopped.')
       else if (message.error) agent.append('error', message.error)
       return
+    case 'rejected':
+      // Back into the composer, where it can be sent again once the turn ends.
+      agent.setDraft(message.text)
+      agent.setStatus('idle')
+      agent.append('notice', 'Not sent: the assistant was still working.')
+      return
   }
 }
 
 export function createAgentConnection(): () => void {
   let disposed = false
   let timer = 0
+  /** How many attempts have failed in a row, which is what the backoff grows with. */
+  let attempts = 0
 
   const connect = (): void => {
     if (disposed) return
@@ -109,6 +126,10 @@ export function createAgentConnection(): () => void {
 
     const ws = new WebSocket(`ws://localhost:${AGENT_PORT}`)
     socket = ws
+
+    ws.onopen = () => {
+      attempts = 0
+    }
 
     ws.onmessage = (event: MessageEvent<string>) => {
       let message: ServerMessage
@@ -127,10 +148,12 @@ export function createAgentConnection(): () => void {
       const state = useAgent.getState()
       state.setStatus('offline')
       if (disposed) return
-      timer = window.setTimeout(connect, RECONNECT_DELAY_MS)
+      const delay = reconnectDelay(attempts)
+      attempts += 1
+      timer = window.setTimeout(connect, delay)
       // The panel counts down from this rather than showing a spinner that means nothing:
       // an offline state that says when it will try again is a state, not a dead end.
-      state.setNextAttemptAt(Date.now() + RECONNECT_DELAY_MS)
+      state.setNextAttemptAt(Date.now() + delay)
     }
     // The close handler fires after an error too, so this only silences the console.
     ws.onerror = () => {}
@@ -178,7 +201,7 @@ export const agentClient = {
     const agent = useAgent.getState()
     if (agent.status === 'busy' || agent.status === 'stopping') return
     agent.clear()
-    send({ type: 'reset' })
+    if (!send({ type: 'reset' })) pendingReset = true
   },
   /** Retry now, instead of waiting out the backoff. */
   reconnect(): void {

@@ -699,6 +699,12 @@ was: the SDK reports an interrupted turn as an unsuccessful result, indistinguis
 the turn cap, so `turn_end` carries `stopped` and the only thing that knows is the code that
 asked for the interrupt.
 
+**A message the server will not run says so.** A chat arriving mid-turn used to be dropped
+where it landed, so the person watched a message that had been typed, sent, and forgotten by
+everything downstream. The server answers `rejected` with the text, and the editor puts it
+back in the composer. The draft lives in the store for that reason and one other: the card
+unmounts when it closes, and a half written message must survive being put away.
+
 **Nothing is sent optimistically.** The socket answers whether it took the message, and a
 message it did not take leaves the transcript untouched and the draft in the composer. The
 panel used to append the person's words and go busy before finding out, which left it waiting
@@ -716,6 +722,11 @@ so the `tool` message carries the args the `command` after it is about to run, a
 object, with dotted paths so a fill's colour is reachable, and the command's own name when
 nothing does. The summary is made where the message arrives rather than in the panel, because
 the item's text is what a saved transcript holds and the args are not saved with it.
+
+**New chat is a promise about the server, not about the panel.** The conversation lives in
+the SDK session the server holds, so clearing the transcript while the socket is down would
+leave the next turn quietly resuming a conversation the person believes they ended. A reset
+that could not be delivered is held and sent when a connection comes up.
 
 The transcript follows the newest message only while it is the one being read. Pinning
 unconditionally meant it could not be scrolled back during a turn, since every arriving step

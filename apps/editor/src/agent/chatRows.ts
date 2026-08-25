@@ -46,6 +46,10 @@ export function hasFailure(items: readonly ChatItem[]): boolean {
   return items.some((item) => item.kind === 'tool-error')
 }
 
+export function failureCount(items: readonly ChatItem[]): number {
+  return items.reduce((count, item) => (item.kind === 'tool-error' ? count + 1 : count), 0)
+}
+
 /**
  * How close to the bottom counts as reading the newest message.
  *

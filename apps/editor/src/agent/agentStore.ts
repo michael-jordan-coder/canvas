@@ -33,12 +33,19 @@ interface AgentState {
   open: boolean
   items: ChatItem[]
   /**
+   * What is typed and not yet sent. In the store rather than in the panel because the panel
+   * unmounts when the card closes, and because a message the server refuses is handed back
+   * here to be typed again rather than lost.
+   */
+  draft: string
+  /**
    * When the next automatic reconnect is due, as a timestamp, or null when none is pending.
    * The panel counts down from it rather than owning the schedule, which stays in
    * `connection.ts` beside the socket it is about.
    */
   nextAttemptAt: number | null
   setStatus: (status: AgentStatus) => void
+  setDraft: (draft: string) => void
   setOpen: (open: boolean) => void
   setNextAttemptAt: (at: number | null) => void
   append: (kind: ChatItem['kind'], text: string) => void
@@ -51,8 +58,10 @@ export const useAgent = create<AgentState>()((set) => ({
   status: 'offline',
   open: false,
   items: [],
+  draft: '',
   nextAttemptAt: null,
   setStatus: (status) => set((state) => (state.status === status ? state : { status })),
+  setDraft: (draft) => set((state) => (state.draft === draft ? state : { draft })),
   setOpen: (open) => set((state) => (state.open === open ? state : { open })),
   setNextAttemptAt: (nextAttemptAt) =>
     set((state) => (state.nextAttemptAt === nextAttemptAt ? state : { nextAttemptAt })),

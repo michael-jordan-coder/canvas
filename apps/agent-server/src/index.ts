@@ -3,6 +3,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { AGENT_PORT, type ClientMessage, type CommandName, type ServerMessage } from './protocol.ts'
 import { createCanvasMcpServer } from './tools.ts'
 import { SYSTEM_PROMPT } from './prompt.ts'
+import { describeResult } from './turnEnd.ts'
 
 /**
  * The agent sidecar: Claude with hands on the canvas.
@@ -113,7 +114,7 @@ async function runChat(text: string): Promise<void> {
       }
       if (msg.type === 'result') {
         sessionId = 'session_id' in msg ? msg.session_id : sessionId
-        if (msg.subtype !== 'success') error = `The agent stopped: ${msg.subtype}`
+        if (msg.subtype !== 'success') error = describeResult(msg.subtype)
       }
     }
   } catch (cause) {
@@ -137,7 +138,13 @@ function onMessage(raw: string): void {
   switch (message.type) {
     case 'chat': {
       const text = message.text.trim()
-      if (!text || busy) return
+      if (!text) return
+      // Refused out loud. Dropping it silently left the person watching a message that had
+      // been typed, sent and forgotten by everything downstream.
+      if (busy) {
+        send({ type: 'rejected', reason: 'busy', text: message.text })
+        return
+      }
       void runChat(text)
       return
     }

@@ -244,6 +244,12 @@ export type ServerMessage =
    * this the only thing the editor could show for a stop is an error line.
    */
   | { type: 'turn_end'; error?: string; stopped?: true }
+  /**
+   * A message the server refused rather than ran, with the text handed back so the editor
+   * can return it to the composer. The editor guards against sending while busy, but it
+   * cannot always know: a second tab, or a send that crossed with a turn starting.
+   */
+  | { type: 'rejected'; reason: 'busy'; text: string }
 
 export type ClientMessage =
   | { type: 'chat'; text: string }
