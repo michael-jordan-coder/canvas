@@ -144,3 +144,7 @@ vite.config.ts.timestamp-*
 
 # macOS
 .DS_Store
+
+# Daniel's own notes. Not part of the project: TASKS.md owns status and CLAUDE.md owns
+# architecture, and a scratch file that everyone shares would drift into being a third one.
+ideas.md
