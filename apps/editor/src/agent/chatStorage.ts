@@ -12,7 +12,7 @@ import { useAgent, type ChatItem } from './agentStore'
  * It is worth keeping for a reason beyond convenience: the server holds the conversation as
  * an SDK session that survives the tab, so without this the model remembers a conversation
  * the person can no longer see. What is stored is what was said, never the status, the
- * draft or whether the card was open, all of which are about this moment rather than about
+ * draft or which tab the panel is on, all of which are about this moment rather than about
  * the conversation.
  *
  * Storage conventions are `state/persistence.ts`'s: the `figma-canvas:` prefix, a version in

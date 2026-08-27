@@ -33,9 +33,10 @@ const TOOLS: ReadonlyArray<{ id: ToolId; label: string; Icon: ComponentType<Icon
  * because it is the only thing in the bar that follows the agent's status: the bar has no
  * business re-rendering its tools every time a turn starts or ends.
  *
- * It is a toggle rather than an opener, now that it is always on screen. Open takes the
- * accent fill an active tool takes; a turn running behind a closed card takes the accent as
- * a colour instead, which is what the floating opener used to say from the corner.
+ * It is a toggle: it puts the right panel on the assistant's tab, and pressed again puts it
+ * back on the properties. Showing takes the accent fill an active tool takes; a turn running
+ * while the properties are showing takes the accent as a colour instead, which is the one
+ * place the assistant's status is on screen when its own tab is not.
  */
 function AssistantButton(): ReactElement {
   const open = useAgent((state) => state.open)
@@ -54,7 +55,7 @@ function AssistantButton(): ReactElement {
       title="Assistant"
       aria-pressed={open}
       data-busy={busy}
-      // Opening puts the caret in the composer, exactly as the shortcut does: a card opened
+      // Opening puts the caret in the composer, exactly as the shortcut does: a panel opened
       // to be typed into and then clicked into is two gestures for one intention.
       onClick={() => (open ? setOpen(false) : openForInput())}
     >

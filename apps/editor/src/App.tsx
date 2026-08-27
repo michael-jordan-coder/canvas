@@ -12,10 +12,10 @@ import { startTranscriptAutosave } from './agent/chatStorage'
 import { selectTool } from './state/textEditing'
 import { useUI } from './state/uiStore'
 import { showStatsFromLocation } from './state/stats'
-import { AgentPanel } from './ui/AgentPanel'
+import { startPanelFollow } from './state/panelFollow'
 import { LayersPanel } from './ui/LayersPanel'
 import { PerfReadout } from './ui/PerfReadout'
-import { PropertiesPanel } from './ui/PropertiesPanel'
+import { RightPanel } from './ui/RightPanel'
 import { Toolbar } from './ui/Toolbar'
 import styles from './App.module.css'
 
@@ -40,11 +40,13 @@ export function App(): ReactElement {
     const disposeClipboard = createClipboardInput(wiring)
     const disposeAgent = createAgentConnection()
     const disposeTranscript = startTranscriptAutosave()
+    const disposePanelFollow = startPanelFollow()
     return () => {
       disposeKeyboard()
       disposeClipboard()
       disposeAgent()
       disposeTranscript()
+      disposePanelFollow()
     }
   }, [])
 
@@ -53,10 +55,9 @@ export function App(): ReactElement {
       <LayersPanel />
       <main className={styles.viewport}>
         <CanvasHost />
-        <AgentPanel />
         {showStats && <PerfReadout />}
       </main>
-      <PropertiesPanel />
+      <RightPanel />
       {/* A sibling of the columns rather than a child of one. It is `position: fixed`, so it
           belongs to the window and takes no grid track; nesting it in the viewport would say
           it belongs to the canvas column, and would hand its containing block to anything

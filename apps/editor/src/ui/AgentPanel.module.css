@@ -1,21 +1,21 @@
 /*
- * The assistant, as a card that floats over the canvas.
+ * The assistant, as one of the two bodies the right column shows.
  *
  * The panels in this editor are docked chrome: they meet the canvas along a hairline, at 11
- * and 12 pixels, packed tight because they are dense controls. The tool bar is the only
- * other thing that floats over the canvas, and it is chrome that happens to hover. A
- * conversation is the opposite kind of surface. It is read rather than operated, it sits on
- * top of artwork rather than beside it, and at the density of the properties panel it reads
- * as a log rather than as something someone said. So this file breaks with the panels on
- * three counts and only three: the body is 13px with a reading line height, the padding is
- * 12 and 16 rather than 4 and 8, and the card is lifted off the canvas by a shadow instead
- * of a hairline. Colour, radii and motion stay exactly the app's.
+ * and 12 pixels, packed tight because they are dense controls. A conversation is the
+ * opposite kind of surface. It is read rather than operated, and at the density of the
+ * properties panel it reads as a log rather than as something someone said. Docking it did
+ * not change that, so the two counts this file still breaks with the panels on are the two
+ * that matter: the body is 13px with a reading line height, and the padding is 12 and 16
+ * rather than 4 and 8. The third, a shadow instead of a hairline, went with the float that
+ * earned it. Sharing a column with the properties is exactly why the first two have to
+ * hold: a surface that gave up its own scale to match its neighbour would have nothing left
+ * that made it worth docking beside one.
  */
 
 /* The ring itself is `base.css`'s, for every focusable thing in the app. Only the offset
    changes: these are round or nearly round, and an inset outline cuts across the shape
    rather than tracing it. */
-.iconButton:focus-visible,
 .retry:focus-visible,
 .jump:focus-visible,
 .suggestion:focus-visible,
@@ -23,115 +23,14 @@
   outline-offset: 1px;
 }
 
-/* The card sits in the corner of the viewport it edits. What opens it is a button in the
-   tool bar, so nothing in this file is on screen while it is closed. */
+/* Fills the column under the tab row. No size of its own and nothing to anchor to: the
+   grid track is the width and the row above is the top. */
 .panel {
-  position: absolute;
-  right: var(--space-4);
-  bottom: var(--space-4);
   display: flex;
   flex-direction: column;
-  /* Written by the corner grip onto the root, so a resized card is the right size in its
-     first frame after being reopened. The viewport bound stays in CSS, which is the only
-     place that knows how much room there is. */
-  width: var(--agent-card-width, 380px);
-  height: var(--agent-card-height, 520px);
-  max-width: calc(100% - var(--space-4) * 2);
-  max-height: calc(100% - var(--space-4) * 2);
-  overflow: hidden;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
-  /* Out of the corner it is anchored to, so the card arrives from the edge rather than
-     from nowhere. Reduced motion zeroes --duration, which ends it before it can be seen. */
-  transform-origin: 100% 100%;
-  animation: cardIn var(--duration) var(--ease);
-}
-
-@keyframes cardIn {
-  from {
-    opacity: 0;
-    scale: 0.97;
-  }
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  flex: none;
-  height: 40px;
-  /* Wider on the left than on the right: the corner grip sits in that space, and anything
-     underneath it would take the press meant for the grip. */
-  padding: 0 var(--space-2) 0 var(--space-5);
-  border-bottom: 1px solid var(--line);
-}
-
-.title {
   flex: 1;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  color: var(--text);
-}
-
-/* Hollow when there is no server, filled when there is, accent while working. */
-.status {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  border: 1px solid var(--line-strong);
-  transition: background var(--duration) var(--ease);
-}
-
-.status[data-status='idle'] {
-  background: var(--line-strong);
-}
-
-/* Connecting is a wait rather than a state of the agent, so it reads as neither on nor off. */
-.status[data-status='connecting'] {
-  background: repeating-linear-gradient(45deg, var(--line-strong) 0 1px, transparent 1px 2px);
-}
-
-.status[data-status='busy'],
-.status[data-status='stopping'] {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.status[data-status='busy'] {
-  animation: breathe 1.6s var(--ease) infinite;
-}
-
-/* Winding down: the same dot, dimmed, so stopping is visibly between busy and idle. */
-.status[data-status='stopping'] {
-  opacity: 0.5;
-}
-
-@keyframes breathe {
-  50% {
-    opacity: 0.35;
-  }
-}
-
-.iconButton {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 26px;
-  height: 26px;
-  border-radius: var(--radius-field);
-  color: var(--text-secondary);
-  transition:
-    color var(--duration) var(--ease),
-    background var(--duration) var(--ease);
-}
-
-.iconButton:hover {
-  color: var(--text);
-  background: var(--hover);
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* The list and the control that floats over its foot, which is why the wrapper exists: the
@@ -146,7 +45,7 @@
 
 .list {
   flex: 1;
-  /* Zero, not a floor: the card has a real height, and a scroller that refuses to shrink
+  /* Zero, not a floor: the column has a real height, and a scroller that refuses to shrink
      pushes the composer off the bottom of it. */
   min-height: 0;
   overflow-y: auto;
@@ -697,6 +596,19 @@
   field-sizing: content;
 }
 
+/*
+ * The ring the rest of the app wears, off for this one field.
+ *
+ * `outline: none` above was already saying so and losing: `base.css`'s `:focus-visible` is a
+ * single pseudo-class, exactly as specific as a class, so which of the two won came down to
+ * which file the bundler happened to put last. Naming the state here makes it two selectors
+ * against one and settles it. The reasoning is `.field`'s above: the caret is in the field,
+ * blinking, and it is the only field on screen someone can be typing in.
+ */
+.input:focus-visible {
+  outline: none;
+}
+
 .input::placeholder {
   color: var(--text-disabled);
 }
@@ -726,7 +638,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .status,
   .pip {
     animation: none;
   }

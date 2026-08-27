@@ -1,13 +1,5 @@
-/* Scrolling lives on .scroll, not here, so the resize edge can span the full height. */
-.panel {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  background: var(--panel);
-  border-left: 1px solid var(--line);
-}
-
+/* The column, its edge and its tab row are `RightPanel.module.css`. What is left here is
+   the properties themselves, which start at the scrolling region. */
 .scroll {
   display: flex;
   flex-direction: column;

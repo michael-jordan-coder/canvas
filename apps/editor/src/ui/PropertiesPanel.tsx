@@ -76,10 +76,16 @@ import {
 } from './icons'
 import { AlignmentGrid } from './AlignmentGrid'
 import { NumberField } from './NumberField'
-import { PanelResizer } from './PanelResizer'
 import { SegmentedField } from './SegmentedField'
 import styles from './PropertiesPanel.module.css'
 
+/**
+ * The properties, as one of the two things the right panel can be showing.
+ *
+ * It is the whole of what subscribes to the selection in that column. `RightPanel` above
+ * reads which tab is on and nothing else, so a selection changing while the assistant is
+ * showing re-renders neither the tab row nor a single line of the transcript.
+ */
 export function PropertiesPanel(): ReactElement {
   const selection = useUI((state) => state.selection)
   // Multiple selection deliberately subscribes to no node at all: the count comes from the
@@ -90,16 +96,9 @@ export function PropertiesPanel(): ReactElement {
     selection.length > 1 ? `${selection.length} selected` : node ? node.name : 'Properties'
 
   return (
-    <aside className={styles.panel}>
-      <PanelResizer
-        side="right"
-        cssVar="--panel-width-right"
-        storageKey="figma-canvas:properties-width"
-        label="Resize properties panel"
-      />
-      <div className={styles.scroll}>
-        <header className={styles.header}>{title}</header>
-        <div className={styles.sections}>
+    <div className={styles.scroll}>
+      <header className={styles.header}>{title}</header>
+      <div className={styles.sections}>
         {selection.length > 1 && <MultiSelectionProperties selection={selection} />}
         {node && <NodeProperties node={node} />}
         {/*
@@ -108,9 +107,8 @@ export function PropertiesPanel(): ReactElement {
           */}
         {selection.length > 0 && <SelectionColorsSection selection={selection} />}
         {selection.length === 0 && <PageSection />}
-        </div>
       </div>
-    </aside>
+    </div>
   )
 }
 

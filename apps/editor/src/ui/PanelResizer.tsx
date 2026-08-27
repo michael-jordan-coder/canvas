@@ -1,15 +1,8 @@
 import { useLayoutEffect, useRef, useState, type ReactElement } from 'react'
 import { readStored, writeStored } from '../state/localStorage'
-import { PANEL_NUDGE } from './cardSize'
+import { PANEL_MIN_WIDTH, PANEL_NUDGE, clampPanelWidth } from './panelSize'
 import { setRootLength } from './rootLength'
 import styles from './PanelResizer.module.css'
-
-/** How wide a panel is allowed to be dragged, and where a double click puts it back. */
-const PANEL_MIN_WIDTH = 240
-const PANEL_MAX_WIDTH = 480
-
-const clampWidth = (width: number): number =>
-  Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, width))
 
 interface PanelResizerProps {
   /** Which screen edge the panel is docked to. The grab edge sits on the opposite side. */
@@ -19,6 +12,12 @@ interface PanelResizerProps {
   /** Where the width survives a reload. */
   storageKey: string
   label: string
+  /**
+   * How narrow this panel may be dragged. A panel holding the conversation needs more room
+   * than one holding fields, and the difference is a property of the panel rather than of
+   * the gesture, so it arrives here instead of being a second constant in `panelSize`.
+   */
+  minWidth?: number
 }
 
 /**
@@ -27,7 +26,14 @@ interface PanelResizerProps {
  * release and put back on mount. A double click returns the default, which is also what
  * clears the store.
  */
-export function PanelResizer({ side, cssVar, storageKey, label }: PanelResizerProps): ReactElement {
+export function PanelResizer({
+  side,
+  cssVar,
+  storageKey,
+  label,
+  minWidth = PANEL_MIN_WIDTH,
+}: PanelResizerProps): ReactElement {
+  const clampWidth = (width: number): number => clampPanelWidth(width, minWidth)
   const dragging = useRef<number | null>(null)
   // The number is the source of truth and the custom property is only ever written, so
   // nothing has to parse a width back out of the DOM. Null means "the stylesheet default",
@@ -44,7 +50,7 @@ export function PanelResizer({ side, cssVar, storageKey, label }: PanelResizerPr
       width.current = clampWidth(saved)
       setRootLength(cssVar, width.current)
     }
-  }, [cssVar, storageKey])
+  }, [cssVar, storageKey, minWidth])
 
   const setWidth = (next: number | null): void => {
     width.current = next
@@ -69,7 +75,7 @@ export function PanelResizer({ side, cssVar, storageKey, label }: PanelResizerPr
     const current =
       width.current ??
       Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(cssVar))
-    setWidth(clampWidth((Number.isFinite(current) ? current : PANEL_MIN_WIDTH) + delta))
+    setWidth(clampWidth((Number.isFinite(current) ? current : minWidth) + delta))
     persist()
   }
 

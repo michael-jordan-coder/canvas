@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -11,24 +12,21 @@ import { agentClient } from '../agent/connection'
 import { isConnected, isWorking, useAgent, type ChatItem } from '../agent/agentStore'
 import { failureCount, isNearBottom, showsPendingWork, stepsLabel, toRows } from '../agent/chatRows'
 import { isAssistantShortcut } from '../input/assistantShortcut'
-import { CornerGrip } from './CornerGrip'
-import {
-  CheckIcon,
-  ChevronIcon,
-  CloseIcon,
-  PlusIcon,
-  SendIcon,
-  StopIcon,
-} from './icons'
+import { CheckIcon, ChevronIcon, SendIcon, StopIcon } from './icons'
 import styles from './AgentPanel.module.css'
 
 /**
- * The chat with the design agent, floating over the viewport's corner.
+ * The chat with the design agent, as one of the two things the right panel can be showing.
  *
- * A floating card rather than a fourth panel column, because the conversation is transient
- * in a way the layers tree and the properties are not: it comes out when there is something
- * to ask and gets out of the way of the canvas it edits. Everything it shows lives in the
- * agent store; this component never touches the socket beyond `agentClient`.
+ * It floated over the canvas as a card before this, which cost it the two things a docked
+ * column gives back: it covered the artwork it was editing, and it collided with the tool
+ * bar. What it gives up in exchange is being on screen beside the properties, since a
+ * segmented control shows one or the other. `state/panelFollow.ts` owns which.
+ *
+ * Everything it shows lives in the agent store; this component never touches the socket
+ * beyond `agentClient`. That is what makes the tab switch cheap: nothing here is state, so
+ * unmounting the conversation loses nothing but where it was scrolled to, and that is kept
+ * below.
  */
 
 /**
@@ -249,7 +247,7 @@ function Question({ item, pending }: { item: ChatItem; pending: boolean }): Reac
 }
 
 /**
- * What an empty card offers. Three, because a list long enough to browse is a menu, and a
+ * What an empty transcript offers. Three, because a list long enough to browse is a menu, and a
  * menu is a different promise from a conversation. Each one is a real request this canvas
  * can answer, and the last is there to say that code is on the table at all.
  */
@@ -280,8 +278,8 @@ function useCountdown(at: number | null): number | null {
  * The connection strip, and the countdown in it.
  *
  * Its own component so the tick is scoped to the one line that shows it. Left at the top of
- * the card, a state set once a second re-rendered the whole transcript to move a single
- * number, and an offline sidecar is exactly when the card sits open longest.
+ * the panel, a state set once a second re-rendered the whole transcript to move a single
+ * number, and an offline sidecar is exactly when the assistant sits showing longest.
  */
 function ConnectionStrip(): ReactElement | null {
   const status = useAgent((state) => state.status)
@@ -320,7 +318,7 @@ function ConnectionStrip(): ReactElement | null {
 /**
  * The composer, which is the only thing here that changes per keystroke.
  *
- * That is the whole reason it is a component: `draft` lives in the store, so a card that
+ * That is the whole reason it is a component: `draft` lives in the store, so a panel that
  * read it at the top re-rendered every row of the transcript on every character typed. It
  * is the field and the one button beside it that have to follow the draft, and nothing
  * else does.
@@ -334,7 +332,7 @@ function Composer(): ReactElement {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const connected = isConnected(status)
 
-  // Whatever asked for the caret gets it, however the card was already standing: the token
+  // Whatever asked for the caret gets it, however the panel was already standing: the token
   // changes even when `open` does not, which is what makes the shortcut work twice.
   useEffect(() => {
     if (focusToken > 0) inputRef.current?.focus()
@@ -413,23 +411,34 @@ function Composer(): ReactElement {
 }
 
 /**
- * The card itself, mounted only while it is open.
+ * Where the transcript was scrolled to the last time the tab left it, and whether it was
+ * following the newest message.
+ *
+ * At module scope for the same reason the typing history group is: the component is not
+ * mounted when the value has to survive. Switching tabs unmounts the conversation, and
+ * without this a glance at the properties would bring you back to the bottom of a
+ * transcript you were reading the middle of. Not persisted, because it is a position in a
+ * list, meaningless the moment the list is restored from storage with different rows.
+ */
+let restingScrollTop: number | null = null
+let restingPinned = true
+
+/**
+ * The conversation, mounted only while its tab is on.
  *
  * The transcript is the expensive thing to render and it is the thing that changes most, so
  * everything that changes on its own schedule sits below this rather than above it: the
- * draft per keystroke, the reconnect countdown per second. Mounting on open is the same
- * rule applied to the card as a whole, since a turn running behind a closed card appends a
- * step per tool call and none of them are on screen.
+ * draft per keystroke, the reconnect countdown per second. Mounting on demand is the same
+ * rule applied to the whole surface, since a turn running behind the properties tab appends
+ * a step per tool call and none of them are on screen.
  */
-function Card(): ReactElement {
+export function AssistantBody(): ReactElement {
   const status = useAgent((state) => state.status)
   const items = useAgent((state) => state.items)
   const pendingAsk = useAgent((state) => state.pendingAsk)
-  const setOpen = useAgent((state) => state.setOpen)
   const setDraft = useAgent((state) => state.setDraft)
   const openForInput = useAgent((state) => state.openForInput)
   const listRef = useRef<HTMLDivElement>(null)
-  const panelRef = useRef<HTMLElement>(null)
   const rows = useMemo(() => toRows(items), [items])
 
   /*
@@ -437,8 +446,23 @@ function Card(): ReactElement {
    * the scroll handler runs at scroll rate and only the jump control renders from it, which
    * is why the boolean is mirrored into state separately and only when it flips.
    */
-  const pinned = useRef(true)
-  const [detached, setDetached] = useState(false)
+  const pinned = useRef(restingPinned)
+  const [detached, setDetached] = useState(!restingPinned)
+
+  /*
+   * Put the transcript back where the tab left it, and keep it there for the next time.
+   * A layout effect, so the restored position is the first thing painted rather than a
+   * frame of the bottom of the list followed by a jump.
+   */
+  useLayoutEffect(() => {
+    const list = listRef.current
+    if (!list) return
+    if (restingScrollTop !== null) list.scrollTop = restingScrollTop
+    return () => {
+      restingScrollTop = list.scrollTop
+      restingPinned = pinned.current
+    }
+  }, [])
 
   const toBottom = (): void => {
     const list = listRef.current
@@ -449,10 +473,10 @@ function Card(): ReactElement {
   }
 
   /*
-   * Shrinking the card changes the list's height without firing a scroll event, so a
+   * Narrowing the column changes the list's height without firing a scroll event, so a
    * transcript that was following the newest message would silently come off the bottom and
-   * stay there. The observer catches every cause at once: the grip, a window resize, and a
-   * panel being dragged wider beside it.
+   * stay there. The observer catches every cause at once: the column's own edge, a window
+   * resize, and the layers panel being dragged wider across the grid.
    */
   useEffect(() => {
     const list = listRef.current
@@ -473,31 +497,14 @@ function Card(): ReactElement {
   }, [items])
 
   return (
-    <section ref={panelRef} className={styles.panel} aria-label="Assistant" aria-busy={isWorking(status)}>
-      <CornerGrip targetRef={panelRef} />
-      <header className={styles.header}>
-        <span className={styles.status} data-status={status} />
-        <h2 className={styles.title}>Assistant</h2>
-        <button
-          type="button"
-          className={styles.iconButton}
-          aria-label="New chat"
-          title="New chat"
-          onClick={() => agentClient.reset()}
-        >
-          <PlusIcon />
-        </button>
-        <button
-          type="button"
-          className={styles.iconButton}
-          aria-label="Close"
-          title="Close"
-          onClick={() => setOpen(false)}
-        >
-          <CloseIcon />
-        </button>
-      </header>
-
+    <section
+      className={styles.panel}
+      aria-label="Assistant"
+      aria-busy={isWorking(status)}
+    >
+      {/* No header of its own. The tab row above names it, holds New chat, and is what
+          leaving it is done through, so a title and a close button here would be the same
+          two things said twice. */}
       <div className={styles.transcript}>
         <div
           ref={listRef}
@@ -573,15 +580,3 @@ function Card(): ReactElement {
   )
 }
 
-/**
- * The assistant, which is nothing at all until it is a card.
- *
- * It used to be its own floating button in the viewport's corner while closed. That button
- * is in the tool bar now, so this reads `open` and nothing else: a turn running behind a
- * closed card costs no render here, and the status the corner used to show is shown by the
- * button that opens it.
- */
-export function AgentPanel(): ReactElement | null {
-  const open = useAgent((state) => state.open)
-  return open ? <Card /> : null
-}

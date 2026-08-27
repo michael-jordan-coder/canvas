@@ -65,7 +65,7 @@ export interface ChatItem {
   /**
    * On a `question` item only. `askId` is the server's id for the question, echoed back in the
    * answer; `question` is what to render; `answer` is the person's choice once they have made
-   * it, absent while the card is still open.
+   * it, absent while the question is still open.
    */
   askId?: number
   question?: AgentQuestion
@@ -74,11 +74,27 @@ export interface ChatItem {
 
 interface AgentState {
   status: AgentStatus
+  /**
+   * Whether the right panel is showing the assistant rather than the properties. It named a
+   * floating card before the assistant was docked into that column, and it still names the
+   * same intention, "the assistant is what I want to be looking at", which is why the
+   * shortcut, the tool bar's toggle and the composer's Escape all still write it.
+   */
   open: boolean
+  /**
+   * Whether the selection changed while the assistant tab was showing and a turn was
+   * running, so the switch to the properties was held back. The properties tab wears a dot
+   * until it is looked at.
+   *
+   * Here rather than in the UI store because it is half of one question the tab row asks,
+   * "which tab, and does the other one want attention", and splitting it across two stores
+   * would make that row subscribe twice to draw itself once.
+   */
+  selectionUnseen: boolean
   items: ChatItem[]
   /**
    * What is typed and not yet sent. In the store rather than in the panel because the panel
-   * unmounts when the card closes, and because a message the server refuses is handed back
+   * unmounts when its tab leaves, and because a message the server refuses is handed back
    * here to be typed again rather than lost.
    */
   draft: string
@@ -98,6 +114,7 @@ interface AgentState {
   setStatus: (status: AgentStatus) => void
   setDraft: (draft: string) => void
   setOpen: (open: boolean) => void
+  setSelectionUnseen: (selectionUnseen: boolean) => void
   setNextAttemptAt: (at: number | null) => void
   append: (kind: ChatItem['kind'], text: string) => void
   /** Append a question card and mark it the one awaiting an answer. */
@@ -118,7 +135,7 @@ interface AgentState {
   clear: () => void
   /** Bumped by anything that wants the composer focused. The panel focuses on each change. */
   focusToken: number
-  /** Open the card and put the caret in it, whether or not it was already open. */
+  /** Show the assistant and put the caret in the composer, whichever tab was on. */
   openForInput: () => void
 }
 
@@ -127,6 +144,7 @@ let nextItemId = 1
 export const useAgent = create<AgentState>()((set) => ({
   status: 'offline',
   open: false,
+  selectionUnseen: false,
   items: [],
   draft: '',
   nextAttemptAt: null,
@@ -134,7 +152,19 @@ export const useAgent = create<AgentState>()((set) => ({
   focusToken: 0,
   setStatus: (status) => set((state) => (state.status === status ? state : { status })),
   setDraft: (draft) => set((state) => (state.draft === draft ? state : { draft })),
-  setOpen: (open) => set((state) => (state.open === open ? state : { open })),
+  // Leaving the assistant tab is what "looked at the properties" means, so the dot the
+  // held-back switch left behind is cleared by the same call rather than by a second one
+  // every caller would have to remember.
+  setOpen: (open) =>
+    set((state) =>
+      state.open === open
+        ? state.selectionUnseen && !open
+          ? { selectionUnseen: false }
+          : state
+        : { open, selectionUnseen: open ? state.selectionUnseen : false },
+    ),
+  setSelectionUnseen: (selectionUnseen) =>
+    set((state) => (state.selectionUnseen === selectionUnseen ? state : { selectionUnseen })),
   setNextAttemptAt: (nextAttemptAt) =>
     set((state) => (state.nextAttemptAt === nextAttemptAt ? state : { nextAttemptAt })),
   append: (kind, text) =>

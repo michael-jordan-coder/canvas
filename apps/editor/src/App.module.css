@@ -1,10 +1,14 @@
 .app {
   display: grid;
   height: 100%;
-  /* The side columns follow their resize handles; without one it is the shared default. */
+  /*
+   * The side columns follow their resize handles; without one it is the column's default.
+   * The two defaults differ because the right column also holds the conversation, and a
+   * sentence needs more room than a label and a field do.
+   */
   grid-template-columns:
     var(--panel-width-left, var(--panel-width)) 1fr
-    var(--panel-width-right, var(--panel-width));
+    var(--panel-width-right, var(--panel-width-assistant));
 }
 
 .viewport {

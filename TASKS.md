@@ -484,6 +484,15 @@ Open:
       appears in the transcript and whether it is saved with it. Note the transcript's
       storage is capped at 64 kB and drops the oldest first, so images almost certainly must
       not go through `figma-canvas:agent-chat`.
+- [x] The assistant is docked in the right column, on a tab beside the properties, instead
+      of floating over the canvas. `open` now names which tab is on; `state/panelFollow.ts`
+      brings the properties forward when something is selected, and holds that back during a
+      turn behind a dot on the tab, since the assistant moves the selection itself. The
+      column's floor is the assistant's 300 rather than the properties' 240, so
+      `PanelResizer` takes the minimum as a prop. `CornerGrip`, `cardSize.ts` and the two
+      `figma-canvas:agent-*` size keys are gone with the float, and so is the card's shadow.
+      `apps/editor/src/ui/RightPanel.tsx`, `apps/editor/src/ui/AgentPanel.tsx`,
+      `apps/editor/src/state/panelFollow.ts`, `apps/editor/src/ui/panelSize.ts`
 - [x] Two editor tabs no longer flap the agent socket. The server sends `evicted` to the
       tab it is about to close, and a displaced editor stops reconnecting instead of taking
       the socket straight back. New `displaced` status, and the strip offers "Use it here".

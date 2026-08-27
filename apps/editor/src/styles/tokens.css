@@ -66,6 +66,10 @@
   --space-5: 16px;
 
   --panel-width: 240px;
+  /* The right column, which shows the properties or the assistant. Wider because only one
+     of the two is dense controls: `ASSISTANT_MIN_WIDTH` in `ui/panelSize.ts` is the floor
+     it may be dragged to, and the reason a sentence is what sets it is written there. */
+  --panel-width-assistant: 300px;
   --row-height: 24px;
 
   --radius: 2px;
@@ -76,13 +80,16 @@
   --radius-md: 8px;
   --radius-lg: 12px;
 
-  /* The only shadow in the app, and it says one thing: this surface floats over the canvas
-     rather than being docked to it. Two surfaces wear it, the assistant's card and the tool
-     bar, and they are exactly the two that sit on top of the artwork. Docked chrome meets
-     the canvas along a hairline and gets no shadow, so an elevation here always means the
-     same thing it does in Figma. Two layers: a wide soft one for the lift, a tight one for
-     the contact edge, both deeper and tighter on dark: there a soft light shadow reads as
-     fog, and what separates the card from the canvas is the darkness directly under it. */
+  /* The only shadow in the app, and it says one thing: this surface floats over what is
+     behind it rather than being docked to it. The tool bar wears it over the artwork, and
+     the transcript's jump control over the conversation it sits on top of. The assistant's
+     card wore it too until the assistant was docked into the right column, and it lost the
+     shadow with the float that earned it, which is the rule working rather than an
+     exception being removed. Docked chrome meets what it abuts along a hairline and gets no
+     shadow, so an elevation here always means the same thing it does in Figma. Two layers:
+     a wide soft one for the lift, a tight one for the contact edge, both deeper and tighter
+     on dark: there a soft light shadow reads as fog, and what separates a floating surface
+     from what is under it is the darkness directly beneath. */
   --shadow-card:
     0 12px 32px light-dark(rgb(0 0 0 / 0.1), rgb(0 0 0 / 0.44)),
     0 2px 6px light-dark(rgb(0 0 0 / 0.06), rgb(0 0 0 / 0.32));

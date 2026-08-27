@@ -4,7 +4,7 @@
  * spends is the one nearest the artwork. Floating gives it back, and puts the tools where
  * the pointer already is rather than at the far edge of the screen.
  *
- * It is the second surface in the app allowed `--shadow-card`, under that token's rule:
+ * It is one of the two surfaces in the app allowed `--shadow-card`, under that token's rule:
  * a shadow here means the same thing it means on the assistant's card, this floats over
  * the canvas. So it takes the floating vocabulary whole, `--radius-lg` included, rather
  * than keeping the docked 2px it had while it was chrome.

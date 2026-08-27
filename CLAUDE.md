@@ -128,8 +128,8 @@ writes to. Loading also pushes the id generator past every id in the file, since
 keeps its ids and the next node created would otherwise collide with one of them.
 
 `figma-canvas:agent-chat` holds the assistant's transcript under the same rules;
-`figma-canvas:layers-width` and `figma-canvas:properties-width` the panel widths; and
-`figma-canvas:agent-width` and `figma-canvas:agent-height` the assistant card's size.
+and `figma-canvas:layers-width` and `figma-canvas:properties-width` the two panel widths,
+the second of which is the column the assistant shares.
 
 Every access goes through `readStored`/`writeStored` in `state/localStorage.ts`, because
 storage can throw rather than merely fail: Safari private mode and storage-blocked embeds
@@ -244,7 +244,7 @@ Built:
   centred over the canvas the way Figma's does rather than taking a row above it. It is
   `position: fixed`, so it holds one place on the window: dragging a side panel resizes the
   canvas on every pointer move, and a bar centred on that column would slide under the hand
-  for the whole gesture. It is the second surface allowed `--shadow-card`. Its
+  for the whole gesture. It is one of the two surfaces allowed `--shadow-card`. Its
   buttons and icons are a step larger than the panels' controls, since a floating bar is
   aimed at rather than scanned. It holds the tools, the code node insert and, behind a
   hairline, the assistant's opener; import and export were removed with it, so a file gets in
@@ -846,61 +846,75 @@ in a text field back to the field. Focus travels as a token rather than a flag, 
 same shortcut pressed twice has to focus twice and `open` will not have changed the second
 time.
 
-**The card is not docked chrome, and it is designed as one of the two surfaces that are
-not.** Every panel here meets the canvas along a hairline at 11 and 12 pixels, packed tight
-because it is dense controls; a conversation is read rather than operated, and at that
-density it looked like a log rather than like something someone said. The assistant breaks
-with the panels on exactly three counts: a 13px body with a reading line height, padding of
-12 and 16 rather than 4 and 8, and `--shadow-card` instead of a hairline, the app's one
-shadow, shared only with the floating tool bar, and meaning only ever "this floats over the
-canvas". Colour, radii and motion stay the app's own. The person's words are the single bubble, in `--field` rather
-than the sunken grey because on the dark theme the sunken tone is darker than the card and
+**The assistant shares the right column with the properties, one tab at a time.** It
+floated over the canvas as a card before that, which cost it the two things a docked column
+gives back: it covered the artwork it was editing, and it collided with the tool bar. What
+it gives up is being on screen beside the properties, and that is the real price rather than
+a detail: a segmented control is mutual exclusion by construction, so the two surfaces
+cannot be read together the way a float allowed. It bought the column's floor as well,
+`ASSISTANT_MIN_WIDTH` in `ui/panelSize.ts`, which is 300 rather than the 240 a panel of
+fields needs, because what has to fit is a sentence. That is 60px of canvas at the narrowest
+setting, and it is charged whichever tab is on, since a width that is only wide enough half
+the time is wrong every time the other tab is showing. `PanelResizer` takes the minimum as a
+prop for that reason; the ceiling and the nudge stay shared.
+
+**Docking took the shadow and left the density.** Every panel here meets the canvas along a
+hairline at 11 and 12 pixels, packed tight because it is dense controls; a conversation is
+read rather than operated, and at that density it looked like a log rather than like
+something someone said. The assistant broke with the panels on three counts and still breaks
+with them on two: a 13px body with a reading line height, and padding of 12 and 16 rather
+than 4 and 8. The third was `--shadow-card` instead of a hairline, and it went with the
+float that earned it, which is the token's rule holding rather than an exception being
+withdrawn. Sharing a column is exactly why the other two have to stand: a surface that gave
+up its own scale to match its neighbour would have nothing left that made it worth docking
+beside one. It is also why tabs rather than a stack. Stacked, the two densities are adjacent
+and invite the comparison, and the one that loses it is the conversation. Colour, radii and
+motion stay the app's own. The person's words are the single bubble, in `--field` rather
+than the sunken grey because on the dark theme the sunken tone is darker than the panel and
 reads as a hole cut in it. A run of steps is a chip rather than a line of grey text, since
 it is the machine's record and has to be openable without being read first, and the pip on
 it is the only moving thing in the panel.
 
-**An empty card offers three things to press.** That is a deliberate exception to the rule
-that the interface explains itself and carries no helper text, and the exception is narrow:
-the rule holds wherever a person can see what a control does, and nothing on screen says
-what an assistant is able to do. A suggestion fills the composer rather than sending, since
-it is a starting point and not a command.
+**An empty transcript offers three things to press.** That is a deliberate exception to the
+rule that the interface explains itself and carries no helper text, and the exception is
+narrow: the rule holds wherever a person can see what a control does, and nothing on screen
+says what an assistant is able to do. A suggestion fills the composer rather than sending,
+since it is a starting point and not a command.
 
-**The card is sized from its free corner.** It is anchored bottom right, so the grip is at
-its top left and dragging away from the anchor grows it. `CornerGrip` takes `PanelResizer`'s
-idioms rather than its code, since that one is a single axis on a docked grid column and
-widening it would double every branch it has for its one caller: refs for the live numbers,
-a layout effect to restore, a write on release, a double click for the default, arrow keys
-with the event stopped. What it shares outright with `PanelResizer` is the one function
-with no drag in it, `setRootLength`, and the nudge step, which a comment used to claim the
-two had in common while each held its own literal.
+**Selecting a node brings the properties forward, except during a turn.** Selecting means
+"tell me about this", and the panel that answers is the properties one, so `state/panelFollow.ts`
+switches the tab. The exception is the whole reason the rule needs a home: the assistant
+moves the selection itself, through `set_selection` and by pruning what it deletes, and a
+tab that flipped on either would take the conversation off screen while it is being read.
+So a selection arriving mid turn leaves a dot on the properties tab and waits to be asked
+for. It costs nothing to wait, because the transcript, the draft and the turn all live
+outside the panel: the tab changes what is visible and nothing else. `selectionUnseen` sits
+beside `open` in the agent store rather than in the UI store, since the two are one question
+the tab row asks, and split across two stores that row would subscribe twice to draw itself
+once. Clearing the selection does not pull the tab, having nothing to show. The rule is a
+subscription rather than a call inside `setSelection`, or the pointer, the layers panel, the
+keyboard, undo and every agent command would each have to remember it.
 
-The size goes on `--agent-card-width` and `--agent-card-height` on the root rather than on
-the card, because the card unmounts when the panel closes and a property set on it would be
-gone on every reopen. Those names, the two storage keys and the bounds are all in
-`cardSize.ts`, so the card's size has one vocabulary rather than a set of numbers in a
-module and a set of strings in the JSX beside it.
-
-The clamp is split: TypeScript holds the minimum and maximum, CSS holds the viewport bound,
-so neither restates the other. **What is remembered is the size the grip computed, not the
-size the element measured**, since the two are different exactly when the CSS bound bit: a
-card sized on a short window would otherwise store the cut-down height and come back shrunk
-on a screen with room for it, the CSS clamp having laundered itself into the value
-TypeScript owns. Nothing is written until a gesture has actually set a size, so a press
-that never moved leaves the stored one alone, which is the slop rule in a smaller place.
+**`open` names the tab now, not a card.** The shortcut, the tool bar's toggle and the
+composer's Escape all still write it, because it still names the same intention. What
+unmounting the conversation actually loses is one thing, where it was scrolled to, and that
+is kept in a module level `restingScrollTop` for the reason the typing history group is at
+module scope: the component is not mounted when the value has to survive. It is not
+persisted, being a position in a list that means nothing once the list is restored from
+storage.
 
 **The transcript is the expensive thing to draw, so nothing that changes on its own
-schedule sits above it.** `AgentPanel` reads `open` and nothing else and renders nothing
-until it is a card, the opener having moved into the tool bar, where it is the one control
+schedule sits above it.** `RightPanel` reads which tab is on and nothing else. `PropertiesPanel`
+is the whole of what subscribes to the selection in that column, `AssistantBody` mounts on
+its tab and owns the rows, and `PanelTabs`, `Composer` and `ConnectionStrip` are each their
+own subscription. Every one of those boundaries used to re-render every row of the
+conversation: the draft on every keystroke, the reconnect countdown once a second, the whole
+transcript rebuilt behind a closed card for every step of a running turn, and now a dot
+appearing on the other tab. The opener lives in the tool bar, where it is the one control
 that follows the agent's status and so a component of its own rather than a seventh button:
-the bar must not re-render its tools every time a turn starts. It is a toggle now that it is
-always on screen, opening with the caret in the composer the way the shortcut does. `Card`
-mounts on open and owns the rows; `Composer` and
-`ConnectionStrip` are below it. Each boundary is one subscription that used to re-render
-every row of the conversation: the draft on every keystroke, the reconnect countdown once a
-second, and the whole transcript rebuilt behind a **closed** card for every step of a
-running turn. A suggestion asks for the caret through `openForInput`'s token rather than
-through a ref, since the field is now a component away, which is the same mechanism the
-shortcut already used to focus a card that was open.
+the bar must not re-render its tools every time a turn starts. A suggestion asks for the
+caret through `openForInput`'s token rather than through a ref, since the field is a
+component away, which is the same mechanism the shortcut uses.
 
 The transcript follows the newest message only while it is the one being read. Pinning
 unconditionally meant it could not be scrolled back during a turn, since every arriving step
