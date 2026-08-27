@@ -10,7 +10,7 @@ import {
   type ServerMessage,
   type TurnEndReason,
 } from './protocol.ts'
-import { createCanvasMcpServer } from './tools.ts'
+import { createCanvasMcpServer } from './tools/index.ts'
 import { SYSTEM_PROMPT } from './prompt.ts'
 import { resultReason } from './turnEnd.ts'
 import { allowedOrigins, isOriginAllowed } from './origin.ts'
