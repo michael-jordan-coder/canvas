@@ -52,7 +52,8 @@
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  /* The whole of what separates two messages, now that a paragraph adds nothing of its own. */
+  gap: var(--space-5);
   padding: var(--space-5) var(--space-4);
 }
 
@@ -183,65 +184,120 @@
 }
 
 /* The one moving thing in the panel, and only while something is actually happening. */
+/*
+ * The assistant's own mark rather than a dot, so the thing that moves while it works is the
+ * thing that is working. It turns 90 degrees a cycle and the star is symmetric about its
+ * centre four ways, so the loop closes on itself: no snap back, and no full turn either,
+ * which on a four pointed glyph would read as a spinner impatient with itself.
+ *
+ * The dot it replaces was declared with `animation: breathe`, and no `@keyframes breathe` was
+ * ever written. It had never moved, in either place that asked it to.
+ */
 .pip {
+  display: grid;
+  place-items: center;
   flex: none;
-  width: 5px;
-  height: 5px;
   margin-left: var(--space-1);
-  border-radius: 50%;
-  background: var(--text-disabled);
+  color: var(--text-disabled);
+}
+
+/*
+ * A quarter turn, but not at a constant rate. Linear rotation on a symmetric glyph reads as a
+ * machine part: nothing about it says a mind is working, only that a timer is. So the turn
+ * carries a twinkle, scale and opacity swelling through the middle and settling at both ends,
+ * and the midpoint sits past halfway so the star gathers speed and then eases off rather than
+ * sweeping evenly. A star should twinkle. It is the one moving thing in the panel, and what it
+ * is there to say is that something is thinking.
+ */
+@keyframes turn {
+  0% {
+    transform: rotate(0deg) scale(0.88);
+    opacity: 0.6;
+  }
+
+  55% {
+    transform: rotate(58deg) scale(1.14);
+    opacity: 1;
+  }
+
+  100% {
+    transform: rotate(90deg) scale(0.88);
+    opacity: 0.6;
+  }
 }
 
 .stepsToggle[data-live='true'] .pip {
-  background: var(--accent);
-  animation: breathe 1.2s var(--ease) infinite;
+  color: var(--accent);
+  animation: turn 1.4s var(--ease) infinite;
 }
 
 .stepsToggle[data-failed='true'] .pip {
-  background: var(--danger);
+  color: var(--danger);
   animation: none;
 }
 
 /*
- * The loading line: the same pill as a live steps chip, for the moment a turn is running with
- * nothing yet to fold. Its pip breathes in the accent, the one moving thing the live chip has,
- * so the two states read as one continuous account of the assistant working. No chevron and no
- * hover: there is nothing to open.
+ * The loading line: the same row as a live steps chip, for the moment a turn is running with
+ * nothing yet to fold. The assistant's star turns on it in the accent, the one moving thing the
+ * live chip has, so the two states read as one continuous account of the assistant working. No
+ * chevron and no hover: there is nothing to open.
  */
 .working {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  align-self: flex-start;
-  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-2);
-  font-size: var(--text-xs);
+  /* The steps chip's own box, since this is the same line before there is anything to fold:
+     one hands off to the other and nothing about the row may move when it does. It was a
+     sunken pill, which made the handoff a shape disappearing rather than a label changing. */
+  padding: var(--space-2) 0;
+  font-size: var(--text-sm);
   color: var(--text);
-  background: var(--panel-sunken);
-  /* Transparent, only to match the live steps chip's box so the two are the same height as
-     one hands off to the other. */
-  border: 1px solid transparent;
-  border-radius: var(--radius-lg);
 }
 
 .working .pip {
-  background: var(--accent);
-  animation: breathe 1.2s var(--ease) infinite;
+  color: var(--accent);
+  animation: turn 1.4s var(--ease) infinite;
 }
 
 /* Indented under the chip, with a rule standing in for the fold. */
 .stepsBody {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
   margin-left: var(--space-4);
   padding-left: var(--space-4);
   border-left: 1px solid var(--line);
 }
 
+/*
+ * A step is one line and reads as a row rather than as a paragraph: a mark, then what was
+ * done. The mark is the difference the thought does not have, which is the point of it. A
+ * check, because these are things that happened, and a cross on the one that did not.
+ */
 .step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
   font-size: var(--text-xs);
-  line-height: 1.5;
+  line-height: 1.4;
   color: var(--text-secondary);
+}
+
+.stepIcon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--text-disabled);
+}
+
+.step[data-failed='true'] .stepIcon {
+  color: var(--danger);
+}
+
+/* A thought heads the steps it describes, so it takes its air above rather than between: the
+   run below it stays tight and the group reads as a group. First in the body it takes none,
+   having nothing to be separated from. */
+.thought:not(:first-child) {
+  margin-top: var(--space-3);
 }
 
 .step[data-failed='true'] {
@@ -266,7 +322,7 @@
   align-self: stretch;
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-5);
 }
 
 .questionText {
@@ -635,8 +691,11 @@
   color: var(--text-disabled);
 }
 
+/* Specific enough to win. `.pip` alone was not, so this had never stopped anything either,
+   which went unnoticed for as long as there was no animation for it to stop. */
 @media (prefers-reduced-motion: reduce) {
-  .pip {
+  .stepsToggle[data-live='true'] .pip,
+  .working .pip {
     animation: none;
   }
 }

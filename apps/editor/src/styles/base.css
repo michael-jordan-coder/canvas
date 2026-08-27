@@ -37,6 +37,16 @@ textarea {
   color: inherit;
 }
 
+/*
+ * Every column in this app spaces itself with a flex `gap`, and a paragraph's own 1em margins
+ * are a second opinion on top of that one. Worse, they do not collapse inside a flex container,
+ * so two of them add: the agent's step list asked for 4px between lines and got 26, which reads
+ * as a line height nobody chose. The gap is the single source, so the margin goes.
+ */
+p {
+  margin: 0;
+}
+
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;

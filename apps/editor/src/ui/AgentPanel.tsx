@@ -13,7 +13,7 @@ import { agentClient } from '../agent/connection'
 import { isConnected, isWorking, useAgent, type ChatItem } from '../agent/agentStore'
 import { failureCount, isNearBottom, showsPendingWork, stepsLabel, toRows } from '../agent/chatRows'
 import { isAssistantShortcut } from '../input/assistantShortcut'
-import { CheckIcon, ChevronIcon, SendIcon, StopIcon } from './icons'
+import { AssistantIcon, CheckIcon, ChevronIcon, CloseIcon, SendIcon, StopIcon } from './icons'
 import styles from './AgentPanel.module.css'
 
 /**
@@ -64,7 +64,9 @@ function Steps({ items, live }: { items: ChatItem[]; live: boolean }): ReactElem
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <span className={styles.pip} />
+        <span className={styles.pip}>
+          <AssistantIcon size={11} />
+        </span>
         {label}
         <ChevronIcon size={12} />
       </button>
@@ -77,6 +79,9 @@ function Steps({ items, live }: { items: ChatItem[]; live: boolean }): ReactElem
               </p>
             ) : (
               <p key={item.id} className={styles.step} data-failed={item.kind === 'tool-error'}>
+                <span className={styles.stepIcon}>
+                  {item.kind === 'tool-error' ? <CloseIcon size={11} /> : <CheckIcon size={11} />}
+                </span>
                 {item.text}
               </p>
             ),
@@ -97,7 +102,9 @@ function Steps({ items, live }: { items: ChatItem[]; live: boolean }): ReactElem
 function Working(): ReactElement {
   return (
     <div className={styles.working}>
-      <span className={styles.pip} />
+      <span className={styles.pip}>
+        <AssistantIcon size={11} />
+      </span>
       Working
     </div>
   )

@@ -915,8 +915,10 @@ and invite the comparison, and the one that loses it is the conversation. Colour
 motion stay the app's own. The person's words are the single bubble, in `--field` rather
 than the sunken grey because on the dark theme the sunken tone is darker than the panel and
 reads as a hole cut in it. A run of steps is a chip rather than a line of grey text, since
-it is the machine's record and has to be openable without being read first, and the pip on
-it is the only moving thing in the panel.
+it is the machine's record and has to be openable without being read first, and the assistant's
+own star turning on it is the only moving thing in the panel. Its own mark rather than a dot,
+so what moves while the assistant works is the assistant. A quarter turn a cycle, since the
+star is four ways symmetric about its centre and the loop therefore closes on itself.
 
 **An empty transcript offers three things to press.** That is a deliberate exception to the
 rule that the interface explains itself and carries no helper text, and the exception is
