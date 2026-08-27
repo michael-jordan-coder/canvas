@@ -194,10 +194,6 @@
   border-radius: var(--radius);
 }
 
-.rename:focus {
-  outline: none;
-}
-
 /* Always present, never revealed on hover: an affordance that does not exist on touch
    does not exist. */
 .visibility,

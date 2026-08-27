@@ -12,7 +12,7 @@ import { agentClient } from '../agent/connection'
 import { isConnected, isWorking, useAgent, type ChatItem } from '../agent/agentStore'
 import { failureCount, isNearBottom, showsPendingWork, stepsLabel, toRows } from '../agent/chatRows'
 import { isAssistantShortcut } from '../input/assistantShortcut'
-import { CheckIcon, ChevronIcon, SendIcon, StopIcon } from './icons'
+import { AssistantIcon, CheckIcon, ChevronIcon, CloseIcon, SendIcon, StopIcon } from './icons'
 import styles from './AgentPanel.module.css'
 
 /**
@@ -57,7 +57,9 @@ function Steps({ items, live }: { items: ChatItem[]; live: boolean }): ReactElem
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <span className={styles.pip} />
+        <span className={styles.pip} data-live={live}>
+          <AssistantIcon size={11} />
+        </span>
         {label}
         <ChevronIcon size={12} />
       </button>
@@ -70,6 +72,9 @@ function Steps({ items, live }: { items: ChatItem[]; live: boolean }): ReactElem
               </p>
             ) : (
               <p key={item.id} className={styles.step} data-failed={item.kind === 'tool-error'}>
+                <span className={styles.stepIcon}>
+                  {item.kind === 'tool-error' ? <CloseIcon size={11} /> : <CheckIcon size={11} />}
+                </span>
                 {item.text}
               </p>
             ),
@@ -90,7 +95,9 @@ function Steps({ items, live }: { items: ChatItem[]; live: boolean }): ReactElem
 function Working(): ReactElement {
   return (
     <div className={styles.working}>
-      <span className={styles.pip} />
+      <span className={styles.pip} data-live="true">
+        <AssistantIcon size={11} />
+      </span>
       Working
     </div>
   )
@@ -105,143 +112,201 @@ function Item({ item }: { item: ChatItem }): ReactElement {
 }
 
 /**
+ * In or out of a list of labels. Both lists this card keeps, what is picked and what is open,
+ * are membership by label and toggle the same way, and written twice they were two places to
+ * change the day the key stops being the label.
+ */
+function toggle(list: readonly string[], label: string): readonly string[] {
+  return list.includes(label) ? list.filter((value) => value !== label) : [...list, label]
+}
+
+/**
  * A question the assistant put to the person, the one place in the transcript they act rather
  * than read. Interactive while it is the pending one, a record of the choice once answered, and
  * a settled un-actionable record otherwise: the turn ended before it was answered, or it came
  * back from a past session with no live turn to answer to.
  *
- * Single-select options answer on click, the fastest path when the choice is the whole point.
- * Multi-select toggles and confirms with Submit, since a set is not finished until it is said
- * to be. Both offer a free-text row, so the person is never boxed in by the options.
+ * The question is said above the card, in the transcript's own voice, and the card below it
+ * holds only what there is to do about it. That split is the point: the sentence is something
+ * the assistant said, and belongs with everything else it has said, while the card is a control
+ * and reads as one.
+ *
+ * Every question confirms with Submit, single select included. A click that answered outright
+ * would be the one control in the app with no way back from a slip, and the free text row makes
+ * it worse: typing there and then clicking an option would send the click and drop the words.
+ * One Submit takes both, and Enter in the field is the same commit for the same reason.
+ *
+ * The record is the same card with the marks filled and nothing to select, rather than a second
+ * vocabulary of chips. What was chosen is read back in the place it was chosen, what was not is
+ * still there to be read, and the descriptions still open, so a past question keeps everything
+ * that was in front of the person when they answered it.
+ *
+ * **A row's description is disclosed, not drawn.** The built-in ask tool marks `description`
+ * required where our protocol has it optional, so in practice every option arrives with a
+ * sentence, and four of them open at the panel's 300px floor is twelve grey lines: a document
+ * rather than a card. The chevron is what opens one, and it sits in a fixed leading column
+ * exactly as the layers tree's fold does: a grid track the row states once, so a row with
+ * nothing to disclose simply renders no chevron rather than having to remember a spacer of the
+ * same width. Beside the label it would land wherever the last word happened to end, and
+ * where a label ends is the model's business rather than ours: everything in this card that
+ * assumed a length or a count broke on the first sentence long enough to test it, and what
+ * held was stated as a column, a gutter and a weight instead.
  */
 function Question({ item, pending }: { item: ChatItem; pending: boolean }): ReactElement | null {
   const [chosen, setChosen] = useState<readonly string[]>([])
+  const [opened, setOpened] = useState<readonly string[]>([])
   const [other, setOther] = useState('')
 
   const question = item.question
   if (!question) return null
 
-  // A record: answered, or no longer answerable. Either way, no controls.
-  if (item.answer !== undefined || !pending || item.askId === undefined) {
-    const answer = item.answer
-    return (
-      <div className={styles.question}>
-        <div className={styles.questionHead}>
-          <span className={styles.questionChip}>{question.header}</span>
-          <p className={styles.questionText}>{question.question}</p>
-        </div>
-        {answer ? (
-          <div className={styles.answerChips}>
-            {answer.selected.map((label) => (
-              <span key={label} className={styles.answerChip}>
-                <CheckIcon size={11} />
-                {label}
-              </span>
-            ))}
-            {answer.other && (
-              <span className={styles.answerChip}>
-                <CheckIcon size={11} />
-                {answer.other}
-              </span>
-            )}
-          </div>
-        ) : (
-          <p className={styles.questionUnanswered}>No answer</p>
-        )}
-      </div>
-    )
-  }
-
+  const answer = item.answer
   const askId = item.askId
+  // Answerable only while it is the pending question of a live turn and has no answer yet.
+  const live = answer === undefined && pending && askId !== undefined
   const multi = question.multiSelect
   const trimmedOther = other.trim()
 
-  const toggle = (label: string): void => {
-    setChosen((current) =>
-      current.includes(label) ? current.filter((value) => value !== label) : [...current, label],
-    )
+  // A single selection is one answer, and the free text row is one of the things it can be, so
+  // picking an option clears what was typed and typing clears what was picked. Without that a
+  // card that says "pick one" can carry two marks, which is the question answered twice.
+  // A multiple selection has no such rule: the typed answer is another of the several.
+  const choose = (label: string): void => {
+    if (!multi) {
+      setChosen([label])
+      setOther('')
+      return
+    }
+    setChosen((current) => toggle(current, label))
   }
 
-  const submitOther = (): void => {
-    if (!trimmedOther) return
-    agentClient.answer(askId, { selected: [], other: trimmedOther })
+  const write = (value: string): void => {
+    setOther(value)
+    if (!multi && value !== '') setChosen([])
   }
 
-  const submitMulti = (): void => {
+  // No rule of one open at a time: the descriptions exist to be compared, and comparing two of
+  // them means having two of them on screen.
+  const disclose = (label: string): void => {
+    setOpened((current) => toggle(current, label))
+  }
+
+  const submit = (): void => {
+    if (askId === undefined) return
     const selected = [...chosen]
     if (selected.length === 0 && !trimmedOther) return
     agentClient.answer(askId, trimmedOther ? { selected, other: trimmedOther } : { selected })
   }
 
+  // What each row's mark says. Live, it is what the person has picked so far; settled, it is
+  // what they picked at the time. An unanswered record marks nothing.
+  const marked = (label: string): boolean =>
+    live ? chosen.includes(label) : (answer?.selected.includes(label) ?? false)
+
   return (
     <div className={styles.question}>
-      <div className={styles.questionHead}>
-        <span className={styles.questionChip}>{question.header}</span>
-        <p className={styles.questionText}>{question.question}</p>
-      </div>
-      <div className={styles.options}>
+      <p className={styles.questionText}>{question.question}</p>
+      <div className={styles.card}>
         {question.options.map((option) => {
-          const active = multi && chosen.includes(option.label)
-          return (
-            <button
-              key={option.label}
-              type="button"
-              className={styles.option}
-              data-active={active}
-              onClick={() =>
-                multi ? toggle(option.label) : agentClient.answer(askId, { selected: [option.label] })
-              }
-            >
-              {multi && (
-                <span className={styles.optionCheck}>{active && <CheckIcon size={12} />}</span>
-              )}
-              <span className={styles.optionText}>
+          const active = marked(option.label)
+          const isOpen = opened.includes(option.label)
+          const body = (
+            <>
+              <span className={styles.text}>
                 <span className={styles.optionLabel}>{option.label}</span>
-                {option.description && (
+                {option.description && isOpen && (
                   <span className={styles.optionDesc}>{option.description}</span>
                 )}
               </span>
-            </button>
+              <span className={styles.mark}>{active && <CheckIcon size={11} />}</span>
+            </>
+          )
+          return (
+            <div key={option.label} className={styles.row}>
+              {option.description && (
+                <button
+                  type="button"
+                  className={styles.chevron}
+                  data-expanded={isOpen}
+                  aria-expanded={isOpen}
+                  aria-label={isOpen ? 'Hide description' : 'Show description'}
+                  onClick={() => disclose(option.label)}
+                >
+                  <ChevronIcon size={12} />
+                </button>
+              )}
+              {live ? (
+                <button
+                  type="button"
+                  role={multi ? 'checkbox' : 'radio'}
+                  aria-checked={active}
+                  className={styles.select}
+                  data-active={active}
+                  onClick={() => choose(option.label)}
+                >
+                  {body}
+                </button>
+              ) : (
+                <div className={styles.select} data-active={active} data-record>
+                  {body}
+                </div>
+              )}
+            </div>
           )
         })}
-        <div className={styles.otherRow}>
-          <input
-            className={styles.otherInput}
-            value={other}
-            placeholder="Something else"
-            aria-label="Other answer"
-            onChange={(event) => setOther(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault()
-                if (multi) submitMulti()
-                else submitOther()
-              }
-            }}
-          />
-          {!multi && (
-            <button
-              type="button"
-              className={styles.otherSend}
-              aria-label="Send"
-              disabled={trimmedOther === ''}
-              onClick={submitOther}
-            >
-              <SendIcon />
-            </button>
-          )}
-        </div>
+        {live ? (
+          <div className={styles.row}>
+            {/* Marked like an option, because it is one: in a single selection what is typed
+                here is the answer, and in a multiple selection it is another of the several.
+                Either way the card says so where it says it of every other row. */}
+            <div className={styles.select} data-active={trimmedOther !== ''}>
+              <input
+                className={styles.otherInput}
+                value={other}
+                placeholder="Something else..."
+                aria-label="Other answer"
+                onChange={(event) => write(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    submit()
+                  }
+                }}
+              />
+              <span className={styles.mark}>
+                {trimmedOther !== '' && <CheckIcon size={11} />}
+              </span>
+            </div>
+          </div>
+        ) : (
+          // The typed answer, as a row of its own so a settled card reads back everything that
+          // was said. The empty field it was typed into is an affordance, and an affordance
+          // does not survive into the record.
+          answer?.other && (
+            <div className={styles.row}>
+              <div className={styles.select} data-active data-record>
+                <span className={styles.text}>
+                  <span className={styles.optionLabel}>{answer.other}</span>
+                </span>
+                <span className={styles.mark}>
+                  <CheckIcon size={11} />
+                </span>
+              </div>
+            </div>
+          )
+        )}
+        {live && (
+          <button
+            type="button"
+            className={styles.submit}
+            disabled={chosen.length === 0 && trimmedOther === ''}
+            onClick={submit}
+          >
+            Submit
+          </button>
+        )}
       </div>
-      {multi && (
-        <button
-          type="button"
-          className={styles.submit}
-          disabled={chosen.length === 0 && trimmedOther === ''}
-          onClick={submitMulti}
-        >
-          Submit
-        </button>
-      )}
+      {!live && answer === undefined && <p className={styles.questionUnanswered}>No answer</p>}
     </div>
   )
 }
@@ -556,9 +621,7 @@ export function AssistantBody(): ReactElement {
                 // Not while stopping: the turn is being torn down, and the server has already
                 // let go of the question, so an answer would land nowhere.
                 pending={
-                  status === 'busy' &&
-                  row.item.askId !== undefined &&
-                  pendingAsk === row.item.askId
+                  status === 'busy' && row.item.askId !== undefined && pendingAsk === row.item.askId
                 }
               />
             ) : (

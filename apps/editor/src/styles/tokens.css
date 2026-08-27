@@ -40,10 +40,23 @@
   --hover: light-dark(rgb(0 0 0 / 0.05), rgb(255 255 255 / 0.06));
   --pressed: light-dark(rgb(0 0 0 / 0.09), rgb(255 255 255 / 0.11));
 
-  --accent: light-dark(#0a7cff, #3b9dff);
-  --accent-hover: light-dark(#0069e0, #5aacff);
-  --on-accent: light-dark(#ffffff, #08121c);
-  --accent-subtle: light-dark(rgb(10 124 255 / 0.12), rgb(59 157 255 / 0.18));
+  /*
+   * What sits on the accent is white in both themes, which is a plain value rather than a
+   * `light-dark` for the reason the convention gives: a token the theme does not move should
+   * not look like one it does. It used to be near-black on dark, because the dark accent was
+   * lifted to #3b9dff and white on that is 2.8:1, under the 3:1 a glyph needs. So the accent
+   * came down rather than the glyph going dark: #1f86ff puts white at 3.55 against the light
+   * theme's 3.93, both clear of the bar, and a tick that changes colour with the theme was the
+   * odd thing in a palette whose whole job is that the two agree.
+   *
+   * Hover darkens on both, which it did not before. On dark it lifted, and lifting a filled
+   * accent takes white down with it: #5aacff was 2.4:1, so the button became less legible for
+   * exactly as long as the pointer was on it.
+   */
+  --accent: light-dark(#0a7cff, #1f86ff);
+  --accent-hover: light-dark(#0069e0, #0b6fd6);
+  --on-accent: #ffffff;
+  --accent-subtle: light-dark(rgb(10 124 255 / 0.12), rgb(31 134 255 / 0.18));
 
   /* Lifted on dark the way the accent is: the same red on a dark panel reads almost brown. */
   --danger: light-dark(#d0342c, #ff6b60);

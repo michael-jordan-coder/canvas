@@ -65,10 +65,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.input:focus {
-  outline: none;
-}
-
 /*
  * A derived value. It reads as text rather than as a field: no hover or focus border, since
  * both would offer an edit that will not happen, and the secondary text colour to say the

@@ -212,6 +212,12 @@ and silently land on each other's ports. This one stays out of that fight.
 - TypeScript strict, no `any`. Explicit return types on exported functions.
 - CSS Modules. Never inline CSS in a component. A dynamic color goes on an SVG presentation
   attribute (see the fill swatch in `PropertiesPanel`), not on a `style` prop.
+- The focus ring is global, and text fields are exempt from it, in `styles/base.css`. A
+  ring says the keyboard is pointing here, and a caret blinking in a field has already said
+  that in the place the eye is; the ring then lands a second time around a box whose own border
+  is what its hover and focus are drawn on. Six fields had reached that on their own and turned
+  it off locally, and a rule six surfaces agree on belongs to the global. Pressable inputs, a
+  checkbox or a colour swatch, keep it: they have no caret and no border to speak with.
 - Design tokens live in `apps/editor/src/styles/tokens.css`. Light is the default because artwork
   has to be judged against a neutral surround. Which of the two is on **follows the
   operating system**, through `color-scheme: light dark` on `:root` and `light-dark()` on
@@ -770,6 +776,32 @@ that reads back what it built is honest about what it cannot check; one that is 
 blank image is not. If seeing the canvas comes back, it should be the person handing over a
 picture deliberately, not the assistant helping itself.
 
+**Asking the person is the SDK's tool, and the card is ours.** There was an `ask_user` of our
+own once, and it lost: it competed with `AskUserQuestion`, which the model is trained to reach
+for, so no amount of prompt copy telling it to ask ever fully stuck. The built-in is offered
+instead and **deliberately kept out of `allowedTools`**, which is the whole mechanism rather
+than an oversight: an allowlisted tool never reaches `canUseTool` at all, and would resolve on
+its own with empty answers and no card ever shown. `handleAsk` is the callback, and it answers
+through `updatedInput` rather than as a tool result, because the built-in owns how a choice is
+worded back to the model. Everything the canvas server exposes is allowlisted past the callback
+by the `mcp__canvas__*` wildcard, so this one tool is all that ever parks there.
+
+What that costs is the tool description, which we used to write and the SDK now owns, so the
+pressure to ask lives in two places instead: the prompt's asking bullet, and `ASK_REMINDER`,
+which rides alongside every message through the `UserPromptSubmit` hook. The same words twice
+on purpose. A system prompt is written once, far from the decision and cached with everything
+else; the hook lands in context at the moment the model is reading a request and choosing
+whether to build or to ask. It is unconditional and carries its own exception, because a regex
+guessing which requests "look open ended" would be a second judgement about the person's words,
+made worse than the model can make it with the whole message in front of it.
+
+`canUseTool` hands the arguments over as `Record<string, unknown>`, so `askInput.ts` is the
+third door after `serialize.ts` and `code/validate.ts` and is held to their standard: hand
+written, every failure naming the path. Unknown keys are ignored rather than refused, so a
+newer SDK adding a field cannot take the assistant down. A call carries one to four questions
+and `ask` carries one, so they are put in turn, one card at a time; stacking them is a protocol
+change on both sides and has not been made.
+
 **A turn is one history step.** `turn_start` opens a history group and `turn_end` closes it,
 so fifty node edits undo together, the same shape a nudge burst has. A socket that dies
 mid-turn force closes the group, because nothing else ever would.
@@ -783,7 +815,12 @@ was: the SDK reports an interrupted turn as an unsuccessful result, indistinguis
 the turn cap, and the only thing that knows is the code that asked for the interrupt.
 
 **`turn_end` carries a reason, not a sentence.** `ok`, `stopped`, `max_turns`, `error`, with
-a `detail` for what the reason cannot hold: an unmapped SDK subtype, or a thrown message.
+a `detail` for what the reason cannot hold: an unmapped SDK subtype, or a thrown message. The
+step cap arrives both ways, as a subtype and as a throw, and both map to `max_turns`: read from
+the throw it was being printed raw, which is the sentence this enum exists to avoid and calls a
+notice a failure. `maxTurns` itself is 200 and is a runaway guard rather than a budget, since
+there is no token ceiling on a turn and a model stuck retrying would otherwise run until the
+context did.
 Only the server can tell the three apart, and only the panel can act on the difference, so
 the mapping from subtype to reason is the server's and the words are the editor's, beside
 "Stopped." and the rest of the assistant's copy. It buys the distinction the flattened
@@ -878,8 +915,10 @@ and invite the comparison, and the one that loses it is the conversation. Colour
 motion stay the app's own. The person's words are the single bubble, in `--field` rather
 than the sunken grey because on the dark theme the sunken tone is darker than the panel and
 reads as a hole cut in it. A run of steps is a chip rather than a line of grey text, since
-it is the machine's record and has to be openable without being read first, and the pip on
-it is the only moving thing in the panel.
+it is the machine's record and has to be openable without being read first, and the assistant's
+own star turning on it is the only moving thing in the panel. Its own mark rather than a dot,
+so what moves while the assistant works is the assistant. A quarter turn a cycle, since the
+star is four ways symmetric about its centre and the loop therefore closes on itself.
 
 **An empty transcript offers three things to press.** That is a deliberate exception to the
 rule that the interface explains itself and carries no helper text, and the exception is
@@ -926,6 +965,30 @@ The transcript follows the newest message only while it is the one being read. P
 unconditionally meant it could not be scrolled back during a turn, since every arriving step
 dragged it down again, which is exactly when there is most to read. A `ResizeObserver` keeps
 that promise across a resize, which changes the list's height without firing a scroll event.
+
+**A question card is reached with `?ask`, on the rule `?stress` already follows.** The card
+says the question above it and holds only the options, a mark on the right of each row, the
+free text row and Submit, which every question confirms with, single selection included: a
+click that answered outright would be the one control here with no way back from a slip, and
+it would drop whatever had been typed in the free text row. **A single selection carries
+exactly one mark, and the free text row is one of the things it can be on**, so picking an
+option clears what was typed and typing clears what was picked; a multiple selection has no
+such rule, the typed answer being another of the several. **A row's description is disclosed
+rather than drawn**, since the built-in tool marks it required where our protocol has it
+optional, so every option arrives with a sentence and four of them open at the 300px floor is
+twelve grey lines. Its chevron sits in a fixed leading column, the layers tree's pattern and
+blank included, because beside the label it would land wherever the last word happened to end
+and where a label ends is the model's business: everything in this card that assumed a length
+or a count broke on the first sentence long enough to test it, and what held was stated as a
+column, a gutter and a weight instead. The settled card is the same rows
+with the marks filled and nothing to select, rather than a second vocabulary of chips, so what
+was chosen is read back where it was chosen, what was not is still there to be read, and the
+descriptions still open. Two of
+its three states, answered and ended-without-answering, cannot be reached deliberately at all
+and the third needs a live turn that happens to ask, so `agent/askPreview.ts` seeds all three
+(`?ask=multi` for a multiple selection). It switches off the transcript autosave and the
+socket with it, the first so a throwaway conversation never lands on a real one, the second
+because connecting would set a status over the one a seeded card needs.
 
 ## Rotation, and the one rule it added
 
@@ -1005,6 +1068,8 @@ A few things are worth knowing because the code looks finished but is not:
   negative scale needs the SDF and hit testing to agree on what an inside out shape is.
 - The accent colour is hardcoded in `OverlayInstances` because the renderer has no access to CSS,
   and the theme now follows the system, so on dark it is the light theme's blue rather than the
-  lighter one the chrome switches to. It reads as an inconsistency rather than as a bug because
-  `--backdrop` is deliberately the same mid grey in both themes, so the overlay is drawn against
-  a constant either way. Passing the accent in through `ViewState` is still the fix.
+  slightly deeper one the chrome switches to. It reads as an inconsistency rather than as a bug
+  because `--backdrop` is deliberately the same mid grey in both themes, so the overlay is drawn
+  against a constant either way. Passing the accent in through `ViewState` is still the fix. The
+  marquee and the text selection tints derive from that one constant rather than restating its
+  channels, so a retune has one place to reach rather than three.

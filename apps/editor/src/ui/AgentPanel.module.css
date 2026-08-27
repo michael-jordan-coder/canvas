@@ -52,7 +52,8 @@
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  /* The whole of what separates two messages, now that a paragraph adds nothing of its own. */
+  gap: var(--space-5);
   padding: var(--space-5) var(--space-4);
 }
 
@@ -183,65 +184,123 @@
 }
 
 /* The one moving thing in the panel, and only while something is actually happening. */
+/*
+ * The assistant's own mark rather than a dot, so the thing that moves while it works is the
+ * thing that is working. It turns 90 degrees a cycle and the star is symmetric about its
+ * centre four ways, so the loop closes on itself: no snap back, and no full turn either,
+ * which on a four pointed glyph would read as a spinner impatient with itself.
+ *
+ * The dot it replaces was declared with `animation: breathe`, and no `@keyframes breathe` was
+ * ever written. It had never moved, in either place that asked it to.
+ */
 .pip {
+  display: grid;
+  place-items: center;
   flex: none;
-  width: 5px;
-  height: 5px;
   margin-left: var(--space-1);
-  border-radius: 50%;
-  background: var(--text-disabled);
+  color: var(--text-disabled);
 }
 
-.stepsToggle[data-live='true'] .pip {
-  background: var(--accent);
-  animation: breathe 1.2s var(--ease) infinite;
+/*
+ * A quarter turn, but not at a constant rate. Linear rotation on a symmetric glyph reads as a
+ * machine part: nothing about it says a mind is working, only that a timer is. So the turn
+ * carries a twinkle, scale and opacity swelling through the middle and settling at both ends,
+ * and the midpoint sits past halfway so the star gathers speed and then eases off rather than
+ * sweeping evenly. A star should twinkle. It is the one moving thing in the panel, and what it
+ * is there to say is that something is thinking.
+ */
+@keyframes turn {
+  0% {
+    transform: rotate(0deg) scale(0.88);
+    opacity: 0.6;
+  }
+
+  55% {
+    transform: rotate(58deg) scale(1.14);
+    opacity: 1;
+  }
+
+  100% {
+    transform: rotate(90deg) scale(0.88);
+    opacity: 0.6;
+  }
 }
 
+/*
+ * The state is on the pip rather than on each thing that holds one. A live run and the loading
+ * line both turn the star, and written as two selectors the declaration was stated twice and
+ * the reduced motion override that cancels it twice more: four places to keep one animation in
+ * step. The element that animates is the one that carries whether it should, so both the
+ * animation and its cancel are a single rule.
+ */
+.pip[data-live='true'] {
+  color: var(--accent);
+  animation: turn 1.4s var(--ease) infinite;
+}
+
+/* Wins on specificity, so a failed run stops the star wherever it is turning. */
 .stepsToggle[data-failed='true'] .pip {
-  background: var(--danger);
+  color: var(--danger);
   animation: none;
 }
 
 /*
- * The loading line: the same pill as a live steps chip, for the moment a turn is running with
- * nothing yet to fold. Its pip breathes in the accent, the one moving thing the live chip has,
- * so the two states read as one continuous account of the assistant working. No chevron and no
- * hover: there is nothing to open.
+ * The loading line: the same row as a live steps chip, for the moment a turn is running with
+ * nothing yet to fold. The assistant's star turns on it in the accent, the one moving thing the
+ * live chip has, so the two states read as one continuous account of the assistant working. No
+ * chevron and no hover: there is nothing to open.
  */
 .working {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  align-self: flex-start;
-  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-2);
-  font-size: var(--text-xs);
+  /* The steps chip's own box, since this is the same line before there is anything to fold:
+     one hands off to the other and nothing about the row may move when it does. It was a
+     sunken pill, which made the handoff a shape disappearing rather than a label changing. */
+  padding: var(--space-2) 0;
+  font-size: var(--text-sm);
   color: var(--text);
-  background: var(--panel-sunken);
-  /* Transparent, only to match the live steps chip's box so the two are the same height as
-     one hands off to the other. */
-  border: 1px solid transparent;
-  border-radius: var(--radius-lg);
-}
-
-.working .pip {
-  background: var(--accent);
-  animation: breathe 1.2s var(--ease) infinite;
 }
 
 /* Indented under the chip, with a rule standing in for the fold. */
 .stepsBody {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
   margin-left: var(--space-4);
   padding-left: var(--space-4);
   border-left: 1px solid var(--line);
 }
 
+/*
+ * A step is one line and reads as a row rather than as a paragraph: a mark, then what was
+ * done. The mark is the difference the thought does not have, which is the point of it. A
+ * check, because these are things that happened, and a cross on the one that did not.
+ */
 .step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
   font-size: var(--text-xs);
-  line-height: 1.5;
+  line-height: 1.4;
   color: var(--text-secondary);
+}
+
+.stepIcon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--text-disabled);
+}
+
+.step[data-failed='true'] .stepIcon {
+  color: var(--danger);
+}
+
+/* A thought heads the steps it describes, so it takes its air above rather than between: the
+   run below it stays tight and the group reads as a group. First in the body it takes none,
+   having nothing to be separated from. */
+.thought:not(:first-child) {
+  margin-top: var(--space-3);
 }
 
 .step[data-failed='true'] {
@@ -258,142 +317,194 @@
 
 /*
  * A question from the assistant: the one place in the transcript the person acts rather than
- * reads. A grouped, bordered surface so it reads as a thing to answer rather than a thing that
- * was said, the way the properties panel groups the controls that belong together.
+ * reads. The sentence sits outside the card, since it is something the assistant said and
+ * belongs with everything else it has said; the card below holds only what there is to do
+ * about it, and so is allowed to look like a control.
  */
 .question {
   align-self: stretch;
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
-  padding: var(--space-4);
-  background: var(--panel-sunken);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-}
-
-.questionHead {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-/* The header, as a small chip: the subject of the question at a glance, like the layer name on
-   a step. */
-.questionChip {
-  align-self: flex-start;
-  padding: 1px var(--space-2);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-field);
+  gap: var(--space-5);
 }
 
 .questionText {
   font-size: var(--text-md);
+  font-weight: 600;
   line-height: 1.5;
   color: var(--text);
 }
 
-.options {
+/* One surface holding the rows, rather than a row of surfaces. The hierarchy inside it is
+   carried by weight and by the mark on the right, so a list of options reads as a list. */
+.card {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-}
-
-.option {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-  text-align: left;
   padding: var(--space-3);
-  color: var(--text);
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
+}
+
+/*
+ * A row: a chevron column, the text, and the mark on the right.
+ *
+ * The chevron is in a fixed leading column rather than beside the label, on the layers tree's
+ * pattern and for the same reason: a control that sits where the last word happened to end is
+ * not in the same place twice, and how long a label runs is the model's business.
+ *
+ * The column is a grid track rather than a flex row with a blank element holding the gap open.
+ * Stated as a track it exists whether or not a row cooperates, so a row with nothing to
+ * disclose is a row that renders no chevron rather than one that has to remember a spacer, and
+ * a kind of row added later cannot be the one that comes out misaligned. That is the same
+ * claim the comment on `Question` makes about lengths and counts, applied to the layout that
+ * carries it: what holds is a relationship, not a value every caller repeats.
+ *
+ * No gap on the row: the select's own left padding is the space between the chevron and the
+ * label, and a second one on top of it pushed the text a third of the column away. 16 is the
+ * layers tree's width for the same control, and the arrow is drawn in the right half of its
+ * own box, so the gap that reads is about 13.
+ */
+.row {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  align-items: start;
+}
+
+.chevron {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 20px;
+  margin-top: var(--space-3);
+  color: var(--text-secondary);
+  border-radius: var(--radius);
   transition:
-    border-color var(--duration) var(--ease),
+    color var(--duration) var(--ease),
     background var(--duration) var(--ease);
 }
 
-.option:hover {
+/*
+ * The target, larger than the pill and invisible. The pill has to stay narrow, since the
+ * column's width is what pulls the label back toward it, so the clickable area is grown past
+ * the box instead: out to the card's padding on the left, and to the full height of a one line
+ * row above and below. Not a pixel to the right, where the label begins. A target that
+ * overlapped it would take clicks meant for the answer and open a description instead, which
+ * is the one confusion this whole arrangement exists to avoid.
+ */
+.chevron::after {
+  content: '';
+  position: absolute;
+  inset: -7px 0 -7px calc(-1 * var(--space-3));
+}
+
+.chevron:hover {
+  color: var(--text);
   background: var(--hover);
-  border-color: var(--line-strong);
 }
 
-/* Chosen, in a multi-select: the accent is the one colour that means selected, the same it
-   means on a node. A single-select never rests here, since a click on it is the answer. */
-.option[data-active='true'] {
-  border-color: var(--accent);
+/* Points right when collapsed, turns down when open, exactly as a layers row does. */
+.chevron svg {
+  transition: transform var(--duration) var(--ease);
 }
 
-/* The checkbox, drawn only for multi-select. Empty until chosen, then an accent tick. */
-.optionCheck {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 16px;
-  height: 16px;
-  margin-top: 1px;
-  color: var(--on-accent);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-field);
+.chevron[data-expanded='true'] svg {
+  transform: rotate(90deg);
 }
 
-.option[data-active='true'] .optionCheck {
-  background: var(--accent);
-  border-color: var(--accent);
+/*
+ * Everything that selects: the label, the description, the space beside them and the mark. The
+ * name of an option picks it, the way it does in every list of options, and the chevron is the
+ * one part of the row that does something else.
+ */
+.select {
+  /* Always the second track, so a row with no chevron leaves the column empty rather than
+     sliding the label into it. */
+  grid-column: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-3);
+  text-align: left;
+  color: var(--text);
+  background: none;
+  border-radius: var(--radius-md);
+  transition: background var(--duration) var(--ease);
 }
 
-.optionText {
+.select:not([data-record]):hover {
+  background: var(--hover);
+}
+
+/* A settled card is the same rows with nothing to select, so the hover surface goes with the
+   selecting. The chevrons stay live: a past question keeps everything that was in front of
+   the person when they answered it. */
+.select[data-record] {
+  cursor: default;
+}
+
+/* The text column. Its width is whatever is left once the chevron, the gutters and the mark
+   are taken, which is why a description cannot run under the mark at any panel width and
+   there is no number here to get wrong. */
+.text {
   display: flex;
   flex-direction: column;
-  gap: 2px;
   min-width: 0;
 }
 
 .optionLabel {
-  font-size: var(--text-sm);
+  font-size: var(--text-md);
+  font-weight: 500;
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
+/* A step down in size as well as in tone. Colour alone left the two lines reading as one
+   paragraph once the label was long enough to wrap, and the step buys back most of the width
+   the chevron column costs. */
 .optionDesc {
-  font-size: var(--text-xs);
-  line-height: 1.4;
+  margin-top: 3px;
+  font-size: var(--text-sm);
+  line-height: 1.45;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
 }
 
-/* The free-text option, always offered so the options are a starting point rather than a fence.
-   Built like the composer's field: the border on the wrapper, the send button sitting inside
-   it, so it reads as the same kind of input the person already knows from the bottom of the
-   card. */
-.otherRow {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  transition: border-color var(--duration) var(--ease);
+/* The mark. Round for both kinds: what distinguishes a single from a multiple selection here
+   is that the first replaces and the second adds, and the person finds that out by clicking a
+   second one, not by reading the shape of an 18px circle. */
+.mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  color: var(--on-accent);
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  transition:
+    background var(--duration) var(--ease),
+    border-color var(--duration) var(--ease);
 }
 
-.otherRow:focus-within {
-  border-color: var(--line-strong);
+.select[data-active='true'] .mark {
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
+/* The free text row, always offered so the options are a starting point rather than a fence.
+   It is a row like the others rather than a field with a border of its own: a second surface
+   inside the card would make the options look like the real answer and this like an escape. */
 .otherInput {
   flex: 1;
   min-width: 0;
-  padding: var(--space-2) 0;
-  font-size: var(--text-sm);
+  font-size: var(--text-md);
+  font-weight: 500;
+  line-height: 1.4;
   background: none;
   border: none;
-  outline: none;
   color: var(--text);
 }
 
@@ -401,36 +512,17 @@
   color: var(--text-disabled);
 }
 
-.otherSend {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: var(--accent);
-  color: var(--on-accent);
-  transition: background var(--duration) var(--ease);
-}
-
-.otherSend:hover:not(:disabled) {
-  background: var(--accent-hover);
-}
-
-.otherSend:disabled {
-  background: transparent;
-  color: var(--text-disabled);
-}
-
-/* Confirms a multi-select, where a set is not finished until it is said to be. */
+/* Confirms every question, single select included, so a slip is always recoverable and the
+   words in the free text row are never dropped by a click on an option. */
 .submit {
   align-self: flex-end;
-  padding: var(--space-2) var(--space-4);
-  font-size: var(--text-sm);
+  margin: var(--space-2) var(--space-3) var(--space-1) 0;
+  padding: var(--space-3) var(--space-5);
+  font-size: var(--text-md);
   font-weight: 500;
   color: var(--on-accent);
   background: var(--accent);
-  border-radius: var(--radius-field);
+  border-radius: 999px;
   transition: background var(--duration) var(--ease);
 }
 
@@ -440,33 +532,7 @@
 
 .submit:disabled {
   color: var(--text-disabled);
-  background: var(--panel);
-  border: 1px solid var(--line);
-}
-
-/* The answered record: the choices as accent-marked chips, so a settled question reads its
-   answer back at a glance without reopening anything. */
-.answerChips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-
-.answerChip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-1) var(--space-3) var(--space-1) var(--space-2);
-  font-size: var(--text-sm);
-  color: var(--text);
-  background: var(--panel);
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-field);
-}
-
-.answerChip svg {
-  flex: none;
-  color: var(--accent);
+  background: var(--field);
 }
 
 /* A question the turn never got an answer to. Quiet, the way a notice is: it is a fact about
@@ -585,23 +651,9 @@
   line-height: 1.5;
   background: none;
   border: none;
-  outline: none;
   color: var(--text);
   resize: none;
   field-sizing: content;
-}
-
-/*
- * The ring the rest of the app wears, off for this one field.
- *
- * `outline: none` above was already saying so and losing: `base.css`'s `:focus-visible` is a
- * single pseudo-class, exactly as specific as a class, so which of the two won came down to
- * which file the bundler happened to put last. Naming the state here makes it two selectors
- * against one and settles it. The reasoning is `.field`'s above: the caret is in the field,
- * blinking, and it is the only field on screen someone can be typing in.
- */
-.input:focus-visible {
-  outline: none;
 }
 
 .input::placeholder {
@@ -632,8 +684,12 @@
   color: var(--text-disabled);
 }
 
+/* The same selector as the rule it cancels, so it cannot lose the specificity fight and cannot
+   fall out of step with a state that starts the animation somewhere else. `.pip` alone was
+   neither, and had stopped nothing, which went unnoticed for as long as there was no animation
+   for it to stop. */
 @media (prefers-reduced-motion: reduce) {
-  .pip {
+  .pip[data-live='true'] {
     animation: none;
   }
 }

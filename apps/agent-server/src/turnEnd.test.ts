@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resultReason } from './turnEnd.ts'
+import { resultReason, thrownReason } from './turnEnd.ts'
 
 describe('resultReason', () => {
   it('names the turn cap as its own reason, since it is process rather than failure', () => {
@@ -15,5 +15,17 @@ describe('resultReason', () => {
       reason: 'error',
       detail: 'error_something_new',
     })
+  })
+})
+
+describe('thrownReason', () => {
+  it('names the step cap when the SDK throws it rather than yielding it', () => {
+    expect(
+      thrownReason('Claude Code returned an error result: Reached maximum number of turns (50)'),
+    ).toEqual({ reason: 'max_turns' })
+  })
+
+  it('keeps anything else as an error carrying its message', () => {
+    expect(thrownReason('socket hang up')).toEqual({ reason: 'error', detail: 'socket hang up' })
   })
 })

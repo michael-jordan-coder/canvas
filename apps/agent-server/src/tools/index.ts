@@ -1,5 +1,4 @@
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk'
-import { askTools } from './ask.ts'
 import { codeTools } from './code.ts'
 import { createTools } from './create.ts'
 import { layoutTools } from './layout.ts'
@@ -8,12 +7,16 @@ import { styleTools } from './style.ts'
 import { textTools } from './text.ts'
 import { transformTools } from './transform.ts'
 import { treeTools } from './tree.ts'
-import type { Ask, Forward } from './runner.ts'
+import type { Forward } from './runner.ts'
 
 /**
  * The agent's hands. Every tool forwards its arguments to the editor over the bridge and
  * returns whatever the editor's executor answered, so this directory decides what the model
  * may ask for and `executor.ts` in the editor decides what actually happens to the document.
+ *
+ * Every tool here is an editor command. Asking the person is not one, and is the SDK's own
+ * `AskUserQuestion` rather than a tool of ours: it competed with a tool the model is trained
+ * to reach for, and lost. `handleAsk` in `index.ts` is what keeps the card ours.
  *
  * One tool per editor command, which was a deliberate choice over a generic apply-patch
  * tool: a narrow schema per operation means the model cannot produce a half-valid document
@@ -25,15 +28,11 @@ import type { Ask, Forward } from './runner.ts'
  * vocabulary and `runner.ts` the forward wrapper; the rest is one group each.
  */
 
-export type { Ask, Forward } from './runner.ts'
+export type { Forward } from './runner.ts'
 
 /** The MCP server the query mounts, holding every canvas tool. */
-export function createCanvasMcpServer(
-  forward: Forward,
-  ask: Ask,
-): ReturnType<typeof createSdkMcpServer> {
+export function createCanvasMcpServer(forward: Forward): ReturnType<typeof createSdkMcpServer> {
   const tools = [
-    ...askTools(ask),
     ...readTools(forward),
     ...createTools(forward),
     ...textTools(forward),
