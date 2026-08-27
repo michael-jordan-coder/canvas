@@ -137,36 +137,31 @@
 }
 
 /*
- * A run of tool calls and thinking, folded into one chip. A chip rather than a line of grey
- * text, because the steps are the machine's own record: they belong in a container that says
- * "this is not the conversation" at a glance, and they have to be openable without being
- * read first.
+ * A run of tool calls and thinking, folded into one row. Openable without being read first,
+ * and the machine's own record rather than conversation: small, secondary, full width.
  */
 .steps {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
   gap: var(--space-3);
 }
 
 .stepsToggle {
   display: flex;
   align-items: center;
+  width: 100%;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-2);
-  font-size: var(--text-xs);
+  padding: var(--space-2) 0;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
-  background: var(--panel-sunken);
-  border: 1px solid transparent;
-  border-radius: var(--radius-lg);
-  transition:
-    color var(--duration) var(--ease),
-    border-color var(--duration) var(--ease);
+  background: none;
+  border: 0;
+  border-radius: 0;
+  transition: color var(--duration) var(--ease);
 }
 
 .stepsToggle:hover {
   color: var(--text);
-  border-color: var(--line);
 }
 
 .stepsToggle svg {
