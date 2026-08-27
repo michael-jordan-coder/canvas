@@ -287,14 +287,64 @@
   border-radius: var(--radius-lg);
 }
 
-/* A row: its label, and its mark on the right. The padding is the row's own rather than the
-   card's, so the hover surface covers the whole row and the text still lands 16px in. */
-.option {
+/*
+ * A row: a chevron column, the text, and the mark on the right.
+ *
+ * The chevron is in a fixed leading column rather than beside the label, on the layers tree's
+ * pattern and for the same reason: a control that sits where the last word happened to end is
+ * not in the same place twice, and how long a label runs is the model's business. The blank of
+ * the same width keeps the column straight on the rows that have nothing to open.
+ */
+.row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+.chevron,
+.chevronBlank {
+  flex: none;
+  width: 20px;
+}
+
+.chevron {
+  display: grid;
+  place-items: center;
+  height: 20px;
+  margin-top: var(--space-3);
+  color: var(--text-secondary);
+  border-radius: var(--radius);
+  transition:
+    color var(--duration) var(--ease),
+    background var(--duration) var(--ease);
+}
+
+.chevron:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+/* Points right when collapsed, turns down when open, exactly as a layers row does. */
+.chevron svg {
+  transition: transform var(--duration) var(--ease);
+}
+
+.chevron[data-expanded='true'] svg {
+  transform: rotate(90deg);
+}
+
+/*
+ * Everything that selects: the label, the description, the space beside them and the mark. The
+ * name of an option picks it, the way it does in every list of options, and the chevron is the
+ * one part of the row that does something else.
+ */
+.select {
+  display: flex;
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-4);
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: var(--space-3);
   text-align: left;
   color: var(--text);
@@ -303,27 +353,47 @@
   transition: background var(--duration) var(--ease);
 }
 
-.option:not([data-record]):hover {
+.select:not([data-record]):hover {
   background: var(--hover);
 }
 
-/* A settled card is the same rows with nothing to press, so the hover surface goes with the
-   pressing. Nothing else about it changes: what was chosen is read back where it was chosen. */
-.option[data-record] {
+/* A settled card is the same rows with nothing to select, so the hover surface goes with the
+   selecting. The chevrons stay live: a past question keeps everything that was in front of
+   the person when they answered it. */
+.select[data-record] {
   cursor: default;
 }
 
-.optionLabel {
+/* The text column. Its width is whatever is left once the chevron, the gutters and the mark
+   are taken, which is why a description cannot run under the mark at any panel width and
+   there is no number here to get wrong. */
+.text {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+}
+
+.optionLabel {
   font-size: var(--text-md);
   font-weight: 500;
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
 
+/* A step down in size as well as in tone. Colour alone left the two lines reading as one
+   paragraph once the label was long enough to wrap, and the step buys back most of the width
+   the chevron column costs. */
+.optionDesc {
+  margin-top: 3px;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
 /* The mark. Round for both kinds: what distinguishes a single from a multiple selection here
    is that the first replaces and the second adds, and the person finds that out by clicking a
-   second one, not by reading the shape of a 18px circle. */
+   second one, not by reading the shape of an 18px circle. */
 .mark {
   display: grid;
   place-items: center;
@@ -338,7 +408,7 @@
     border-color var(--duration) var(--ease);
 }
 
-.option[data-active='true'] .mark {
+.select[data-active='true'] .mark {
   background: var(--accent);
   border-color: var(--accent);
 }
@@ -365,7 +435,7 @@
    words in the free text row are never dropped by a click on an option. */
 .submit {
   align-self: flex-end;
-  margin: var(--space-2) var(--space-1) var(--space-1) 0;
+  margin: var(--space-2) var(--space-3) var(--space-1) 0;
   padding: var(--space-3) var(--space-5);
   font-size: var(--text-md);
   font-weight: 500;

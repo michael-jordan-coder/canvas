@@ -120,20 +120,31 @@ function Item({ item }: { item: ChatItem }): ReactElement {
  * The question is said above the card, in the transcript's own voice, and the card below it
  * holds only what there is to do about it. That split is the point: the sentence is something
  * the assistant said, and belongs with everything else it has said, while the card is a control
- * and reads as one. A row is its label and a mark on the right, on a single surface, so a list
- * of options is a list rather than a stack of buttons.
+ * and reads as one.
  *
  * Every question confirms with Submit, single select included. A click that answered outright
  * would be the one control in the app with no way back from a slip, and the free text row makes
  * it worse: typing there and then clicking an option would send the click and drop the words.
  * One Submit takes both, and Enter in the field is the same commit for the same reason.
  *
- * The record is the same card with the marks filled and nothing to press, rather than a second
- * vocabulary of chips. What was chosen is read back in the place it was chosen, and what was
- * not is still there to be read, which is most of what makes a past question worth showing.
+ * The record is the same card with the marks filled and nothing to select, rather than a second
+ * vocabulary of chips. What was chosen is read back in the place it was chosen, what was not is
+ * still there to be read, and the descriptions still open, so a past question keeps everything
+ * that was in front of the person when they answered it.
+ *
+ * **A row's description is disclosed, not drawn.** The built-in ask tool marks `description`
+ * required where our protocol has it optional, so in practice every option arrives with a
+ * sentence, and four of them open at the panel's 300px floor is twelve grey lines: a document
+ * rather than a card. The chevron is what opens one, and it sits in a fixed leading column
+ * exactly as the layers tree's fold does, with a blank of the same width on the rows that have
+ * nothing to open. Beside the label it would land wherever the last word happened to end, and
+ * where a label ends is the model's business rather than ours: everything in this card that
+ * assumed a length or a count broke on the first sentence long enough to test it, and what
+ * held was stated as a column, a gutter and a weight instead.
  */
 function Question({ item, pending }: { item: ChatItem; pending: boolean }): ReactElement | null {
   const [chosen, setChosen] = useState<readonly string[]>([])
+  const [opened, setOpened] = useState<readonly string[]>([])
   const [other, setOther] = useState('')
 
   const question = item.question
@@ -166,6 +177,14 @@ function Question({ item, pending }: { item: ChatItem; pending: boolean }): Reac
     if (!multi && value !== '') setChosen([])
   }
 
+  // No rule of one open at a time: the descriptions exist to be compared, and comparing two of
+  // them means having two of them on screen.
+  const disclose = (label: string): void => {
+    setOpened((current) =>
+      current.includes(label) ? current.filter((value) => value !== label) : [...current, label],
+    )
+  }
+
   const submit = (): void => {
     if (askId === undefined) return
     const selected = [...chosen]
@@ -184,61 +203,92 @@ function Question({ item, pending }: { item: ChatItem; pending: boolean }): Reac
       <div className={styles.card}>
         {question.options.map((option) => {
           const active = marked(option.label)
-          const content = (
+          const isOpen = opened.includes(option.label)
+          const body = (
             <>
-              <span className={styles.optionLabel}>{option.label}</span>
+              <span className={styles.text}>
+                <span className={styles.optionLabel}>{option.label}</span>
+                {option.description && isOpen && (
+                  <span className={styles.optionDesc}>{option.description}</span>
+                )}
+              </span>
               <span className={styles.mark}>{active && <CheckIcon size={11} />}</span>
             </>
           )
-          return live ? (
-            <button
-              key={option.label}
-              type="button"
-              role={multi ? 'checkbox' : 'radio'}
-              aria-checked={active}
-              className={styles.option}
-              data-active={active}
-              onClick={() => choose(option.label)}
-            >
-              {content}
-            </button>
-          ) : (
-            <div key={option.label} className={styles.option} data-active={active} data-record>
-              {content}
+          return (
+            <div key={option.label} className={styles.row}>
+              {option.description ? (
+                <button
+                  type="button"
+                  className={styles.chevron}
+                  data-expanded={isOpen}
+                  aria-expanded={isOpen}
+                  aria-label={isOpen ? 'Hide description' : 'Show description'}
+                  onClick={() => disclose(option.label)}
+                >
+                  <ChevronIcon size={12} />
+                </button>
+              ) : (
+                <span className={styles.chevronBlank} aria-hidden="true" />
+              )}
+              {live ? (
+                <button
+                  type="button"
+                  role={multi ? 'checkbox' : 'radio'}
+                  aria-checked={active}
+                  className={styles.select}
+                  data-active={active}
+                  onClick={() => choose(option.label)}
+                >
+                  {body}
+                </button>
+              ) : (
+                <div className={styles.select} data-active={active} data-record>
+                  {body}
+                </div>
+              )}
             </div>
           )
         })}
         {live ? (
-          // Marked like an option when it is one: in a single selection what is typed here is
-          // the answer, and the card has to say so where it says it of every other row.
-          <div className={styles.option} data-active={!multi && trimmedOther !== ''}>
-            <input
-              className={styles.otherInput}
-              value={other}
-              placeholder="Something else..."
-              aria-label="Other answer"
-              onChange={(event) => write(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault()
-                  submit()
-                }
-              }}
-            />
-            {!multi && (
-              <span className={styles.mark}>{trimmedOther !== '' && <CheckIcon size={11} />}</span>
-            )}
+          <div className={styles.row}>
+            <span className={styles.chevronBlank} aria-hidden="true" />
+            {/* Marked like an option when it is one: in a single selection what is typed here
+                is the answer, and the card has to say so where it says it of every other row. */}
+            <div className={styles.select} data-active={!multi && trimmedOther !== ''}>
+              <input
+                className={styles.otherInput}
+                value={other}
+                placeholder="Something else..."
+                aria-label="Other answer"
+                onChange={(event) => write(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    submit()
+                  }
+                }}
+              />
+              <span className={styles.mark}>
+                {!multi && trimmedOther !== '' && <CheckIcon size={11} />}
+              </span>
+            </div>
           </div>
         ) : (
-          // The typed answer, shown as a row of its own so a settled card reads back everything
-          // that was said. The empty field it was typed into is an affordance and does not
-          // survive into the record.
+          // The typed answer, as a row of its own so a settled card reads back everything that
+          // was said. The empty field it was typed into is an affordance, and an affordance
+          // does not survive into the record.
           answer?.other && (
-            <div className={styles.option} data-active data-record>
-              <span className={styles.optionLabel}>{answer.other}</span>
-              <span className={styles.mark}>
-                <CheckIcon size={11} />
-              </span>
+            <div className={styles.row}>
+              <span className={styles.chevronBlank} aria-hidden="true" />
+              <div className={styles.select} data-active data-record>
+                <span className={styles.text}>
+                  <span className={styles.optionLabel}>{answer.other}</span>
+                </span>
+                <span className={styles.mark}>
+                  <CheckIcon size={11} />
+                </span>
+              </div>
             </div>
           )
         )}

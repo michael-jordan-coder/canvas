@@ -27,7 +27,24 @@ export function askPreviewFromLocation(): AskPreview {
 
 const QUESTION = 'Which layout should I use for the sign-in screen?'
 
-const OPTIONS = [{ label: 'Centered card with price' }, { label: 'fluid panel and text shadows' }]
+/**
+ * Deliberately uneven: one label that fits, one that wraps at the panel's floor, and one with
+ * no description at all, since the protocol allows it even though the built-in tool always
+ * sends one. The card is only worth looking at under the lengths it will actually receive.
+ */
+const OPTIONS = [
+  {
+    label: 'Centered card with price',
+    description:
+      'A single column on a plain ground, the price above the button. Reads well at any width and needs no artwork.',
+  },
+  {
+    label: 'Fluid panel with text shadows and a full bleed background image',
+    description:
+      'The form floats over the image, which carries the mood. Wants a picture good enough to hold the whole screen.',
+  },
+  { label: 'Split screen' },
+]
 
 /**
  * The three states, in the order a transcript would hold them: a question that was answered, one
@@ -51,7 +68,11 @@ export function seedAskPreview(kind: Exclude<AskPreview, null>): void {
     store.ask(3, {
       header: 'Tone',
       question: 'Which of these should the copy be? Pick as many as apply.',
-      options: [{ label: 'Formal' }, { label: 'Casual' }, { label: 'Playful' }],
+      options: [
+        { label: 'Formal', description: 'Full sentences, no contractions, nothing playful.' },
+        { label: 'Casual', description: 'The way you would say it to someone at the next desk.' },
+        { label: 'Playful', description: 'Jokes allowed, as long as they are not in the way.' },
+      ],
       multiSelect: true,
     })
   } else {

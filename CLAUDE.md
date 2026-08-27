@@ -971,9 +971,17 @@ click that answered outright would be the one control here with no way back from
 it would drop whatever had been typed in the free text row. **A single selection carries
 exactly one mark, and the free text row is one of the things it can be on**, so picking an
 option clears what was typed and typing clears what was picked; a multiple selection has no
-such rule, the typed answer being another of the several. The settled card is the same rows
-with the marks filled and nothing to press, rather than a second vocabulary of chips, so what
-was chosen is read back where it was chosen and what was not is still there to be read. Two of
+such rule, the typed answer being another of the several. **A row's description is disclosed
+rather than drawn**, since the built-in tool marks it required where our protocol has it
+optional, so every option arrives with a sentence and four of them open at the 300px floor is
+twelve grey lines. Its chevron sits in a fixed leading column, the layers tree's pattern and
+blank included, because beside the label it would land wherever the last word happened to end
+and where a label ends is the model's business: everything in this card that assumed a length
+or a count broke on the first sentence long enough to test it, and what held was stated as a
+column, a gutter and a weight instead. The settled card is the same rows
+with the marks filled and nothing to select, rather than a second vocabulary of chips, so what
+was chosen is read back where it was chosen, what was not is still there to be read, and the
+descriptions still open. Two of
 its three states, answered and ended-without-answering, cannot be reached deliberately at all
 and the third needs a live turn that happens to ask, so `agent/askPreview.ts` seeds all three
 (`?ask=multi` for a multiple selection). It switches off the transcript autosave and the
