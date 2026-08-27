@@ -23,7 +23,3 @@
   /* Safari draws its own caret and selection on a focused field even at zero opacity. */
   caret-color: transparent;
 }
-
-.field:focus {
-  outline: none;
-}

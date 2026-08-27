@@ -212,6 +212,12 @@ and silently land on each other's ports. This one stays out of that fight.
 - TypeScript strict, no `any`. Explicit return types on exported functions.
 - CSS Modules. Never inline CSS in a component. A dynamic color goes on an SVG presentation
   attribute (see the fill swatch in `PropertiesPanel`), not on a `style` prop.
+- The focus ring is global, and text fields are exempt from it, in `styles/base.css`. A
+  ring says the keyboard is pointing here, and a caret blinking in a field has already said
+  that in the place the eye is; the ring then lands a second time around a box whose own border
+  is what its hover and focus are drawn on. Six fields had reached that on their own and turned
+  it off locally, and a rule six surfaces agree on belongs to the global. Pressable inputs, a
+  checkbox or a colour swatch, keep it: they have no caret and no border to speak with.
 - Design tokens live in `apps/editor/src/styles/tokens.css`. Light is the default because artwork
   has to be judged against a neutral surround. Which of the two is on **follows the
   operating system**, through `color-scheme: light dark` on `:root` and `light-dark()` on
@@ -957,6 +963,22 @@ The transcript follows the newest message only while it is the one being read. P
 unconditionally meant it could not be scrolled back during a turn, since every arriving step
 dragged it down again, which is exactly when there is most to read. A `ResizeObserver` keeps
 that promise across a resize, which changes the list's height without firing a scroll event.
+
+**A question card is reached with `?ask`, on the rule `?stress` already follows.** The card
+says the question above it and holds only the options, a mark on the right of each row, the
+free text row and Submit, which every question confirms with, single selection included: a
+click that answered outright would be the one control here with no way back from a slip, and
+it would drop whatever had been typed in the free text row. **A single selection carries
+exactly one mark, and the free text row is one of the things it can be on**, so picking an
+option clears what was typed and typing clears what was picked; a multiple selection has no
+such rule, the typed answer being another of the several. The settled card is the same rows
+with the marks filled and nothing to press, rather than a second vocabulary of chips, so what
+was chosen is read back where it was chosen and what was not is still there to be read. Two of
+its three states, answered and ended-without-answering, cannot be reached deliberately at all
+and the third needs a live turn that happens to ask, so `agent/askPreview.ts` seeds all three
+(`?ask=multi` for a multiple selection). It switches off the transcript autosave and the
+socket with it, the first so a throwaway conversation never lands on a real one, the second
+because connecting would set a status over the one a seeded card needs.
 
 ## Rotation, and the one rule it added
 

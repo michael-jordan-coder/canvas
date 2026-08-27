@@ -43,6 +43,24 @@ textarea {
 }
 
 /*
+ * Except on a text field, which never wants one. A ring says "this is where the keyboard is
+ * pointing", and a field with a caret blinking in it has already said that, in the one place
+ * the eye is looking; the ring lands a second time around a box whose own border is what the
+ * field's hover and focus states are drawn on, so it reads as a stray rectangle rather than as
+ * information. Every text field in the app had reached that conclusion on its own and turned it
+ * off locally, in six copies of this declaration, and a rule six surfaces agree on is the
+ * global's job rather than each one's.
+ *
+ * The exceptions are pressable inputs. A checkbox, a radio, a colour swatch or a slider has no
+ * caret and no border of its own to speak with, so the ring is the whole of what says the
+ * keyboard is on it.
+ */
+input:not([type='checkbox'], [type='radio'], [type='color'], [type='range']):focus-visible,
+textarea:focus-visible {
+  outline: none;
+}
+
+/*
  * A label scrub holds the resize cursor however far the pointer strays from the label,
  * the way the canvas holds its pan cursor. The attribute is set by NumberField for the
  * life of the gesture; without this, every element the sweep crosses would flash its own

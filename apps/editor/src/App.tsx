@@ -1,5 +1,6 @@
 import { useEffect, type ReactElement } from 'react'
 import type { NodeId } from '@canvas/document'
+import { askPreviewFromLocation, seedAskPreview } from './agent/askPreview'
 import { createAgentConnection } from './agent/connection'
 import { CanvasHost } from './canvas/CanvasHost'
 import { createClipboardInput } from './input/clipboardInput'
@@ -19,8 +20,10 @@ import { RightPanel } from './ui/RightPanel'
 import { Toolbar } from './ui/Toolbar'
 import styles from './App.module.css'
 
-/** Read once: it comes from the URL and cannot change without a reload. */
+/** Read once: they come from the URL and cannot change without a reload. */
 const showStats = showStatsFromLocation()
+const askPreview = askPreviewFromLocation()
+if (askPreview) seedAskPreview(askPreview)
 
 // The loaded document's code nodes run once at startup. Here rather than in `state/scene`,
 // because the scene module runs its load at import time and the code door imports the scene:
@@ -38,8 +41,10 @@ export function App(): ReactElement {
     }
     const disposeKeyboard = createKeyboardInput(wiring)
     const disposeClipboard = createClipboardInput(wiring)
-    const disposeAgent = createAgentConnection()
-    const disposeTranscript = startTranscriptAutosave()
+    // Neither runs in ask preview: the socket would set a status over the one the seeded
+    // cards need, and the autosave would put a throwaway conversation on top of a real one.
+    const disposeAgent = askPreview ? () => {} : createAgentConnection()
+    const disposeTranscript = askPreview ? () => {} : startTranscriptAutosave()
     const disposePanelFollow = startPanelFollow()
     return () => {
       disposeKeyboard()

@@ -8,12 +8,19 @@ import {
   type ReactElement,
   type SyntheticEvent,
 } from 'react'
+import { askPreviewFromLocation } from '../agent/askPreview'
 import { agentClient } from '../agent/connection'
 import { isConnected, isWorking, useAgent, type ChatItem } from '../agent/agentStore'
 import { failureCount, isNearBottom, showsPendingWork, stepsLabel, toRows } from '../agent/chatRows'
 import { isAssistantShortcut } from '../input/assistantShortcut'
 import { CheckIcon, ChevronIcon, SendIcon, StopIcon } from './icons'
 import styles from './AgentPanel.module.css'
+
+/**
+ * Read once, from the URL. In `?ask` preview the seeded question is live without a turn to be
+ * busy in, since the whole point is to reach a card no conversation is producing.
+ */
+const askPreview = askPreviewFromLocation()
 
 /**
  * The chat with the design agent, as one of the two things the right panel can be showing.
@@ -110,9 +117,20 @@ function Item({ item }: { item: ChatItem }): ReactElement {
  * a settled un-actionable record otherwise: the turn ended before it was answered, or it came
  * back from a past session with no live turn to answer to.
  *
- * Single-select options answer on click, the fastest path when the choice is the whole point.
- * Multi-select toggles and confirms with Submit, since a set is not finished until it is said
- * to be. Both offer a free-text row, so the person is never boxed in by the options.
+ * The question is said above the card, in the transcript's own voice, and the card below it
+ * holds only what there is to do about it. That split is the point: the sentence is something
+ * the assistant said, and belongs with everything else it has said, while the card is a control
+ * and reads as one. A row is its label and a mark on the right, on a single surface, so a list
+ * of options is a list rather than a stack of buttons.
+ *
+ * Every question confirms with Submit, single select included. A click that answered outright
+ * would be the one control in the app with no way back from a slip, and the free text row makes
+ * it worse: typing there and then clicking an option would send the click and drop the words.
+ * One Submit takes both, and Enter in the field is the same commit for the same reason.
+ *
+ * The record is the same card with the marks filled and nothing to press, rather than a second
+ * vocabulary of chips. What was chosen is read back in the place it was chosen, and what was
+ * not is still there to be read, which is most of what makes a past question worth showing.
  */
 function Question({ item, pending }: { item: ChatItem; pending: boolean }): ReactElement | null {
   const [chosen, setChosen] = useState<readonly string[]>([])
@@ -121,127 +139,121 @@ function Question({ item, pending }: { item: ChatItem; pending: boolean }): Reac
   const question = item.question
   if (!question) return null
 
-  // A record: answered, or no longer answerable. Either way, no controls.
-  if (item.answer !== undefined || !pending || item.askId === undefined) {
-    const answer = item.answer
-    return (
-      <div className={styles.question}>
-        <div className={styles.questionHead}>
-          <span className={styles.questionChip}>{question.header}</span>
-          <p className={styles.questionText}>{question.question}</p>
-        </div>
-        {answer ? (
-          <div className={styles.answerChips}>
-            {answer.selected.map((label) => (
-              <span key={label} className={styles.answerChip}>
-                <CheckIcon size={11} />
-                {label}
-              </span>
-            ))}
-            {answer.other && (
-              <span className={styles.answerChip}>
-                <CheckIcon size={11} />
-                {answer.other}
-              </span>
-            )}
-          </div>
-        ) : (
-          <p className={styles.questionUnanswered}>No answer</p>
-        )}
-      </div>
-    )
-  }
-
+  const answer = item.answer
   const askId = item.askId
+  // Answerable only while it is the pending question of a live turn and has no answer yet.
+  const live = answer === undefined && pending && askId !== undefined
   const multi = question.multiSelect
   const trimmedOther = other.trim()
 
-  const toggle = (label: string): void => {
+  // A single selection is one answer, and the free text row is one of the things it can be, so
+  // picking an option clears what was typed and typing clears what was picked. Without that a
+  // card that says "pick one" can carry two marks, which is the question answered twice.
+  // A multiple selection has no such rule: the typed answer is another of the several.
+  const choose = (label: string): void => {
+    if (!multi) {
+      setChosen([label])
+      setOther('')
+      return
+    }
     setChosen((current) =>
       current.includes(label) ? current.filter((value) => value !== label) : [...current, label],
     )
   }
 
-  const submitOther = (): void => {
-    if (!trimmedOther) return
-    agentClient.answer(askId, { selected: [], other: trimmedOther })
+  const write = (value: string): void => {
+    setOther(value)
+    if (!multi && value !== '') setChosen([])
   }
 
-  const submitMulti = (): void => {
+  const submit = (): void => {
+    if (askId === undefined) return
     const selected = [...chosen]
     if (selected.length === 0 && !trimmedOther) return
     agentClient.answer(askId, trimmedOther ? { selected, other: trimmedOther } : { selected })
   }
 
+  // What each row's mark says. Live, it is what the person has picked so far; settled, it is
+  // what they picked at the time. An unanswered record marks nothing.
+  const marked = (label: string): boolean =>
+    live ? chosen.includes(label) : (answer?.selected.includes(label) ?? false)
+
   return (
     <div className={styles.question}>
-      <div className={styles.questionHead}>
-        <span className={styles.questionChip}>{question.header}</span>
-        <p className={styles.questionText}>{question.question}</p>
-      </div>
-      <div className={styles.options}>
+      <p className={styles.questionText}>{question.question}</p>
+      <div className={styles.card}>
         {question.options.map((option) => {
-          const active = multi && chosen.includes(option.label)
-          return (
+          const active = marked(option.label)
+          const content = (
+            <>
+              <span className={styles.optionLabel}>{option.label}</span>
+              <span className={styles.mark}>{active && <CheckIcon size={11} />}</span>
+            </>
+          )
+          return live ? (
             <button
               key={option.label}
               type="button"
+              role={multi ? 'checkbox' : 'radio'}
+              aria-checked={active}
               className={styles.option}
               data-active={active}
-              onClick={() =>
-                multi ? toggle(option.label) : agentClient.answer(askId, { selected: [option.label] })
-              }
+              onClick={() => choose(option.label)}
             >
-              {multi && (
-                <span className={styles.optionCheck}>{active && <CheckIcon size={12} />}</span>
-              )}
-              <span className={styles.optionText}>
-                <span className={styles.optionLabel}>{option.label}</span>
-                {option.description && (
-                  <span className={styles.optionDesc}>{option.description}</span>
-                )}
-              </span>
+              {content}
             </button>
+          ) : (
+            <div key={option.label} className={styles.option} data-active={active} data-record>
+              {content}
+            </div>
           )
         })}
-        <div className={styles.otherRow}>
-          <input
-            className={styles.otherInput}
-            value={other}
-            placeholder="Something else"
-            aria-label="Other answer"
-            onChange={(event) => setOther(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault()
-                if (multi) submitMulti()
-                else submitOther()
-              }
-            }}
-          />
-          {!multi && (
-            <button
-              type="button"
-              className={styles.otherSend}
-              aria-label="Send"
-              disabled={trimmedOther === ''}
-              onClick={submitOther}
-            >
-              <SendIcon />
-            </button>
-          )}
-        </div>
+        {live ? (
+          // Marked like an option when it is one: in a single selection what is typed here is
+          // the answer, and the card has to say so where it says it of every other row.
+          <div className={styles.option} data-active={!multi && trimmedOther !== ''}>
+            <input
+              className={styles.otherInput}
+              value={other}
+              placeholder="Something else..."
+              aria-label="Other answer"
+              onChange={(event) => write(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  submit()
+                }
+              }}
+            />
+            {!multi && (
+              <span className={styles.mark}>{trimmedOther !== '' && <CheckIcon size={11} />}</span>
+            )}
+          </div>
+        ) : (
+          // The typed answer, shown as a row of its own so a settled card reads back everything
+          // that was said. The empty field it was typed into is an affordance and does not
+          // survive into the record.
+          answer?.other && (
+            <div className={styles.option} data-active data-record>
+              <span className={styles.optionLabel}>{answer.other}</span>
+              <span className={styles.mark}>
+                <CheckIcon size={11} />
+              </span>
+            </div>
+          )
+        )}
+        {live && (
+          <button
+            type="button"
+            className={styles.submit}
+            disabled={chosen.length === 0 && trimmedOther === ''}
+            onClick={submit}
+          >
+            Submit
+          </button>
+        )}
       </div>
-      {multi && (
-        <button
-          type="button"
-          className={styles.submit}
-          disabled={chosen.length === 0 && trimmedOther === ''}
-          onClick={submitMulti}
-        >
-          Submit
-        </button>
-      )}
+      {!live && answer === undefined && <p className={styles.questionUnanswered}>No answer</p>}
     </div>
   )
 }
@@ -556,7 +568,7 @@ export function AssistantBody(): ReactElement {
                 // Not while stopping: the turn is being torn down, and the server has already
                 // let go of the question, so an answer would land nowhere.
                 pending={
-                  status === 'busy' &&
+                  (askPreview !== null || status === 'busy') &&
                   row.item.askId !== undefined &&
                   pendingAsk === row.item.askId
                 }
