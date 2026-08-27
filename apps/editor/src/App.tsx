@@ -50,16 +50,18 @@ export function App(): ReactElement {
 
   return (
     <div className={styles.app}>
+      <LayersPanel />
+      <main className={styles.viewport}>
+        <CanvasHost />
+        <AgentPanel />
+        {showStats && <PerfReadout />}
+      </main>
+      <PropertiesPanel />
+      {/* A sibling of the columns rather than a child of one. It is `position: fixed`, so it
+          belongs to the window and takes no grid track; nesting it in the viewport would say
+          it belongs to the canvas column, and would hand its containing block to anything
+          that ever puts a transform or a filter on that column. */}
       <Toolbar />
-      <div className={styles.body}>
-        <LayersPanel />
-        <main className={styles.viewport}>
-          <CanvasHost />
-          <AgentPanel />
-          {showStats && <PerfReadout />}
-        </main>
-        <PropertiesPanel />
-      </div>
     </div>
   )
 }

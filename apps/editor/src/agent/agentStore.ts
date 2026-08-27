@@ -32,9 +32,9 @@ export type AgentStatus =
  * The two questions the union is actually asked, beside the union itself, the way
  * `clipsChildren` sits beside the node kinds it answers for.
  *
- * Every affordance in the panel wants one of these rather than the status itself: the
+ * Every affordance the assistant has wants one of these rather than the status itself: the
  * composer and the send button want `isConnected`, the stop button, the status dot, the
- * live steps chip and the opener's badge want `isWorking`. Spelled out at the call site
+ * live steps chip and the tool bar's assistant button want `isWorking`. Spelled out at the call site
  * they are a disjunction to keep in step across two files, and this union has already grown
  * twice, from three values to six.
  */

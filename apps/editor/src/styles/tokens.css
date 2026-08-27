@@ -1,7 +1,17 @@
 /*
- * Light is the default because a design tool has to show artwork at its real value, and a
+ * Light is written first because a design tool has to show artwork at its real value, and a
  * dark surround makes everything drawn on it read brighter than it is. Dark is here for
- * long sessions, switched with data-theme="dark" on <html>.
+ * long sessions.
+ *
+ * Which of the two is on follows the operating system, and it does so through
+ * `color-scheme` and `light-dark()` rather than through a second copy of the palette under
+ * a media query or a script that writes an attribute. One declaration holds both values of
+ * a token, so the two can never drift, and the style engine resolves it before the first
+ * paint: a script would have to wait for the bundle, which is a frame of light chrome on a
+ * dark desktop. `data-theme` on <html> stays the override door, and it works by setting
+ * `color-scheme` alone: every token below follows from that one line, so a manual toggle
+ * later has nothing else to write. Tokens that are the same in both themes are plain values,
+ * which is what makes it obvious at a glance which ones the theme actually changes.
  *
  * Greys are true neutral (equal channels) on purpose. That is what leaves the accent as the
  * only chromatic thing on screen, so color always means selected, active or focused.
@@ -12,30 +22,31 @@
  * the accent for what the eye lands on first.
  */
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
 
-  --panel: #ffffff;
-  --panel-sunken: #f5f5f5;
+  --panel: light-dark(#ffffff, #1c1c1c);
+  --panel-sunken: light-dark(#f5f5f5, #141414);
   /* Fields sit a step below the panel, so an editable slot reads as a slot before it is
      hovered. Light keeps the panel white and sinks the field; dark raises it instead. */
-  --field: #f0f0f0;
+  --field: light-dark(#f0f0f0, #262626);
 
-  --line: #e2e2e2;
-  --line-strong: #c7c7c7;
+  --line: light-dark(#e2e2e2, #303030);
+  --line-strong: light-dark(#c7c7c7, #454545);
 
-  --text: #1a1a1a;
-  --text-secondary: #757575;
-  --text-disabled: #adadad;
+  --text: light-dark(#1a1a1a, #f0f0f0);
+  --text-secondary: light-dark(#757575, #9e9e9e);
+  --text-disabled: light-dark(#adadad, #6b6b6b);
 
-  --hover: rgb(0 0 0 / 0.05);
-  --pressed: rgb(0 0 0 / 0.09);
+  --hover: light-dark(rgb(0 0 0 / 0.05), rgb(255 255 255 / 0.06));
+  --pressed: light-dark(rgb(0 0 0 / 0.09), rgb(255 255 255 / 0.11));
 
-  --accent: #0a7cff;
-  --accent-hover: #0069e0;
-  --on-accent: #ffffff;
-  --accent-subtle: rgb(10 124 255 / 0.12);
+  --accent: light-dark(#0a7cff, #3b9dff);
+  --accent-hover: light-dark(#0069e0, #5aacff);
+  --on-accent: light-dark(#ffffff, #08121c);
+  --accent-subtle: light-dark(rgb(10 124 255 / 0.12), rgb(59 157 255 / 0.18));
 
-  --danger: #d0342c;
+  /* Lifted on dark the way the accent is: the same red on a dark panel reads almost brown. */
+  --danger: light-dark(#d0342c, #ff6b60);
 
   /* The surround the artwork sits on. Mid grey in both themes so a fill is judged against
      a constant, not against the chrome. */
@@ -54,7 +65,6 @@
   --space-4: 12px;
   --space-5: 16px;
 
-  --toolbar-height: 40px;
   --panel-width: 240px;
   --row-height: 24px;
 
@@ -66,44 +76,29 @@
   --radius-md: 8px;
   --radius-lg: 12px;
 
-  /* The one shadow in the app, and it says one thing: this surface floats over the canvas
-     rather than being docked to it. Docked chrome meets the canvas along a hairline and gets
-     no shadow, so an elevation here always means the same thing it does in Figma. Two
-     layers: a wide soft one for the lift, a tight one for the contact edge. */
-  --shadow-card: 0 12px 32px rgb(0 0 0 / 0.1), 0 2px 6px rgb(0 0 0 / 0.06);
+  /* The only shadow in the app, and it says one thing: this surface floats over the canvas
+     rather than being docked to it. Two surfaces wear it, the assistant's card and the tool
+     bar, and they are exactly the two that sit on top of the artwork. Docked chrome meets
+     the canvas along a hairline and gets no shadow, so an elevation here always means the
+     same thing it does in Figma. Two layers: a wide soft one for the lift, a tight one for
+     the contact edge, both deeper and tighter on dark: there a soft light shadow reads as
+     fog, and what separates the card from the canvas is the darkness directly under it. */
+  --shadow-card:
+    0 12px 32px light-dark(rgb(0 0 0 / 0.1), rgb(0 0 0 / 0.44)),
+    0 2px 6px light-dark(rgb(0 0 0 / 0.06), rgb(0 0 0 / 0.32));
 
   --duration: 90ms;
   --ease: cubic-bezier(0.2, 0, 0, 1);
 }
 
-[data-theme='dark'] {
+/* The override door. Setting `color-scheme` is the whole of it: every `light-dark()` above
+   reads it, so one declaration per theme moves the entire palette. */
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
   color-scheme: dark;
-
-  --panel: #1c1c1c;
-  --panel-sunken: #141414;
-  --field: #262626;
-
-  --line: #303030;
-  --line-strong: #454545;
-
-  --text: #f0f0f0;
-  --text-secondary: #9e9e9e;
-  --text-disabled: #6b6b6b;
-
-  --hover: rgb(255 255 255 / 0.06);
-  --pressed: rgb(255 255 255 / 0.11);
-
-  --accent: #3b9dff;
-  --accent-hover: #5aacff;
-  --on-accent: #08121c;
-  --accent-subtle: rgb(59 157 255 / 0.18);
-
-  /* Lifted the way the accent is: the same red on a dark panel reads almost brown. */
-  --danger: #ff6b60;
-
-  /* Deeper and tighter: on a dark surround a soft light shadow reads as fog, and what
-     separates the card from the canvas is the darkness directly under it. */
-  --shadow-card: 0 12px 32px rgb(0 0 0 / 0.44), 0 2px 6px rgb(0 0 0 / 0.32);
 }
 
 @media (prefers-reduced-motion: reduce) {

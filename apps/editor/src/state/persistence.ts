@@ -13,11 +13,11 @@ const QUARANTINE_KEY = 'figma-canvas:document.unreadable'
 /** Long enough that a drag writes once at the end, short enough to survive a tab close. */
 const AUTOSAVE_DELAY = 600
 
-export function toJSON(document: SceneDocument): string {
+function toJSON(document: SceneDocument): string {
   return JSON.stringify(serializeDocument(document))
 }
 
-export function fromJSON(text: string): SerializedDocument {
+function fromJSON(text: string): SerializedDocument {
   return parseDocument(JSON.parse(text) as unknown)
 }
 

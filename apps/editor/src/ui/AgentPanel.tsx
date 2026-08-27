@@ -13,7 +13,6 @@ import { failureCount, isNearBottom, showsPendingWork, stepsLabel, toRows } from
 import { isAssistantShortcut } from '../input/assistantShortcut'
 import { CornerGrip } from './CornerGrip'
 import {
-  AssistantIcon,
   CheckIcon,
   ChevronIcon,
   CloseIcon,
@@ -575,31 +574,14 @@ function Card(): ReactElement {
 }
 
 /**
- * The assistant, which is a button until it is a card.
+ * The assistant, which is nothing at all until it is a card.
  *
- * This reads `open` and `status` and nothing else, so a turn running behind a closed card
- * costs one render of one button per status change rather than a render of the transcript
- * per step.
+ * It used to be its own floating button in the viewport's corner while closed. That button
+ * is in the tool bar now, so this reads `open` and nothing else: a turn running behind a
+ * closed card costs no render here, and the status the corner used to show is shown by the
+ * button that opens it.
  */
-export function AgentPanel(): ReactElement {
+export function AgentPanel(): ReactElement | null {
   const open = useAgent((state) => state.open)
-  const setOpen = useAgent((state) => state.setOpen)
-  const status = useAgent((state) => state.status)
-
-  if (!open) {
-    return (
-      <button
-        type="button"
-        className={styles.opener}
-        aria-label="Assistant"
-        title="Assistant"
-        data-busy={isWorking(status)}
-        onClick={() => setOpen(true)}
-      >
-        <AssistantIcon size={18} />
-      </button>
-    )
-  }
-
-  return <Card />
+  return open ? <Card /> : null
 }

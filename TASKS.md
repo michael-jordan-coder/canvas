@@ -38,7 +38,7 @@ Layers panel (`ui`)
 - [x] Enter/F2 triggers rename on a focused row. `apps/editor/src/ui/LayersPanel.tsx`
 
 Accessibility (`ui`)
-- [x] aria-live on the FileActions import error. `apps/editor/src/ui/FileActions.tsx`
+- [x] aria-live on the FileActions import error. (FileActions was later removed with import and export.)
 
 ## Panel polish pass
 

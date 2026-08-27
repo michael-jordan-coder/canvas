@@ -1,8 +1,10 @@
 import type { ComponentType, ReactElement } from 'react'
+import { isWorking, useAgent } from '../agent/agentStore'
 import { useUI, type ToolId } from '../state/uiStore'
 import { insertCodeNode } from '../state/code'
 import { selectTool } from '../state/textEditing'
 import {
+  AssistantIcon,
   CodeIcon,
   EllipseIcon,
   FrameIcon,
@@ -12,8 +14,10 @@ import {
   TextIcon,
   type IconProps,
 } from './icons'
-import { FileActions } from './FileActions'
 import styles from './Toolbar.module.css'
+
+/** One size for every icon in the bar, so a button added later cannot arrive at 16. */
+const ICON_SIZE = 20
 
 const TOOLS: ReadonlyArray<{ id: ToolId; label: string; Icon: ComponentType<IconProps> }> = [
   { id: 'move', label: 'Move', Icon: MoveIcon },
@@ -23,6 +27,41 @@ const TOOLS: ReadonlyArray<{ id: ToolId; label: string; Icon: ComponentType<Icon
   { id: 'text', label: 'Text', Icon: TextIcon },
   { id: 'hand', label: 'Hand', Icon: HandIcon },
 ]
+
+/**
+ * The assistant's opener, and a component rather than a seventh entry in the list above
+ * because it is the only thing in the bar that follows the agent's status: the bar has no
+ * business re-rendering its tools every time a turn starts or ends.
+ *
+ * It is a toggle rather than an opener, now that it is always on screen. Open takes the
+ * accent fill an active tool takes; a turn running behind a closed card takes the accent as
+ * a colour instead, which is what the floating opener used to say from the corner.
+ */
+function AssistantButton(): ReactElement {
+  const open = useAgent((state) => state.open)
+  // The boolean rather than the status it comes from: zustand compares what the selector
+  // returns, so six statuses collapse to the two the button can actually draw, and the
+  // reconnect backoff cycling offline and connecting re-renders nothing.
+  const busy = useAgent((state) => isWorking(state.status))
+  const setOpen = useAgent((state) => state.setOpen)
+  const openForInput = useAgent((state) => state.openForInput)
+
+  return (
+    <button
+      type="button"
+      className={styles.tool}
+      aria-label="Assistant"
+      title="Assistant"
+      aria-pressed={open}
+      data-busy={busy}
+      // Opening puts the caret in the composer, exactly as the shortcut does: a card opened
+      // to be typed into and then clicked into is two gestures for one intention.
+      onClick={() => (open ? setOpen(false) : openForInput())}
+    >
+      <AssistantIcon size={ICON_SIZE} />
+    </button>
+  )
+}
 
 export function Toolbar(): ReactElement {
   const tool = useUI((state) => state.tool)
@@ -38,7 +77,7 @@ export function Toolbar(): ReactElement {
           aria-pressed={tool === id}
           onClick={() => selectTool(id)}
         >
-          <Icon />
+          <Icon size={ICON_SIZE} />
         </button>
       ))}
       {/*
@@ -51,9 +90,12 @@ export function Toolbar(): ReactElement {
         aria-label="Insert code node"
         onClick={insertCodeNode}
       >
-        <CodeIcon />
+        <CodeIcon size={ICON_SIZE} />
       </button>
-      <FileActions />
+      {/* Not a tool: it opens a surface rather than changing what the pointer does, so it
+          sits behind a hairline rather than in the run of them. */}
+      <span className={styles.divider} />
+      <AssistantButton />
     </div>
   )
 }

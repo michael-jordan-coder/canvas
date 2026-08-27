@@ -1,8 +1,9 @@
 /*
  * The assistant, as a card that floats over the canvas.
  *
- * Everything else in this editor is docked chrome: panels that meet the canvas along a
- * hairline, at 11 and 12 pixels, packed tight because they are dense controls. A
+ * The panels in this editor are docked chrome: they meet the canvas along a hairline, at 11
+ * and 12 pixels, packed tight because they are dense controls. The tool bar is the only
+ * other thing that floats over the canvas, and it is chrome that happens to hover. A
  * conversation is the opposite kind of surface. It is read rather than operated, it sits on
  * top of artwork rather than beside it, and at the density of the properties panel it reads
  * as a log rather than as something someone said. So this file breaks with the panels on
@@ -11,42 +12,9 @@
  * of a hairline. Colour, radii and motion stay exactly the app's.
  */
 
-/* The card and the opener share the corner, so opening reads as the button becoming the
-   panel rather than as something new arriving. */
-.opener,
-.panel {
-  position: absolute;
-  right: var(--space-4);
-  bottom: var(--space-4);
-}
-
-.opener {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
-  color: var(--text-secondary);
-  transition:
-    color var(--duration) var(--ease),
-    background var(--duration) var(--ease),
-    translate var(--duration) var(--ease);
-}
-
-.opener:hover {
-  color: var(--text);
-  background: var(--hover);
-  /* A pixel of lift, which is the only affordance a round button has room for. */
-  translate: 0 -1px;
-}
-
 /* The ring itself is `base.css`'s, for every focusable thing in the app. Only the offset
    changes: these are round or nearly round, and an inset outline cuts across the shape
    rather than tracing it. */
-.opener:focus-visible,
 .iconButton:focus-visible,
 .retry:focus-visible,
 .jump:focus-visible,
@@ -55,12 +23,12 @@
   outline-offset: 1px;
 }
 
-/* Working while closed: the accent is the one colour that means active. */
-.opener[data-busy='true'] {
-  color: var(--accent);
-}
-
+/* The card sits in the corner of the viewport it edits. What opens it is a button in the
+   tool bar, so nothing in this file is on screen while it is closed. */
 .panel {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-4);
   display: flex;
   flex-direction: column;
   /* Written by the corner grip onto the root, so a resized card is the right size in its
@@ -75,8 +43,8 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
-  /* Out of the corner it sits in, so the card grows from the button it replaced. Reduced
-     motion zeroes --duration, which ends the animation before it can be seen. */
+  /* Out of the corner it is anchored to, so the card arrives from the edge rather than
+     from nowhere. Reduced motion zeroes --duration, which ends it before it can be seen. */
   transform-origin: 100% 100%;
   animation: cardIn var(--duration) var(--ease);
 }

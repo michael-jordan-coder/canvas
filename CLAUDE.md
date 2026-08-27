@@ -213,7 +213,16 @@ and silently land on each other's ports. This one stays out of that fight.
 - CSS Modules. Never inline CSS in a component. A dynamic color goes on an SVG presentation
   attribute (see the fill swatch in `PropertiesPanel`), not on a `style` prop.
 - Design tokens live in `apps/editor/src/styles/tokens.css`. Light is the default because artwork
-  has to be judged against a neutral surround. Dark is `data-theme="dark"` on `<html>`. Greys are
+  has to be judged against a neutral surround. Which of the two is on **follows the
+  operating system**, through `color-scheme: light dark` on `:root` and `light-dark()` on
+  every token the theme changes. That is one declaration holding both values rather than a
+  second copy of the palette under a media query, so the two cannot drift, and it is
+  resolved by the style engine before the first paint: a script writing the attribute has to
+  wait for the bundle, which is a frame of light chrome on a dark desktop. `data-theme` on
+  `<html>` is still the override door, and it works by setting `color-scheme` alone, so a
+  manual toggle has one line to write and the palette follows. A token that is the same in
+  both themes stays a plain value, which is what makes it legible at a glance which ones the
+  theme actually moves. Greys are
   true neutral so the one accent always means something: selected, active, focused. `--danger` is
   the single exception to that, for text and hairlines only and never a fill: a failure has to be
   legible before it is read, and desaturated it looked like a caption.
@@ -231,7 +240,15 @@ Built:
 - The camera: pan and zoom math, screen to world, zoom around a point, fit to rect. All of it is
   pure and testable without a GPU.
 - The `Renderer` interface the app is written against.
-- The editor shell: toolbar, layers tree, properties panel. The property fields edit the document
+- The editor shell: layers tree, properties panel, and the tool bar, which floats bottom
+  centred over the canvas the way Figma's does rather than taking a row above it. It is
+  `position: fixed`, so it holds one place on the window: dragging a side panel resizes the
+  canvas on every pointer move, and a bar centred on that column would slide under the hand
+  for the whole gesture. It is the second surface allowed `--shadow-card`. Its
+  buttons and icons are a step larger than the panels' controls, since a floating bar is
+  aimed at rather than scanned. It holds the tools, the code node insert and, behind a
+  hairline, the assistant's opener; import and export were removed with it, so a file gets in
+  and out of the editor by the autosave alone for now. The property fields edit the document
   for real, which is how the store and the hooks are verified without any rendering.
 - `CanvasHost`, which owns the canvas element, the device lifecycle and the draw schedule,
   including the `devicePixelRatio` change that fires no resize event when a window moves
@@ -829,14 +846,14 @@ in a text field back to the field. Focus travels as a token rather than a flag, 
 same shortcut pressed twice has to focus twice and `open` will not have changed the second
 time.
 
-**The card is the one surface in this app that is not docked chrome, and it is designed as
-one.** Every panel here meets the canvas along a hairline at 11 and 12 pixels, packed tight
+**The card is not docked chrome, and it is designed as one of the two surfaces that are
+not.** Every panel here meets the canvas along a hairline at 11 and 12 pixels, packed tight
 because it is dense controls; a conversation is read rather than operated, and at that
 density it looked like a log rather than like something someone said. The assistant breaks
 with the panels on exactly three counts: a 13px body with a reading line height, padding of
-12 and 16 rather than 4 and 8, and `--shadow-card` instead of a hairline, which is the one
-shadow in the app and means only ever "this floats over the canvas". Colour, radii and
-motion stay the app's own. The person's words are the single bubble, in `--field` rather
+12 and 16 rather than 4 and 8, and `--shadow-card` instead of a hairline, the app's one
+shadow, shared only with the floating tool bar, and meaning only ever "this floats over the
+canvas". Colour, radii and motion stay the app's own. The person's words are the single bubble, in `--field` rather
 than the sunken grey because on the dark theme the sunken tone is darker than the card and
 reads as a hole cut in it. A run of steps is a chip rather than a line of grey text, since
 it is the machine's record and has to be openable without being read first, and the pip on
@@ -872,8 +889,12 @@ TypeScript owns. Nothing is written until a gesture has actually set a size, so 
 that never moved leaves the stored one alone, which is the slop rule in a smaller place.
 
 **The transcript is the expensive thing to draw, so nothing that changes on its own
-schedule sits above it.** `AgentPanel` reads `open` and `status` and nothing else, and is a
-button until it is a card; `Card` mounts on open and owns the rows; `Composer` and
+schedule sits above it.** `AgentPanel` reads `open` and nothing else and renders nothing
+until it is a card, the opener having moved into the tool bar, where it is the one control
+that follows the agent's status and so a component of its own rather than a seventh button:
+the bar must not re-render its tools every time a turn starts. It is a toggle now that it is
+always on screen, opening with the caret in the composer the way the shortcut does. `Card`
+mounts on open and owns the rows; `Composer` and
 `ConnectionStrip` are below it. Each boundary is one subscription that used to re-render
 every row of the conversation: the draft on every keystroke, the reconnect countdown once a
 second, and the whole transcript rebuilt behind a **closed** card for every step of a
@@ -962,5 +983,8 @@ A few things are worth knowing because the code looks finished but is not:
   nothing and neither does this, but the result is not what the handles imply.
 - A resize cannot flip a node through its anchor. `scaleFactors` clamps positive, because a
   negative scale needs the SDF and hit testing to agree on what an inside out shape is.
-- The accent colour is hardcoded in `OverlayInstances` because the renderer has no access to CSS.
-  It needs passing in when the theme toggle exists, since dark uses a lighter blue.
+- The accent colour is hardcoded in `OverlayInstances` because the renderer has no access to CSS,
+  and the theme now follows the system, so on dark it is the light theme's blue rather than the
+  lighter one the chrome switches to. It reads as an inconsistency rather than as a bug because
+  `--backdrop` is deliberately the same mid grey in both themes, so the overlay is drawn against
+  a constant either way. Passing the accent in through `ViewState` is still the fix.
