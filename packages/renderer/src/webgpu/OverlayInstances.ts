@@ -36,7 +36,10 @@ const BYTES_PER_INSTANCE = FLOATS_PER_INSTANCE * 4
 
 /**
  * Mirrors --accent in the editor's tokens. Hardcoded because the renderer has no access to
- * CSS. It will need passing in when the theme toggle exists, since dark uses a lighter blue.
+ * CSS, and it is the light theme's blue in both themes: the theme follows the system now, so
+ * the divergence on dark is live rather than pending. It reads as an inconsistency rather than
+ * as a bug because --backdrop is deliberately the same mid grey either way, so the overlay is
+ * drawn against a constant. Passing the accent in through `ViewState` is still the fix.
  */
 const ACCENT = { r: 10 / 255, g: 124 / 255, b: 1, a: 1 }
 /**
@@ -48,12 +51,12 @@ const CODE_ACCENT = { r: 34 / 255, g: 211 / 255, b: 116 / 255, a: 1 }
 const HANDLE_FILL = { r: 1, g: 1, b: 1, a: 1 }
 const TRANSPARENT = { r: 0, g: 0, b: 0, a: 0 }
 /** Faint enough to read what is underneath, which is the whole point of a rubber band. */
-const MARQUEE_FILL = { r: 10 / 255, g: 124 / 255, b: 1, a: 0.1 }
+const MARQUEE_FILL = { ...ACCENT, a: 0.1 }
 /**
  * The text selection highlight sits under the glyphs it covers, so it has to stay light
  * enough to read them through. Matching --accent-subtle in the editor's tokens.
  */
-const TEXT_SELECTION_FILL = { r: 10 / 255, g: 124 / 255, b: 1, a: 0.25 }
+const TEXT_SELECTION_FILL = { ...ACCENT, a: 0.25 }
 /**
  * Which accent a box is drawn in. Green only when every node in the box is a code node: a
  * mixed selection has no single story to tell, so it falls back to the ordinary one.

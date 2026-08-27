@@ -226,11 +226,19 @@
   }
 }
 
-.stepsToggle[data-live='true'] .pip {
+/*
+ * The state is on the pip rather than on each thing that holds one. A live run and the loading
+ * line both turn the star, and written as two selectors the declaration was stated twice and
+ * the reduced motion override that cancels it twice more: four places to keep one animation in
+ * step. The element that animates is the one that carries whether it should, so both the
+ * animation and its cancel are a single rule.
+ */
+.pip[data-live='true'] {
   color: var(--accent);
   animation: turn 1.4s var(--ease) infinite;
 }
 
+/* Wins on specificity, so a failed run stops the star wherever it is turning. */
 .stepsToggle[data-failed='true'] .pip {
   color: var(--danger);
   animation: none;
@@ -252,11 +260,6 @@
   padding: var(--space-2) 0;
   font-size: var(--text-sm);
   color: var(--text);
-}
-
-.working .pip {
-  color: var(--accent);
-  animation: turn 1.4s var(--ease) infinite;
 }
 
 /* Indented under the chip, with a rule standing in for the fold. */
@@ -348,22 +351,24 @@
  *
  * The chevron is in a fixed leading column rather than beside the label, on the layers tree's
  * pattern and for the same reason: a control that sits where the last word happened to end is
- * not in the same place twice, and how long a label runs is the model's business. The blank of
- * the same width keeps the column straight on the rows that have nothing to open.
+ * not in the same place twice, and how long a label runs is the model's business.
+ *
+ * The column is a grid track rather than a flex row with a blank element holding the gap open.
+ * Stated as a track it exists whether or not a row cooperates, so a row with nothing to
+ * disclose is a row that renders no chevron rather than one that has to remember a spacer, and
+ * a kind of row added later cannot be the one that comes out misaligned. That is the same
+ * claim the comment on `Question` makes about lengths and counts, applied to the layout that
+ * carries it: what holds is a relationship, not a value every caller repeats.
+ *
+ * No gap on the row: the select's own left padding is the space between the chevron and the
+ * label, and a second one on top of it pushed the text a third of the column away. 16 is the
+ * layers tree's width for the same control, and the arrow is drawn in the right half of its
+ * own box, so the gap that reads is about 13.
  */
 .row {
-  display: flex;
-  align-items: flex-start;
-}
-
-/* No gap on the row: the select's own left padding is the space between the chevron and the
-   label, and a second one on top of it pushed the text a third of the column away. 16 is the
-   layers tree's width for the same control, and the arrow is drawn in the right half of its
-   own box, so the gap that reads is about 13. */
-.chevron,
-.chevronBlank {
-  flex: none;
-  width: 16px;
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  align-items: start;
 }
 
 .chevron {
@@ -413,11 +418,13 @@
  * one part of the row that does something else.
  */
 .select {
+  /* Always the second track, so a row with no chevron leaves the column empty rather than
+     sliding the label into it. */
+  grid-column: 2;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-4);
-  flex: 1;
   min-width: 0;
   padding: var(--space-3);
   text-align: left;
@@ -644,23 +651,9 @@
   line-height: 1.5;
   background: none;
   border: none;
-  outline: none;
   color: var(--text);
   resize: none;
   field-sizing: content;
-}
-
-/*
- * The ring the rest of the app wears, off for this one field.
- *
- * `outline: none` above was already saying so and losing: `base.css`'s `:focus-visible` is a
- * single pseudo-class, exactly as specific as a class, so which of the two won came down to
- * which file the bundler happened to put last. Naming the state here makes it two selectors
- * against one and settles it. The reasoning is `.field`'s above: the caret is in the field,
- * blinking, and it is the only field on screen someone can be typing in.
- */
-.input:focus-visible {
-  outline: none;
 }
 
 .input::placeholder {
@@ -691,11 +684,12 @@
   color: var(--text-disabled);
 }
 
-/* Specific enough to win. `.pip` alone was not, so this had never stopped anything either,
-   which went unnoticed for as long as there was no animation for it to stop. */
+/* The same selector as the rule it cancels, so it cannot lose the specificity fight and cannot
+   fall out of step with a state that starts the animation somewhere else. `.pip` alone was
+   neither, and had stopped nothing, which went unnoticed for as long as there was no animation
+   for it to stop. */
 @media (prefers-reduced-motion: reduce) {
-  .stepsToggle[data-live='true'] .pip,
-  .working .pip {
+  .pip[data-live='true'] {
     animation: none;
   }
 }

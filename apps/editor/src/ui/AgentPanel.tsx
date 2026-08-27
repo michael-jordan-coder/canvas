@@ -8,19 +8,12 @@ import {
   type ReactElement,
   type SyntheticEvent,
 } from 'react'
-import { askPreviewFromLocation } from '../agent/askPreview'
 import { agentClient } from '../agent/connection'
 import { isConnected, isWorking, useAgent, type ChatItem } from '../agent/agentStore'
 import { failureCount, isNearBottom, showsPendingWork, stepsLabel, toRows } from '../agent/chatRows'
 import { isAssistantShortcut } from '../input/assistantShortcut'
 import { AssistantIcon, CheckIcon, ChevronIcon, CloseIcon, SendIcon, StopIcon } from './icons'
 import styles from './AgentPanel.module.css'
-
-/**
- * Read once, from the URL. In `?ask` preview the seeded question is live without a turn to be
- * busy in, since the whole point is to reach a card no conversation is producing.
- */
-const askPreview = askPreviewFromLocation()
 
 /**
  * The chat with the design agent, as one of the two things the right panel can be showing.
@@ -64,7 +57,7 @@ function Steps({ items, live }: { items: ChatItem[]; live: boolean }): ReactElem
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <span className={styles.pip}>
+        <span className={styles.pip} data-live={live}>
           <AssistantIcon size={11} />
         </span>
         {label}
@@ -102,7 +95,7 @@ function Steps({ items, live }: { items: ChatItem[]; live: boolean }): ReactElem
 function Working(): ReactElement {
   return (
     <div className={styles.working}>
-      <span className={styles.pip}>
+      <span className={styles.pip} data-live="true">
         <AssistantIcon size={11} />
       </span>
       Working
@@ -116,6 +109,15 @@ function Item({ item }: { item: ChatItem }): ReactElement {
       {item.text}
     </p>
   )
+}
+
+/**
+ * In or out of a list of labels. Both lists this card keeps, what is picked and what is open,
+ * are membership by label and toggle the same way, and written twice they were two places to
+ * change the day the key stops being the label.
+ */
+function toggle(list: readonly string[], label: string): readonly string[] {
+  return list.includes(label) ? list.filter((value) => value !== label) : [...list, label]
 }
 
 /**
@@ -143,8 +145,9 @@ function Item({ item }: { item: ChatItem }): ReactElement {
  * required where our protocol has it optional, so in practice every option arrives with a
  * sentence, and four of them open at the panel's 300px floor is twelve grey lines: a document
  * rather than a card. The chevron is what opens one, and it sits in a fixed leading column
- * exactly as the layers tree's fold does, with a blank of the same width on the rows that have
- * nothing to open. Beside the label it would land wherever the last word happened to end, and
+ * exactly as the layers tree's fold does: a grid track the row states once, so a row with
+ * nothing to disclose simply renders no chevron rather than having to remember a spacer of the
+ * same width. Beside the label it would land wherever the last word happened to end, and
  * where a label ends is the model's business rather than ours: everything in this card that
  * assumed a length or a count broke on the first sentence long enough to test it, and what
  * held was stated as a column, a gutter and a weight instead.
@@ -174,9 +177,7 @@ function Question({ item, pending }: { item: ChatItem; pending: boolean }): Reac
       setOther('')
       return
     }
-    setChosen((current) =>
-      current.includes(label) ? current.filter((value) => value !== label) : [...current, label],
-    )
+    setChosen((current) => toggle(current, label))
   }
 
   const write = (value: string): void => {
@@ -187,9 +188,7 @@ function Question({ item, pending }: { item: ChatItem; pending: boolean }): Reac
   // No rule of one open at a time: the descriptions exist to be compared, and comparing two of
   // them means having two of them on screen.
   const disclose = (label: string): void => {
-    setOpened((current) =>
-      current.includes(label) ? current.filter((value) => value !== label) : [...current, label],
-    )
+    setOpened((current) => toggle(current, label))
   }
 
   const submit = (): void => {
@@ -224,7 +223,7 @@ function Question({ item, pending }: { item: ChatItem; pending: boolean }): Reac
           )
           return (
             <div key={option.label} className={styles.row}>
-              {option.description ? (
+              {option.description && (
                 <button
                   type="button"
                   className={styles.chevron}
@@ -235,8 +234,6 @@ function Question({ item, pending }: { item: ChatItem; pending: boolean }): Reac
                 >
                   <ChevronIcon size={12} />
                 </button>
-              ) : (
-                <span className={styles.chevronBlank} aria-hidden="true" />
               )}
               {live ? (
                 <button
@@ -259,7 +256,6 @@ function Question({ item, pending }: { item: ChatItem; pending: boolean }): Reac
         })}
         {live ? (
           <div className={styles.row}>
-            <span className={styles.chevronBlank} aria-hidden="true" />
             {/* Marked like an option, because it is one: in a single selection what is typed
                 here is the answer, and in a multiple selection it is another of the several.
                 Either way the card says so where it says it of every other row. */}
@@ -288,7 +284,6 @@ function Question({ item, pending }: { item: ChatItem; pending: boolean }): Reac
           // does not survive into the record.
           answer?.other && (
             <div className={styles.row}>
-              <span className={styles.chevronBlank} aria-hidden="true" />
               <div className={styles.select} data-active data-record>
                 <span className={styles.text}>
                   <span className={styles.optionLabel}>{answer.other}</span>
@@ -626,9 +621,7 @@ export function AssistantBody(): ReactElement {
                 // Not while stopping: the turn is being torn down, and the server has already
                 // let go of the question, so an answer would land nowhere.
                 pending={
-                  (askPreview !== null || status === 'busy') &&
-                  row.item.askId !== undefined &&
-                  pendingAsk === row.item.askId
+                  status === 'busy' && row.item.askId !== undefined && pendingAsk === row.item.askId
                 }
               />
             ) : (

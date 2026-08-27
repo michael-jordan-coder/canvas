@@ -14,6 +14,10 @@ import { useAgent } from './agentStore'
  * one, and the socket is not opened, since connecting would set a status over the one the
  * preview needs and start a turn's worth of machinery for a conversation that is not happening.
  *
+ * What it does not do is ask anything downstream to make an exception for it. The seed drives
+ * the store the way a turn would, status included, so no component has to know the flag exists;
+ * a preview a component has to be told about is a preview of something else.
+ *
  * Only one card is ever live, because the store holds one `pendingAsk` and that is the truth
  * rather than a limitation of the preview: the assistant asks one question at a time.
  */
@@ -54,6 +58,11 @@ const OPTIONS = [
 export function seedAskPreview(kind: Exclude<AskPreview, null>): void {
   const store = useAgent.getState()
   store.setOpen(true)
+  // Busy, because a live question is one a running turn is waiting on, and the store is where
+  // that is said. Set here rather than excepted for downstream: the panel asks the same
+  // question of a seeded turn as of a real one, and so does everything else that reads the
+  // status, which is what makes the preview worth looking at.
+  store.setStatus('busy')
   store.append('user', 'Design a sign in screen')
 
   store.ask(1, { header: 'Layout', question: QUESTION, options: OPTIONS, multiSelect: false })

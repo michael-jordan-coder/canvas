@@ -1068,6 +1068,8 @@ A few things are worth knowing because the code looks finished but is not:
   negative scale needs the SDF and hit testing to agree on what an inside out shape is.
 - The accent colour is hardcoded in `OverlayInstances` because the renderer has no access to CSS,
   and the theme now follows the system, so on dark it is the light theme's blue rather than the
-  lighter one the chrome switches to. It reads as an inconsistency rather than as a bug because
-  `--backdrop` is deliberately the same mid grey in both themes, so the overlay is drawn against
-  a constant either way. Passing the accent in through `ViewState` is still the fix.
+  slightly deeper one the chrome switches to. It reads as an inconsistency rather than as a bug
+  because `--backdrop` is deliberately the same mid grey in both themes, so the overlay is drawn
+  against a constant either way. Passing the accent in through `ViewState` is still the fix. The
+  marquee and the text selection tints derive from that one constant rather than restating its
+  channels, so a retune has one place to reach rather than three.

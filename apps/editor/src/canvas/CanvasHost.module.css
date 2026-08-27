@@ -46,7 +46,6 @@
 .error {
   position: absolute;
   inset: auto 0 0 0;
-  margin: 0;
   padding: var(--space-3) var(--space-4);
   color: var(--text);
   background: var(--panel);

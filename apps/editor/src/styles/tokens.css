@@ -45,9 +45,9 @@
    * `light-dark` for the reason the convention gives: a token the theme does not move should
    * not look like one it does. It used to be near-black on dark, because the dark accent was
    * lifted to #3b9dff and white on that is 2.8:1, under the 3:1 a glyph needs. So the accent
-   * came down rather than the glyph going dark: #1f86ff puts white at 3.55, within a hair of
-   * the light theme's 3.66, and a tick that changes colour with the theme was the odd thing
-   * in a palette whose whole job is that the two agree.
+   * came down rather than the glyph going dark: #1f86ff puts white at 3.55 against the light
+   * theme's 3.93, both clear of the bar, and a tick that changes colour with the theme was the
+   * odd thing in a palette whose whole job is that the two agree.
    *
    * Hover darkens on both, which it did not before. On dark it lifted, and lifting a filled
    * accent takes white down with it: #5aacff was 2.4:1, so the button became less legible for
