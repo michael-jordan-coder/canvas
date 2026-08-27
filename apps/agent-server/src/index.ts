@@ -180,13 +180,13 @@ function forward(name: CommandName, args: unknown): Promise<unknown> {
   })
 }
 
-const canvas = createCanvasMcpServer(forward, askQuestion)
+const canvas = createCanvasMcpServer(forward)
 
 /**
  * The permission callback, and the only thing that ever reaches it.
  *
  * `AskUserQuestion` is the SDK's own tool, and the model is trained to reach for it, which
- * our `ask_user` could only ever compete with. So the tool is the SDK's and the surface
+ * the `ask_user` this replaced could only ever compete with. So the tool is the SDK's and the surface
  * stays ours: the built-in is offered but deliberately left out of `allowedTools`, since an
  * allowlisted tool never reaches this callback at all. It resolves on its own with no
  * answers, and no card is ever shown. Everything the canvas server exposes is allowlisted by

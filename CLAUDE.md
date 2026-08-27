@@ -770,6 +770,32 @@ that reads back what it built is honest about what it cannot check; one that is 
 blank image is not. If seeing the canvas comes back, it should be the person handing over a
 picture deliberately, not the assistant helping itself.
 
+**Asking the person is the SDK's tool, and the card is ours.** There was an `ask_user` of our
+own once, and it lost: it competed with `AskUserQuestion`, which the model is trained to reach
+for, so no amount of prompt copy telling it to ask ever fully stuck. The built-in is offered
+instead and **deliberately kept out of `allowedTools`**, which is the whole mechanism rather
+than an oversight: an allowlisted tool never reaches `canUseTool` at all, and would resolve on
+its own with empty answers and no card ever shown. `handleAsk` is the callback, and it answers
+through `updatedInput` rather than as a tool result, because the built-in owns how a choice is
+worded back to the model. Everything the canvas server exposes is allowlisted past the callback
+by the `mcp__canvas__*` wildcard, so this one tool is all that ever parks there.
+
+What that costs is the tool description, which we used to write and the SDK now owns, so the
+pressure to ask lives in two places instead: the prompt's asking bullet, and `ASK_REMINDER`,
+which rides alongside every message through the `UserPromptSubmit` hook. The same words twice
+on purpose. A system prompt is written once, far from the decision and cached with everything
+else; the hook lands in context at the moment the model is reading a request and choosing
+whether to build or to ask. It is unconditional and carries its own exception, because a regex
+guessing which requests "look open ended" would be a second judgement about the person's words,
+made worse than the model can make it with the whole message in front of it.
+
+`canUseTool` hands the arguments over as `Record<string, unknown>`, so `askInput.ts` is the
+third door after `serialize.ts` and `code/validate.ts` and is held to their standard: hand
+written, every failure naming the path. Unknown keys are ignored rather than refused, so a
+newer SDK adding a field cannot take the assistant down. A call carries one to four questions
+and `ask` carries one, so they are put in turn, one card at a time; stacking them is a protocol
+change on both sides and has not been made.
+
 **A turn is one history step.** `turn_start` opens a history group and `turn_end` closes it,
 so fifty node edits undo together, the same shape a nudge burst has. A socket that dies
 mid-turn force closes the group, because nothing else ever would.
@@ -783,7 +809,12 @@ was: the SDK reports an interrupted turn as an unsuccessful result, indistinguis
 the turn cap, and the only thing that knows is the code that asked for the interrupt.
 
 **`turn_end` carries a reason, not a sentence.** `ok`, `stopped`, `max_turns`, `error`, with
-a `detail` for what the reason cannot hold: an unmapped SDK subtype, or a thrown message.
+a `detail` for what the reason cannot hold: an unmapped SDK subtype, or a thrown message. The
+step cap arrives both ways, as a subtype and as a throw, and both map to `max_turns`: read from
+the throw it was being printed raw, which is the sentence this enum exists to avoid and calls a
+notice a failure. `maxTurns` itself is 200 and is a runaway guard rather than a budget, since
+there is no token ceiling on a turn and a model stuck retrying would otherwise run until the
+context did.
 Only the server can tell the three apart, and only the panel can act on the difference, so
 the mapping from subtype to reason is the server's and the words are the editor's, beside
 "Stopped." and the rest of the assistant's copy. It buys the distinction the flattened

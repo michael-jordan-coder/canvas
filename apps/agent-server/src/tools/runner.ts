@@ -1,19 +1,12 @@
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk'
-import type { AgentQuestion, CommandName } from '../protocol.ts'
+import type { CommandName } from '../protocol.ts'
 
 /**
- * What every tool file is built from: the two ways out of this process, the result shape the
- * SDK wants back, and the wrapper that turns one into the other.
+ * What every tool file is built from: the way out of this process, the result shape the SDK
+ * wants back, and the wrapper that turns one into the other.
  */
 
 export type Forward = (name: CommandName, args: unknown) => Promise<unknown>
-
-/**
- * Puts a question to the person and resolves with their answer as one line. Separate from
- * `Forward` because it is not a document edit: it blocks on a human, so it is held on a far
- * longer timeout and cancelled when the turn is stopped rather than after the command window.
- */
-export type Ask = (question: AgentQuestion) => Promise<string>
 
 export type ToolResult = {
   content: Array<{ type: 'text'; text: string }>

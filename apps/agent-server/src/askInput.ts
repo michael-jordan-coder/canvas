@@ -3,8 +3,8 @@ import type { AgentQuestion, AgentQuestionOption } from './protocol.ts'
 /**
  * The door for `AskUserQuestion`'s arguments.
  *
- * `ask_user` was our own tool, so its arguments arrived through a zod schema and were
- * checked before the body ever saw them. The built-in tool is the SDK's, and `canUseTool`
+ * The `ask_user` this replaced was our own tool, so its arguments arrived through a zod
+ * schema and were checked before the body ever saw them. The built-in tool is the SDK's, and `canUseTool`
  * hands its input over as `Record<string, unknown>`: nothing between the model and this
  * function has looked at it. That makes it the third place untrusted input enters, after
  * `serialize.ts` and `code/validate.ts`, and it is held to their standard rather than to a
