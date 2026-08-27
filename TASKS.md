@@ -497,6 +497,23 @@ Open:
       tab it is about to close, and a displaced editor stops reconnecting instead of taking
       the socket straight back. New `displaced` status, and the strip offers "Use it here".
       `apps/agent-server/src/index.ts`, `apps/editor/src/agent/connection.ts`
+- [x] The question card rebuilt. The question is said above it in the transcript's own voice
+      and the header chip is gone; the card is one surface of rows, each a label and a mark on
+      the right. Every question confirms with Submit, single selection included, and a single
+      selection carries exactly one mark with the free text row as one of the things it can be
+      on. An option's description is disclosed by a chevron in a fixed leading column, the
+      layers tree's pattern and blank included, collapsed by default and with no rule of one
+      open at a time. The record is the same rows with the marks filled, nothing to select and
+      the chevrons still working. `?ask` seeds all three states, on the `?stress` rule, since
+      two of them cannot be reached deliberately and the third needs a live turn that asks.
+      The check on the dark theme stays the token's near-black rather than the mockup's white:
+      white on the dark accent is 2.8:1, under the 3:1 a glyph wants, and the token is 6.8:1.
+      `apps/editor/src/ui/AgentPanel.tsx`, `apps/editor/src/ui/AgentPanel.module.css`,
+      `apps/editor/src/agent/askPreview.ts`
+- [x] The focus ring became global business rather than each field's. Text fields are exempt
+      in `styles/base.css`, where six local copies of that opt-out used to live; pressable
+      inputs keep it, having no caret and no border of their own to say the keyboard is on
+      them. Out of the question card but not about it. `apps/editor/src/styles/base.css`
 
 ## Backlog
 

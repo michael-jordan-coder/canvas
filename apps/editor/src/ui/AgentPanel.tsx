@@ -253,9 +253,10 @@ function Question({ item, pending }: { item: ChatItem; pending: boolean }): Reac
         {live ? (
           <div className={styles.row}>
             <span className={styles.chevronBlank} aria-hidden="true" />
-            {/* Marked like an option when it is one: in a single selection what is typed here
-                is the answer, and the card has to say so where it says it of every other row. */}
-            <div className={styles.select} data-active={!multi && trimmedOther !== ''}>
+            {/* Marked like an option, because it is one: in a single selection what is typed
+                here is the answer, and in a multiple selection it is another of the several.
+                Either way the card says so where it says it of every other row. */}
+            <div className={styles.select} data-active={trimmedOther !== ''}>
               <input
                 className={styles.otherInput}
                 value={other}
@@ -270,7 +271,7 @@ function Question({ item, pending }: { item: ChatItem; pending: boolean }): Reac
                 }}
               />
               <span className={styles.mark}>
-                {!multi && trimmedOther !== '' && <CheckIcon size={11} />}
+                {trimmedOther !== '' && <CheckIcon size={11} />}
               </span>
             </div>
           </div>
