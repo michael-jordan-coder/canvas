@@ -298,16 +298,20 @@
 .row {
   display: flex;
   align-items: flex-start;
-  gap: var(--space-4);
 }
 
+/* No gap on the row: the select's own left padding is the space between the chevron and the
+   label, and a second one on top of it pushed the text a third of the column away. 16 is the
+   layers tree's width for the same control, and the arrow is drawn in the right half of its
+   own box, so the gap that reads is about 13. */
 .chevron,
 .chevronBlank {
   flex: none;
-  width: 20px;
+  width: 16px;
 }
 
 .chevron {
+  position: relative;
   display: grid;
   place-items: center;
   height: 20px;
@@ -317,6 +321,20 @@
   transition:
     color var(--duration) var(--ease),
     background var(--duration) var(--ease);
+}
+
+/*
+ * The target, larger than the pill and invisible. The pill has to stay narrow, since the
+ * column's width is what pulls the label back toward it, so the clickable area is grown past
+ * the box instead: out to the card's padding on the left, and to the full height of a one line
+ * row above and below. Not a pixel to the right, where the label begins. A target that
+ * overlapped it would take clicks meant for the answer and open a description instead, which
+ * is the one confusion this whole arrangement exists to avoid.
+ */
+.chevron::after {
+  content: '';
+  position: absolute;
+  inset: -7px 0 -7px calc(-1 * var(--space-3));
 }
 
 .chevron:hover {
