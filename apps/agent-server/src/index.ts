@@ -1,5 +1,5 @@
 import type { IncomingMessage } from 'node:http'
-import { query } from '@anthropic-ai/claude-agent-sdk'
+import { query, type PermissionResult } from '@anthropic-ai/claude-agent-sdk'
 import { WebSocketServer, WebSocket } from 'ws'
 import {
   AGENT_PORT,
@@ -10,9 +10,10 @@ import {
   type ServerMessage,
   type TurnEndReason,
 } from './protocol.ts'
+import { parseAskInput } from './askInput.ts'
 import { createCanvasMcpServer } from './tools/index.ts'
-import { SYSTEM_PROMPT } from './prompt.ts'
-import { resultReason } from './turnEnd.ts'
+import { ASK_REMINDER, SYSTEM_PROMPT } from './prompt.ts'
+import { resultReason, thrownReason } from './turnEnd.ts'
 import { allowedOrigins, isOriginAllowed } from './origin.ts'
 import { generateToken, tokenFromUrl, tokensMatch, writeTokenFile } from './token.ts'
 
@@ -133,7 +134,7 @@ function failPendingQuestions(reason: string): void {
  * side of the tool: no document command runs, the editor renders a card and answers with
  * `answer`, and the whole thing is held on the long question timeout.
  */
-function askQuestion(question: AgentQuestion): Promise<string> {
+function askQuestion(question: AgentQuestion, signal?: AbortSignal): Promise<string> {
   if (editor?.readyState !== WebSocket.OPEN) {
     return Promise.reject(new Error('The editor is not connected.'))
   }
@@ -144,6 +145,19 @@ function askQuestion(question: AgentQuestion): Promise<string> {
       pendingQuestions.delete(id)
       reject(new Error('The person did not answer in time.'))
     }, QUESTION_TIMEOUT_MS)
+    // The signal is the SDK's own way of taking the turn back, and it is not the same event
+    // as a stop arriving over the socket: an abort that only `failPendingQuestions` knew
+    // about would leave this promise held by a card nothing is waiting on any more.
+    const abort = (): void => {
+      clearTimeout(timer)
+      pendingQuestions.delete(id)
+      reject(new Error('The turn was cancelled.'))
+    }
+    if (signal?.aborted) {
+      abort()
+      return
+    }
+    signal?.addEventListener('abort', abort, { once: true })
     pendingQuestions.set(id, { resolve, reject, timer })
     send({ type: 'ask', id, question })
   })
@@ -168,6 +182,52 @@ function forward(name: CommandName, args: unknown): Promise<unknown> {
 
 const canvas = createCanvasMcpServer(forward, askQuestion)
 
+/**
+ * The permission callback, and the only thing that ever reaches it.
+ *
+ * `AskUserQuestion` is the SDK's own tool, and the model is trained to reach for it, which
+ * our `ask_user` could only ever compete with. So the tool is the SDK's and the surface
+ * stays ours: the built-in is offered but deliberately left out of `allowedTools`, since an
+ * allowlisted tool never reaches this callback at all. It resolves on its own with no
+ * answers, and no card is ever shown. Everything the canvas server exposes is allowlisted by
+ * the `mcp__canvas__*` wildcard and so runs without asking; only this one parks here.
+ *
+ * The answer goes back through `updatedInput` rather than as a tool result, because the
+ * built-in tool owns how a choice is worded to the model. `answers` is keyed by the question
+ * text and holds a single string per question: the SDK's own output type says a multi select
+ * answer is comma joined, so `formatAnswer` is already the right shape and a label with a
+ * comma in it is a limit of the built-in tool rather than something this can fix.
+ */
+async function handleAsk(
+  toolName: string,
+  input: Record<string, unknown>,
+  options: { signal: AbortSignal },
+): Promise<PermissionResult> {
+  if (toolName !== 'AskUserQuestion') {
+    // Nothing else should arrive: the built-ins are limited to this one tool and the canvas
+    // server is allowlisted past this callback. Named rather than silent, because a tool
+    // parking here is a wiring fault and a denial on its own says nothing about which.
+    console.warn(`agent server denied an unexpected tool at the permission prompt: ${toolName}`)
+    return { behavior: 'deny', message: `${toolName} is not available here.` }
+  }
+  try {
+    const questions = parseAskInput(input)
+    const answers: Record<string, string> = {}
+    // One card at a time. A call carries up to four questions and the protocol's `ask`
+    // carries one, so they are put in turn. Stacking them into a single card is the follow
+    // up, and it is a protocol change on both sides: `ask` needs a `questions[]`.
+    for (const question of questions) {
+      answers[question.question] = await askQuestion(question, options.signal)
+    }
+    return { behavior: 'allow', updatedInput: { questions: input.questions, answers } }
+  } catch (error) {
+    // Denied rather than thrown. A throw out of here is not a refusal the model can read,
+    // and every way this fails is one: the person stopped the turn, the editor went away,
+    // nobody answered, or the arguments did not validate.
+    return { behavior: 'deny', message: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 async function runChat(text: string): Promise<void> {
   busy = true
   interrupted = false
@@ -186,13 +246,43 @@ async function runChat(text: string): Promise<void> {
         // forwards `thinking` blocks; without this they never arrive, and the panel's thinking
         // row stays dead code. It is the one line that makes the assistant show its work.
         thinking: { type: 'adaptive', display: 'summarized' },
-        // No built-ins: an agent embedded in an app gets exactly the tools the app defines,
-        // not Read/Write/Bash on this machine.
-        tools: [],
+        // One built-in, and it is a surface rather than a capability: an agent embedded in an
+        // app gets exactly the tools the app defines, never Read/Write/Bash on this machine.
+        // `AskUserQuestion` is the exception because asking the person is not a capability
+        // the app can withhold, and the model already knows how to reach for it.
+        tools: ['AskUserQuestion'],
         mcpServers: { canvas },
+        // Deliberately not naming `AskUserQuestion`: allowlisting it is what would stop it
+        // reaching `canUseTool`, and the callback is the whole mechanism. See `handleAsk`.
         allowedTools: ['mcp__canvas__*'],
-        permissionMode: 'dontAsk',
-        maxTurns: 50,
+        // `dontAsk` auto-denies without ever reaching the callback, which is right when
+        // nothing is meant to park and wrong the moment one thing is.
+        permissionMode: 'default',
+        canUseTool: handleAsk,
+        // The asking bullet again, delivered next to the request instead of at the top of a
+        // cached system prompt. See `ASK_REMINDER` for why the same words are worth saying
+        // twice and why nothing here decides when they apply.
+        hooks: {
+          UserPromptSubmit: [
+            {
+              hooks: [
+                () =>
+                  Promise.resolve({
+                    hookSpecificOutput: {
+                      hookEventName: 'UserPromptSubmit' as const,
+                      additionalContext: ASK_REMINDER,
+                    },
+                  }),
+              ],
+            },
+          ],
+        },
+        // A turn here is a model round trip, not a token: one assistant message and the tool
+        // results that answer it. 50 was set before the agent could read its own work back,
+        // and a screen built node by node and then checked through get_node spends most of
+        // its steps on the checking. It is a runaway guard rather than a budget, so it sits
+        // far above any real turn and well under a loop nobody notices paying for.
+        maxTurns: 200,
       },
     })
     activeQuery = q
@@ -212,10 +302,8 @@ async function runChat(text: string): Promise<void> {
       }
     }
   } catch (cause) {
-    ending = {
-      reason: 'error',
-      ...(cause instanceof Error && cause.message ? { detail: cause.message } : {}),
-    }
+    const message = cause instanceof Error ? cause.message : ''
+    ending = message ? thrownReason(message) : { reason: 'error' }
   } finally {
     activeQuery = null
     busy = false
