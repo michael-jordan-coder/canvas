@@ -34,6 +34,27 @@ export function snapDelta(delta: number, startAngle: number | null): number {
   return Math.round((startAngle + delta) / step) * step - startAngle
 }
 
+/**
+ * The delta a rotate drag applies, measured from the grab.
+ *
+ * The angle is taken from the pivot to the pointer and compared with where it was when the
+ * handle was grabbed, so the shape does not jump on the first move: what matters is how far
+ * the pointer has travelled around, not where on the handle it landed. Absolute from the
+ * grab rather than accumulated, because the moment shift is pressed mid gesture the angle
+ * has to be able to walk back down to the nearest step.
+ */
+export function dragRotationDelta(
+  pivot: Vec2,
+  startAngle: number,
+  pointer: Vec2,
+  constrain: boolean,
+  startNodeAngle: number | null,
+): number {
+  const now = Math.atan2(pointer.y - pivot.y, pointer.x - pivot.x)
+  const raw = now - startAngle
+  return constrain ? snapDelta(raw, startNodeAngle) : raw
+}
+
 /** Everything needed to turn one node, resolved once when the gesture begins. */
 export interface RotateTarget {
   id: NodeId

@@ -356,7 +356,13 @@ would have returned had it been callable there.
   that is not on screen. A frame clips to its geometry and deliberately not to its stroke, since
   painting a thick outline on a frame must not enlarge where its children may appear. Input reads
   the stores through `getState` rather than subscribing, because a drag must not put a React
-  render between the pointer and the pixels.
+  render between the pointer and the pixels. `pointerInput.ts` itself is the dispatch and the
+  event wiring; what a gesture decides lives in tested modules beside it, one per concept:
+  `clickIntent` (slop, double click), `createGesture`, `marquee`, `flowDrag` (the move and the
+  auto layout reorder), `cancelDrag` (what Escape restores), `resize` and `dragState` (the
+  `Drag` record they all share), with the rotate delta beside `snapDelta` in `state/rotate.ts`.
+  The closure keeps only what needs the DOM or the closure's own state, which is what makes the
+  gesture logic testable against a real `SceneDocument` with no browser in the test.
 
 - The selection overlay: outline, eight handles and the rotate handle on its stem, drawn by a
   second pipeline bound to a pixels to clip matrix instead of a world to clip one. That is the
@@ -571,7 +577,7 @@ the audit.
 hug axis hands its size upward and the chain solves from the top. On a document with no auto
 layout the walk is one or two steps to nothing, which is what keeps `?stress` free.
 
-The reorder drag (`applyFlow` in `pointerInput.ts`): a single dragged child of an auto frame
+The reorder drag (`applyFlow` in `apps/editor/src/input/flowDrag.ts`): a single dragged child of an auto frame
 **floats with the pointer and is excluded from every layout pass**, so the siblings shift
 around an open slot. A hug axis holds the size it already has for as long as the frame has a
 child out of the flow, because hug derives the frame from its children and dropping one would
