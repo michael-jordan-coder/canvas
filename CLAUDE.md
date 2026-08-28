@@ -1113,3 +1113,5 @@ A few things are worth knowing because the code looks finished but is not:
   against a constant either way. Passing the accent in through `ViewState` is still the fix. The
   marquee and the text selection tints derive from that one constant rather than restating its
   channels, so a retune has one place to reach rather than three.
+
+<!-- Comment added on request, 2026-08-28: this file describes what exists and why; TASKS.md owns what is left. -->
