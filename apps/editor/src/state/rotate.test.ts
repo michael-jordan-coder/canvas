@@ -14,6 +14,7 @@ import {
 } from '@canvas/document'
 import {
   applyRotation,
+  dragRotationDelta,
   rotateNodes,
   rotateTargetsFor,
   setNodesAngle,
@@ -174,6 +175,50 @@ describe('snapDelta', () => {
   it('leaves an angle already on a step alone', () => {
     const start = radians(30)
     expect(snapDelta(0, start)).toBeCloseTo(0, 10)
+  })
+})
+
+describe('dragRotationDelta', () => {
+  const pivot = { x: 0, y: 0 }
+  /** Grabbed due east of the pivot, so the start angle is 0. */
+  const startAngle = 0
+  const pointerAt = (angle: number) => ({
+    x: Math.cos(radians(angle)),
+    y: Math.sin(radians(angle)),
+  })
+
+  it('is how far the pointer travelled around, not where it landed', () => {
+    // Grabbed at 40 degrees, dragged to 70: the shape turns 30, wherever the handle was.
+    const grabbed = radians(40)
+    const delta = dragRotationDelta(pivot, grabbed, pointerAt(70), false, null)
+    expect(degrees(delta)).toBeCloseTo(30, 6)
+  })
+
+  it('does not jump on a first move that has not gone anywhere', () => {
+    expect(dragRotationDelta(pivot, startAngle, pointerAt(0), false, null)).toBeCloseTo(0, 10)
+  })
+
+  it("snaps onto the node's own absolute angle while shift is held", () => {
+    // The node sits at 10 degrees and the pointer has dragged 12 more. Constrained, the
+    // total lands on 15, so the delta is 5.
+    const nodeAngle = radians(10)
+    const delta = dragRotationDelta(pivot, startAngle, pointerAt(12), true, nodeAngle)
+    expect(degrees(nodeAngle + delta)).toBeCloseTo(15, 6)
+  })
+
+  it('snaps the delta itself for a group, which has no single angle', () => {
+    const delta = dragRotationDelta(pivot, startAngle, pointerAt(20), true, null)
+    expect(degrees(delta)).toBeCloseTo(15, 6)
+  })
+
+  it('walks the angle back down when shift arrives mid gesture', () => {
+    // Free at 20 degrees, then shift is pressed with the pointer unmoved: the same pointer
+    // now answers 15, which is a smaller delta than the free one.
+    const free = dragRotationDelta(pivot, startAngle, pointerAt(20), false, null)
+    const snapped = dragRotationDelta(pivot, startAngle, pointerAt(20), true, radians(0))
+    expect(degrees(free)).toBeCloseTo(20, 6)
+    expect(degrees(snapped)).toBeCloseTo(15, 6)
+    expect(snapped).toBeLessThan(free)
   })
 })
 

@@ -38,7 +38,7 @@ Layers panel (`ui`)
 - [x] Enter/F2 triggers rename on a focused row. `apps/editor/src/ui/LayersPanel.tsx`
 
 Accessibility (`ui`)
-- [x] aria-live on the FileActions import error. `apps/editor/src/ui/FileActions.tsx`
+- [x] aria-live on the FileActions import error. (FileActions was later removed with import and export.)
 
 ## Panel polish pass
 
@@ -399,6 +399,121 @@ Figma's selection model, replacing the deepest-node-wins policy the editor start
       layout flow and let its siblings close up over it for as long as the button was held.
       Resize and rotate wait on the same slop, so a press on a handle cannot flip a hug axis to
       fixed or turn a node by a fraction of a degree.
+
+## Code node
+
+Live code on the canvas: a node carrying JSX source whose run generates its children as real
+locked scene nodes, with an interactive Play mode. Architecture in CLAUDE.md ("The code
+node"); built on the `code-node` branch. New deps, both approved: `sucrase` (the workspace
+has no transpiler at all) and CodeMirror 6.
+
+- [x] `CodeNode` (`source`, JSON `props`, frame fields) and `'code'` in `NodeType`, with
+      every compile alarm chased: `cloneNodeAs`, `parseNode`, LayersPanel `ICONS`, agent
+      `AgentNode`, plus the deliberate widens behind new `clipsChildren` /
+      `acceptsManualChildren` predicates. `packages/document/src/node.ts`
+- [x] `SCHEMA_VERSION` 6. Generated children are stripped from both save paths by
+      `persistedClones`, the code node writes `children: []`, and a version 5 file claiming
+      a code node is refused. `packages/document/src/serialize.ts`
+- [x] The pure runtime: `__jsx` factory, hooks as path-keyed cells over re-running a pure
+      function, `renderTree` flattening components to `CodeElement`s, sucrase + `new
+      Function` compile with ambient primitives and no imports.
+      `apps/editor/src/code/runtime/`
+- [x] The untrusted-output door: `validateCodeTree` with dotted-path errors, element budget
+      and depth cap. `packages/document/src/code/validate.ts`
+- [x] Keyed reconciliation: `applyCodeTree` matches element key paths to `sourceKey`, keeps
+      ids where keys match, epsilon-compares every write so a settled re-run costs nothing,
+      one transact one undo step. `packages/document/src/code/instantiate.ts`
+- [x] The worker (`codeWorker.ts`), its RPC client with a 2s terminate-and-respawn timeout,
+      and `state/code.ts` as the one door: source, children, relayout and measured size in
+      one transaction; load/paste/duplicate re-run; load is not an edit.
+- [x] Selection policy: `codeOwner` in `selectionTarget.ts` resolves any hit in generated
+      output to the code node across click, Cmd, hover, descent and the layers panel, whose
+      generated rows are dimmed and inert. Drops into code nodes refused everywhere.
+- [x] CodeSection panel: CodeMirror 6, run on 400ms idle / blur / Cmd+Enter, error badge,
+      JSON props editor, Play toggle. Toolbar insert with a working starter.
+      `apps/editor/src/ui/CodeSection.tsx`
+- [x] Play mode: `play` in `uiStore`, pointer routing through `playHitAt` with key-path
+      bubbling, enter/leave diffing, live effects (edit-mode runs are effect-free), history
+      group opened on entry and aborted after a deterministic fresh re-run on exit, undo and
+      redo refused while playing, Escape or a click outside exits.
+- [x] Agent tools: `create_code_node` / `get_code_source` / `set_code_source`, failure text
+      in the tool result, `snapshotNode` reports props and source length only, and a
+      system-prompt section teaching the model when and how.
+
+Open, in rough order of likely need:
+
+- [ ] Undoing a paste that contained a code node takes two steps: the paste, then the
+      regeneration that arrived async. Grouping them needs a history group that survives
+      the worker round trip safely.
+- [ ] Deleting the playing code node leaves play to unwind on the next click; it works but
+      the abort then discards the deletion from history while the node stays deleted.
+      `endPlay` on delete would be cleaner.
+- [ ] `playHitAt` ignores clipping inside the generated subtree, so a clipped-away child of
+      an overflow-hidden generated frame is still clickable in Play.
+- [ ] An override layer for hand edits on generated nodes, keyed by `sourceKey`. The keys
+      exist from day one precisely so this is additive; nothing else prepares for it.
+- [ ] Live coding during Play (edit source while it runs, keep state). The CodeSection
+      currently disables editing during Play on purpose.
+- [ ] Gradient/image props, more text props (weight, align) as the canvas itself grows them.
+      The prop set must keep its CSS-equivalence rule.
+- [ ] The editor bundle crossed Vite's 500 kB warning with CodeMirror in it; splitting the
+      panel or the CodeMirror import is the obvious cut.
+
+## The assistant
+
+Claude with hands on the canvas, over a Node sidecar on 5174. Shipped across six commits;
+`CLAUDE.md` has the architecture and the reasoning.
+
+- [x] Screenshot removed from the agent rather than fixed. It had never worked: the capture
+      waited two animation frames before reading the canvas with `drawImage`, and a WebGPU
+      canvas is readable only until the next frame boundary, so every image the model ever
+      received was blank. It also moved the camera with `fitTo` and never restored it. The
+      tool, the `CommandMap` entry, the executor handler, `capture.ts` and `captureCanvas`
+      are gone, and the prompt rule that told the model to look at its work now says it
+      cannot see and must read back through `get_document`.
+      `apps/agent-server/src/tools.ts`, `apps/agent-server/src/prompt.ts:47`,
+      `apps/editor/src/canvas/CanvasHost.tsx`
+
+Open:
+
+- [ ] Let the person hand the assistant a picture. This is what replaces the tool that was
+      removed: seeing the canvas should be Daniel offering an image deliberately, not the
+      model helping itself. Nothing of it exists yet. It needs an image input on the
+      composer (paste, drag, and a file picker), a `ClientMessage` that can carry the bytes,
+      an image content block on the way into the SDK, and a decision about how a sent image
+      appears in the transcript and whether it is saved with it. Note the transcript's
+      storage is capped at 64 kB and drops the oldest first, so images almost certainly must
+      not go through `figma-canvas:agent-chat`.
+- [x] The assistant is docked in the right column, on a tab beside the properties, instead
+      of floating over the canvas. `open` now names which tab is on; `state/panelFollow.ts`
+      brings the properties forward when something is selected, and holds that back during a
+      turn behind a dot on the tab, since the assistant moves the selection itself. The
+      column's floor is the assistant's 300 rather than the properties' 240, so
+      `PanelResizer` takes the minimum as a prop. `CornerGrip`, `cardSize.ts` and the two
+      `figma-canvas:agent-*` size keys are gone with the float, and so is the card's shadow.
+      `apps/editor/src/ui/RightPanel.tsx`, `apps/editor/src/ui/AgentPanel.tsx`,
+      `apps/editor/src/state/panelFollow.ts`, `apps/editor/src/ui/panelSize.ts`
+- [x] Two editor tabs no longer flap the agent socket. The server sends `evicted` to the
+      tab it is about to close, and a displaced editor stops reconnecting instead of taking
+      the socket straight back. New `displaced` status, and the strip offers "Use it here".
+      `apps/agent-server/src/index.ts`, `apps/editor/src/agent/connection.ts`
+- [x] The question card rebuilt. The question is said above it in the transcript's own voice
+      and the header chip is gone; the card is one surface of rows, each a label and a mark on
+      the right. Every question confirms with Submit, single selection included, and a single
+      selection carries exactly one mark with the free text row as one of the things it can be
+      on. An option's description is disclosed by a chevron in a fixed leading column, the
+      layers tree's pattern and blank included, collapsed by default and with no rule of one
+      open at a time. The record is the same rows with the marks filled, nothing to select and
+      the chevrons still working. `?ask` seeds all three states, on the `?stress` rule, since
+      two of them cannot be reached deliberately and the third needs a live turn that asks.
+      The check on the dark theme stays the token's near-black rather than the mockup's white:
+      white on the dark accent is 2.8:1, under the 3:1 a glyph wants, and the token is 6.8:1.
+      `apps/editor/src/ui/AgentPanel.tsx`, `apps/editor/src/ui/AgentPanel.module.css`,
+      `apps/editor/src/agent/askPreview.ts`
+- [x] The focus ring became global business rather than each field's. Text fields are exempt
+      in `styles/base.css`, where six local copies of that opt-out used to live; pressable
+      inputs keep it, having no caret and no border of their own to say the keyboard is on
+      them. Out of the question card but not about it. `apps/editor/src/styles/base.css`
 
 ## Backlog
 

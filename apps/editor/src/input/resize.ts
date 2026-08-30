@@ -1,4 +1,14 @@
-import { applyToVector, type Mat2D, type Rect, type Size, type Vec2 } from '@canvas/document'
+import {
+  applyToVector,
+  isAutoLayoutFrame,
+  type FrameLayout,
+  type LayoutChild,
+  type Mat2D,
+  type Rect,
+  type SceneNode,
+  type Size,
+  type Vec2,
+} from '@canvas/document'
 import type { HandleId } from '@canvas/renderer'
 
 export interface ResizeAxes {
@@ -98,6 +108,48 @@ export function scaleFactors(
   if (axes.y) sy = Math.max(sy, bounds.height > EPSILON ? minimum / bounds.height : 1)
 
   return { sx, sy }
+}
+
+/**
+ * Dragging a handle claims the axes it moves.
+ *
+ * On an auto layout frame a dragged hug axis becomes fixed, the frame's mirror of a text
+ * box losing `autoWidth` to the same gesture. On a child of one a dragged fill axis
+ * becomes fixed, because a hand set size and a computed one cannot both hold. Folded into
+ * the same update as the size, so one gesture is one step.
+ */
+export function flowOverrides(
+  node: SceneNode | undefined,
+  parent: SceneNode | undefined,
+  handle: HandleId,
+): { layout?: FrameLayout; layoutChild?: LayoutChild } {
+  if (!node) return {}
+  const axes = axesFor(handle)
+  const result: { layout?: FrameLayout; layoutChild?: LayoutChild } = {}
+
+  if (isAutoLayoutFrame(node)) {
+    const layout = node.layout
+    const horizontal = layout.direction === 'horizontal'
+    const dragsMain = horizontal ? axes.x : axes.y
+    const dragsCross = horizontal ? axes.y : axes.x
+    const mainSizing = dragsMain && layout.mainSizing === 'hug' ? 'fixed' : layout.mainSizing
+    const crossSizing = dragsCross && layout.crossSizing === 'hug' ? 'fixed' : layout.crossSizing
+    if (mainSizing !== layout.mainSizing || crossSizing !== layout.crossSizing) {
+      result.layout = { ...layout, padding: { ...layout.padding }, mainSizing, crossSizing }
+    }
+  }
+
+  if (isAutoLayoutFrame(parent) && node.layoutChild) {
+    const widthMode =
+      axes.x && node.layoutChild.widthMode === 'fill' ? 'fixed' : node.layoutChild.widthMode
+    const heightMode =
+      axes.y && node.layoutChild.heightMode === 'fill' ? 'fixed' : node.layoutChild.heightMode
+    if (widthMode !== node.layoutChild.widthMode || heightMode !== node.layoutChild.heightMode) {
+      result.layoutChild = { widthMode, heightMode }
+    }
+  }
+
+  return result
 }
 
 /** The node's own box, which is always at the origin: only `size` says how big it is. */

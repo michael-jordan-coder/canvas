@@ -4,6 +4,7 @@ import {
   type SceneDocument,
   type SerializedDocument,
 } from '@canvas/document'
+import { startDebouncedSave } from './localStorage'
 
 const KEY = 'figma-canvas:document'
 /** Where a save that will not parse gets moved, rather than being overwritten and lost. */
@@ -12,11 +13,11 @@ const QUARANTINE_KEY = 'figma-canvas:document.unreadable'
 /** Long enough that a drag writes once at the end, short enough to survive a tab close. */
 const AUTOSAVE_DELAY = 600
 
-export function toJSON(document: SceneDocument): string {
+function toJSON(document: SceneDocument): string {
   return JSON.stringify(serializeDocument(document))
 }
 
-export function fromJSON(text: string): SerializedDocument {
+function fromJSON(text: string): SerializedDocument {
   return parseDocument(JSON.parse(text) as unknown)
 }
 
@@ -64,25 +65,9 @@ export function save(document: SceneDocument): void {
  * document sixty times a second would stall the gesture it is trying to record.
  */
 export function startAutosave(document: SceneDocument): () => void {
-  let timer: ReturnType<typeof setTimeout> | undefined
-
-  const unsubscribe = document.subscribe(() => {
-    clearTimeout(timer)
-    timer = setTimeout(() => save(document), AUTOSAVE_DELAY)
-  })
-
-  // A pending save must not be lost to a tab close.
-  const flush = (): void => {
-    if (timer === undefined) return
-    clearTimeout(timer)
-    timer = undefined
-    save(document)
-  }
-  window.addEventListener('pagehide', flush)
-
-  return () => {
-    clearTimeout(timer)
-    unsubscribe()
-    window.removeEventListener('pagehide', flush)
-  }
+  return startDebouncedSave(
+    (onChange) => document.subscribe(onChange),
+    () => save(document),
+    AUTOSAVE_DELAY,
+  )
 }

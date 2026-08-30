@@ -6,6 +6,7 @@ import { useUI } from '../state/uiStore'
 import { deepSelectionTarget } from '../state/selectionTarget'
 import {
   ChevronIcon,
+  CodeIcon,
   CollapseAllIcon,
   EllipseIcon,
   FrameIcon,
@@ -32,6 +33,7 @@ const ICONS: Record<NodeType, ComponentType<IconProps>> = {
   rectangle: RectangleIcon,
   ellipse: EllipseIcon,
   text: TextIcon,
+  code: CodeIcon,
 }
 
 /**
@@ -161,6 +163,10 @@ function LayerRow({ id, drag }: { id: NodeId; drag: LayerDrag }): ReactElement |
   const hasChildren = children.length > 0
   const Icon = ICONS[node.type]
   const drop = drag.target?.id === id ? drag.target.position : undefined
+  // A code node's output: shown so the tree tells the truth about what the code produced,
+  // but not offered for editing, since renaming or unlocking it would be undone by the next
+  // run. Clicking one selects the code node, the same answer the canvas gives.
+  const generated = node.sourceKey !== undefined
 
   return (
     <div className={styles.branch}>
@@ -168,7 +174,7 @@ function LayerRow({ id, drag }: { id: NodeId; drag: LayerDrag }): ReactElement |
         className={styles.row}
         data-layer-id={id}
         data-selected={selected}
-        data-dimmed={!node.visible}
+        data-dimmed={!node.visible || generated}
         data-locked={node.locked}
         data-dragging={drag.dragging === id}
         data-drop={drop}
@@ -196,21 +202,26 @@ function LayerRow({ id, drag }: { id: NodeId; drag: LayerDrag }): ReactElement |
             type="button"
             className={styles.name}
             onClick={(event) => {
+              // A generated row answers with its code node, the same answer the canvas
+              // gives: the output is not selectable, the thing that made it is.
+              const resolved = deepSelectionTarget(scene, id)
               // Same toggle canvas shift-click already uses, so a selection built on the
               // canvas can be extended from here and vice versa.
-              if (event.shiftKey || event.metaKey || event.ctrlKey) toggleInSelection(id)
+              if (event.shiftKey || event.metaKey || event.ctrlKey) toggleInSelection(resolved.id)
               else {
-                setSelection([id])
+                setSelection([resolved.id])
                 // The tree names a node outright, so picking one here is the same statement
                 // Cmd clicking it on the canvas makes: work at that depth. Without this the
                 // next canvas click would spring back out to the frame above it.
-                setContext(deepSelectionTarget(scene, id).context)
+                setContext(resolved.context)
               }
             }}
-            onDoubleClick={() => setRenaming(true)}
+            onDoubleClick={() => {
+              if (!generated) setRenaming(true)
+            }}
             onPointerDown={(event) => drag.start(id, event)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === 'F2') {
+              if ((event.key === 'Enter' || event.key === 'F2') && !generated) {
                 event.preventDefault()
                 setRenaming(true)
               }
@@ -229,29 +240,33 @@ function LayerRow({ id, drag }: { id: NodeId; drag: LayerDrag }): ReactElement |
             <span className={styles.label}>{labelOf(node)}</span>
           </button>
         )}
-        <button
-          type="button"
-          className={styles.lock}
-          aria-label={node.locked ? 'Unlock' : 'Lock'}
-          onClick={() => scene.update(id, { locked: !node.locked })}
-        >
-          {node.locked ? <LockedIcon size={12} /> : <UnlockedIcon size={12} />}
-        </button>
-        <button
-          type="button"
-          className={styles.visibility}
-          aria-label={node.visible ? 'Hide' : 'Show'}
-          onClick={() =>
-            // A hidden child leaves an auto layout flow, so the siblings close the gap in
-            // the same undo step as the toggle.
-            scene.transact(() => {
-              scene.update(id, { visible: !node.visible })
-              relayout(scene, [id])
-            })
-          }
-        >
-          {node.visible ? <VisibleIcon size={12} /> : <HiddenIcon size={12} />}
-        </button>
+        {!generated && (
+          <button
+            type="button"
+            className={styles.lock}
+            aria-label={node.locked ? 'Unlock' : 'Lock'}
+            onClick={() => scene.update(id, { locked: !node.locked })}
+          >
+            {node.locked ? <LockedIcon size={12} /> : <UnlockedIcon size={12} />}
+          </button>
+        )}
+        {!generated && (
+          <button
+            type="button"
+            className={styles.visibility}
+            aria-label={node.visible ? 'Hide' : 'Show'}
+            onClick={() =>
+              // A hidden child leaves an auto layout flow, so the siblings close the gap in
+              // the same undo step as the toggle.
+              scene.transact(() => {
+                scene.update(id, { visible: !node.visible })
+                relayout(scene, [id])
+              })
+            }
+          >
+            {node.visible ? <VisibleIcon size={12} /> : <HiddenIcon size={12} />}
+          </button>
+        )}
       </div>
       {hasChildren && !collapsed && (
         <div className={styles.children}>

@@ -2,16 +2,21 @@ import { describe, expect, it } from 'vitest'
 import {
   IDENTITY,
   applyToPoint,
+  createFrame,
+  createRectangle,
+  defaultFrameLayout,
   multiply,
   radians,
   rotation,
   scaling,
   translation,
+  type FrameLayout,
   type Rect,
 } from '@canvas/document'
 import {
   anchorFor,
   axesFor,
+  flowOverrides,
   handlePointFor,
   localBox,
   resizedInPlace,
@@ -294,5 +299,49 @@ describe('localBox', () => {
     expect(anchorFor('se', box, false)).toEqual({ x: 0, y: 0 })
     expect(handlePointFor('se', box)).toEqual({ x: 100, y: 60 })
     expect(anchorFor('nw', box, false)).toEqual({ x: 100, y: 60 })
+  })
+})
+
+describe('flowOverrides', () => {
+  const hugBoth = (direction: FrameLayout['direction']): FrameLayout => ({
+    ...defaultFrameLayout(direction),
+    mainSizing: 'hug',
+    crossSizing: 'hug',
+  })
+
+  it('flips a dragged hug axis to fixed, main and cross alike', () => {
+    const frame = createFrame({ layout: hugBoth('horizontal') })
+    expect(flowOverrides(frame, undefined, 'e').layout?.mainSizing).toBe('fixed')
+    expect(flowOverrides(frame, undefined, 'e').layout?.crossSizing).toBe('hug')
+    expect(flowOverrides(frame, undefined, 's').layout?.crossSizing).toBe('fixed')
+    expect(flowOverrides(frame, undefined, 's').layout?.mainSizing).toBe('hug')
+  })
+
+  it('reads main and cross through the frame direction', () => {
+    const frame = createFrame({ layout: hugBoth('vertical') })
+    // In a column the main axis is y, so the south handle drags main.
+    expect(flowOverrides(frame, undefined, 's').layout?.mainSizing).toBe('fixed')
+    expect(flowOverrides(frame, undefined, 'e').layout?.crossSizing).toBe('fixed')
+  })
+
+  it('flips a dragged fill axis on a child of an auto frame to fixed', () => {
+    const parent = createFrame({ layout: defaultFrameLayout('horizontal') })
+    const child = createRectangle({ layoutChild: { widthMode: 'fill', heightMode: 'fill' } })
+    const overrides = flowOverrides(child, parent, 'e')
+    expect(overrides.layoutChild).toEqual({ widthMode: 'fixed', heightMode: 'fill' })
+  })
+
+  it('leaves the child alone when its parent has no auto layout', () => {
+    const parent = createFrame({})
+    const child = createRectangle({ layoutChild: { widthMode: 'fill', heightMode: 'fill' } })
+    expect(flowOverrides(child, parent, 'e')).toEqual({})
+  })
+
+  it('emits nothing when nothing changes, so no key holds undefined', () => {
+    const fixed = createFrame({ layout: defaultFrameLayout('horizontal') })
+    expect(flowOverrides(fixed, undefined, 'e')).toEqual({})
+    expect(flowOverrides(undefined, undefined, 'e')).toEqual({})
+    // A corner drags both axes; a frame already fixed on both still emits nothing.
+    expect(flowOverrides(fixed, undefined, 'se')).toEqual({})
   })
 })

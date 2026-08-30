@@ -28,6 +28,26 @@ export interface SelectionResolution {
   context: SelectionContext
 }
 
+/**
+ * The code node that owns a generated node, or the id unchanged for everything else.
+ *
+ * Generated children are locked, so hit testing normally never returns one and the click
+ * lands on the code node by itself. This is the policy stated outright rather than left to
+ * that side effect: every resolution funnels through here, so a generated row picked in the
+ * layers panel, a marquee result, or a child someone managed to unlock all still select the
+ * code node. Code is the truth, and selecting its output as if it were editable would offer
+ * an edit the next run erases.
+ */
+export function codeOwner(document: SceneDocument, id: NodeId): NodeId {
+  let current = document.getNode(id)
+  if (current?.sourceKey === undefined) return id
+  while (current) {
+    if (current.type === 'code') return current.id
+    current = current.parent ? document.getNode(current.parent) : undefined
+  }
+  return id
+}
+
 /** From a node up to the page: `[id, parent, ..., rootId]`. */
 function chainToRoot(document: SceneDocument, id: NodeId): NodeId[] {
   const chain: NodeId[] = []
@@ -54,7 +74,8 @@ export function selectionTarget(
   hit: NodeId,
   context: SelectionContext,
 ): SelectionResolution {
-  const chain = chainToRoot(document, hit)
+  const owned = codeOwner(document, hit)
+  const chain = chainToRoot(document, owned)
 
   // The page is not an entered context, it is the absence of one. Treating it as entered
   // would select the top-level frame and take the artboard rule with it.
@@ -71,7 +92,7 @@ export function selectionTarget(
   // it is top-level already and there is no level to stop short of.
   const underPage = chain[chain.length - 1] === document.rootId ? chain.slice(0, -1) : chain
   if (underPage.length <= 1) {
-    return { id: hit, context: null }
+    return { id: owned, context: null }
   }
   return {
     id: underPage[underPage.length - 2] as NodeId,
@@ -89,8 +110,11 @@ export function deepSelectionTarget(
   document: SceneDocument,
   hit: NodeId,
 ): SelectionResolution {
-  const parent = document.getNode(hit)?.parent ?? null
-  return { id: hit, context: parent === document.rootId ? null : parent }
+  // Cmd reaches past every container except a code node: its children are not up for grabs
+  // at any depth, so the deepest selectable thing inside one is the code node itself.
+  const owned = codeOwner(document, hit)
+  const parent = document.getNode(owned)?.parent ?? null
+  return { id: owned, context: parent === document.rootId ? null : parent }
 }
 
 /**
@@ -104,7 +128,9 @@ export function descendSelectionTarget(
   hit: NodeId,
   context: SelectionContext,
 ): SelectionResolution | null {
-  const resolved = selectionTarget(document, hit, context)
-  if (resolved.id === hit) return null
-  return selectionTarget(document, hit, resolved.id)
+  // Descent bottoms out at the code node: there is no level inside it to step into.
+  const owned = codeOwner(document, hit)
+  const resolved = selectionTarget(document, owned, context)
+  if (resolved.id === owned) return null
+  return selectionTarget(document, owned, resolved.id)
 }

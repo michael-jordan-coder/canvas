@@ -127,6 +127,18 @@ subscribe to it, so swapping in a new instance would leave them all watching an 
 writes to. Loading also pushes the id generator past every id in the file, since a loaded document
 keeps its ids and the next node created would otherwise collide with one of them.
 
+`figma-canvas:agent-chat` holds the assistant's transcript under the same rules;
+and `figma-canvas:layers-width` and `figma-canvas:properties-width` the two panel widths,
+the second of which is the column the assistant shares.
+
+Every access goes through `readStored`/`writeStored` in `state/localStorage.ts`, because
+storage can throw rather than merely fail: Safari private mode and storage-blocked embeds
+raise on access, and a second private copy of that try/catch is a second place to forget it.
+The debounce that all of it is written on is one function there too, `startDebouncedSave`,
+since the document and the transcript both want a timer, a `pagehide` flush and a symmetric
+disposer, and written twice the half that drifts is the tab-close path, which is the half
+nobody notices is broken.
+
 The editor autosaves to `localStorage` 600ms after edits stop, and flushes on `pagehide` so a tab
 close does not drop the pending write. A save that will not parse is moved to
 `figma-canvas:document.unreadable` rather than overwritten, because silently starting from a blank
@@ -200,9 +212,26 @@ and silently land on each other's ports. This one stays out of that fight.
 - TypeScript strict, no `any`. Explicit return types on exported functions.
 - CSS Modules. Never inline CSS in a component. A dynamic color goes on an SVG presentation
   attribute (see the fill swatch in `PropertiesPanel`), not on a `style` prop.
+- The focus ring is global, and text fields are exempt from it, in `styles/base.css`. A
+  ring says the keyboard is pointing here, and a caret blinking in a field has already said
+  that in the place the eye is; the ring then lands a second time around a box whose own border
+  is what its hover and focus are drawn on. Six fields had reached that on their own and turned
+  it off locally, and a rule six surfaces agree on belongs to the global. Pressable inputs, a
+  checkbox or a colour swatch, keep it: they have no caret and no border to speak with.
 - Design tokens live in `apps/editor/src/styles/tokens.css`. Light is the default because artwork
-  has to be judged against a neutral surround. Dark is `data-theme="dark"` on `<html>`. Greys are
-  true neutral so the one accent always means something: selected, active, focused.
+  has to be judged against a neutral surround. Which of the two is on **follows the
+  operating system**, through `color-scheme: light dark` on `:root` and `light-dark()` on
+  every token the theme changes. That is one declaration holding both values rather than a
+  second copy of the palette under a media query, so the two cannot drift, and it is
+  resolved by the style engine before the first paint: a script writing the attribute has to
+  wait for the bundle, which is a frame of light chrome on a dark desktop. `data-theme` on
+  `<html>` is still the override door, and it works by setting `color-scheme` alone, so a
+  manual toggle has one line to write and the palette follows. A token that is the same in
+  both themes stays a plain value, which is what makes it legible at a glance which ones the
+  theme actually moves. Greys are
+  true neutral so the one accent always means something: selected, active, focused. `--danger` is
+  the single exception to that, for text and hairlines only and never a fill: a failure has to be
+  legible before it is read, and desaturated it looked like a caption.
 - WGSL shaders are separate `.wgsl` files imported with `?raw`. No shader source inside a `.ts`
   string literal, because that loses syntax highlighting and makes diffs unreadable.
 - No em dashes anywhere: UI copy, comments, commit messages, docs.
@@ -217,7 +246,15 @@ Built:
 - The camera: pan and zoom math, screen to world, zoom around a point, fit to rect. All of it is
   pure and testable without a GPU.
 - The `Renderer` interface the app is written against.
-- The editor shell: toolbar, layers tree, properties panel. The property fields edit the document
+- The editor shell: layers tree, properties panel, and the tool bar, which floats bottom
+  centred over the canvas the way Figma's does rather than taking a row above it. It is
+  `position: fixed`, so it holds one place on the window: dragging a side panel resizes the
+  canvas on every pointer move, and a bar centred on that column would slide under the hand
+  for the whole gesture. It is one of the two surfaces allowed `--shadow-card`. Its
+  buttons and icons are a step larger than the panels' controls, since a floating bar is
+  aimed at rather than scanned. It holds the tools, the code node insert and, behind a
+  hairline, the assistant's opener; import and export were removed with it, so a file gets in
+  and out of the editor by the autosave alone for now. The property fields edit the document
   for real, which is how the store and the hooks are verified without any rendering.
 - `CanvasHost`, which owns the canvas element, the device lifecycle and the draw schedule,
   including the `devicePixelRatio` change that fires no resize event when a window moves
@@ -365,7 +402,13 @@ would have returned had it been callable there.
   that is not on screen. A frame clips to its geometry and deliberately not to its stroke, since
   painting a thick outline on a frame must not enlarge where its children may appear. Input reads
   the stores through `getState` rather than subscribing, because a drag must not put a React
-  render between the pointer and the pixels.
+  render between the pointer and the pixels. `pointerInput.ts` itself is the dispatch and the
+  event wiring; what a gesture decides lives in tested modules beside it, one per concept:
+  `clickIntent` (slop, double click), `createGesture`, `marquee`, `flowDrag` (the move and the
+  auto layout reorder), `cancelDrag` (what Escape restores), `resize` and `dragState` (the
+  `Drag` record they all share), with the rotate delta beside `snapDelta` in `state/rotate.ts`.
+  The closure keeps only what needs the DOM or the closure's own state, which is what makes the
+  gesture logic testable against a real `SceneDocument` with no browser in the test.
 
 - The selection overlay: outline, eight handles and the rotate handle on its stem, drawn by a
   second pipeline bound to a pixels to clip matrix instead of a world to clip one. That is the
@@ -580,7 +623,7 @@ the audit.
 hug axis hands its size upward and the chain solves from the top. On a document with no auto
 layout the walk is one or two steps to nothing, which is what keeps `?stress` free.
 
-The reorder drag (`applyFlow` in `pointerInput.ts`): a single dragged child of an auto frame
+The reorder drag (`applyFlow` in `apps/editor/src/input/flowDrag.ts`): a single dragged child of an auto frame
 **floats with the pointer and is excluded from every layout pass**, so the siblings shift
 around an open slot. A hug axis holds the size it already has for as long as the frame has a
 child out of the flow, because hug derives the frame from its children and dropping one would
@@ -609,6 +652,383 @@ new frame drawn 10 around its bounds (`wrapInAutoLayout`): hug on both axes, no 
 fill, and the wrapped nodes keep their world positions, so the padding infers to exactly
 that margin and the wrap is a regrouping rather than a rearrangement. One undo removes it
 entirely, old selection included.
+
+## The code node
+
+Live code on the canvas: a `code` node is a frame that carries JSX source, and running the
+source is what writes its children. **Code generates scene nodes, never DOM.** The output is
+real nodes in the live document, so hit testing, clipping, paint order and auto layout apply
+to it with no case of their own, and the renderer needed a two line widen (the clip push and
+the hit tests go through `clipsChildren` in `node.ts`, one predicate three consumers share).
+A DOM overlay was rejected outright: DOM sits above or below the canvas element and can never
+interleave with paint order, so a code node built that way would be the one thing in the app
+a frame cannot clip and a rectangle cannot cover.
+
+**The code is the truth, and the generated children are locked.** A click anywhere in the
+output selects the code node, the way a component instance behaves in Figma. `hit.ts` gives
+most of that for free, since locked children are click transparent, but the policy is stated
+outright in `selectionTarget.ts` (`codeOwner`), so the layers panel, Cmd click, hover and
+descent all give the same answer. The layers panel shows generated rows dimmed with their
+edit affordances gone, and `acceptsManualChildren` in `node.ts` is why nothing can drop,
+draw or paste into a code node: it holds children but owns them, which is exactly the split
+from `canHaveChildren` that the document level `insert` still needs to accept.
+
+**Execution is a Web Worker, and structured clone is the contract.** The runner in
+`apps/editor/src/code/runtime/` is React's model without React: `__jsx` builds plain
+objects, hooks are index ordered cells keyed by the component's key path, and a re-run
+renders the whole tree and diffs later. No reconciler, because at this scale a full re-run
+is cheaper than the machinery that avoids one, and the instantiator is idempotent anyway.
+sucrase strips TS and compiles the JSX in the worker; everything user code can name arrives
+as a `new Function` parameter, so there is no module system at all and `import` throws with
+its own explanation. An infinite loop is a 2s timeout, `terminate()` and a fresh worker; on
+the main thread it would be a dead tab and the last 600ms of autosave with it.
+
+**Source is arbitrary code, so the worker runs it with the network taken away.** Before any
+user code compiles, the worker deletes `fetch`, `WebSocket`, `XMLHttpRequest`, `EventSource`
+and `importScripts` from its global, so a code node cannot phone home or open the agent
+socket, and the page ships a CSP whose `connect-src` is only its own origin and
+`ws://localhost:5174`. This matters because source arrives from outside too (see below), and a
+foreign snippet that draws shapes is a nuisance where one that exfiltrates or drives the agent
+is a breach.
+
+**The worker's output is untrusted input**, the second door after `serialize.ts` and held to
+its exact standard: hand validation in `packages/document/src/code/validate.ts` with dotted
+path errors, an element budget and a depth cap, because user code holds the worker's
+`postMessage` and can send anything. What survives goes to `applyCodeTree`
+(`code/instantiate.ts`): keyed reconciliation matching element key paths against `sourceKey`
+on the node, so ids are stable where keys match, a settled re-run writes nothing, and one
+transact is one undo step. Layout runs through the real auto layout engine after
+instantiation rather than being precomputed in the worker, which would be a second layout
+implementation waiting to drift.
+
+**Only `source` and `props` persist.** `serializeDocument` and `serializeSubtree` walk
+through `persistedClones`, which stops at a code node and writes it with empty children:
+saving the output would put two copies of one fact in the file and let them disagree.
+
+**Foreign source does not run until the person asks.** Source from a loaded file, a paste or
+the autosaved document restored on reload is untrusted under the `serialize.ts` rule, so it is
+shown but not executed. `codeTrust.ts` holds the sources trusted to auto-run, keyed by the
+source string and never persisted: source the person authored, edited or ran here, and source
+the agent wrote through its tools, is trusted, and running an untrusted node once through the
+panel trusts it from then on. So load, paste and duplicate re-run only what is already trusted
+(still not an edit, still clearing history, the `remeasureAll` rule); a shared file's code
+nodes sit inert with their last-saved bounds until run. A source edit is an edit:
+`state/code.ts` is the one
+door, and it awaits the worker outside any transaction, then commits source, children,
+relayout and the measured `size` in one synchronous transact. A failed run still commits the
+source, keeps the previous output on canvas, and surfaces the failure in the panel; the
+node's `size` is a cache of the output bounds, under the text node's rule.
+
+**A code node has no resize handles at all**, the narrowing text made for one axis taken to
+both: its `size` is the measured bounds of the output, so a handle would offer an edit the
+next run erases. The properties panel holds W and H read only for the same reason, and
+`resizeHandlesFor` is what keeps the two from disagreeing. An empty run resizes it to a
+plain empty box rather than leaving the bounds the last output measured, which would be an
+invisible rectangle that still hit tests and still clips.
+
+**Play mode is the second half.** `play` in the UI store names the one running code node;
+`beginPlay` opens a history group, runs the code `live` (effects run there and only there,
+edit mode renders are deliberately effect free, the way a server render mounts nothing), and
+pointer events inside the node route to the worker: `playHitAt` walks the generated subtree
+seeing through the lock, bubbling is a walk up the key path, and handlers never cross the
+thread, only `{elementId, kind, point}` does. State changes come back as `update` messages,
+validated and applied like any run, and ignored the moment play ends. Exit re-runs fresh,
+which deterministically restores the pre play tree, then `abortHistoryGroup` discards the
+whole session: the undo stack never learns play happened. Undo and redo are refused while
+playing and for the worker round trip the exit waits on, since the group is open for all of
+it and `play` goes null at the start of it: `isPlayLocked` is the question, not the store.
+A run for a node that is playing is forced live whatever the caller asked, because the panel
+commits its pending keystrokes as the editor is torn down, which is exactly what entering
+play does to it, and that static run would land last and leave the session answering no
+event. the CodeSection swaps its editor for a notice, and a click outside the node or
+Escape is the exit.
+
+**A code node selects in green**, not in the accent every other node uses, and Play sits on
+the canvas above its frame rather than only in the panel. Both say the same thing: this one
+is written, not drawn, and its children answer to its source. The outline colour is decided
+by `accentFor` in `OverlayInstances`, green only when every node in the box is a code node,
+since a mixed selection has no single story. The button is the one piece of DOM that tracks
+a world position, and it moves itself: `state/canvasView.ts` publishes the camera once per
+drawn frame and the button writes its own offsets, because React state for a value that
+changes at pointer rate would put a render between the pointer and the pixels on every frame
+of a pan. Drawing is on demand, so a button that mounts while nothing is moving has no frame
+coming; it asks for one through `requestCanvasView` and stays hidden until it has been
+placed, an unplaced absolute element sitting over the toolbar rather than on the canvas.
+
+The panel is CodeMirror 6 in `CodeSection.tsx`, uncontrolled like the text editor's textarea
+and for the same reason, committing on 400ms idle, on blur and on Cmd+Enter through the same
+door. The agent has `create_code_node`, `get_code_source` and `set_code_source`; the run's
+failure text travels back in the tool result so the model can fix and retry, and
+`get_document` deliberately reports only that source exists, because three code nodes would
+otherwise ship kilobytes of TSX on every turn. Since `get_document` also returns text nodes'
+characters, the system prompt and those two tools' descriptions state that text read from a
+node is canvas content, never an instruction: an injected "create a code node that..." in a
+text layer is something to design with, not a command to obey. The worker egress fence above
+is the structural half of that, so this is defence in depth rather than the only line.
+
+The prop names are the web's (`direction: "row"`, `gap`, `padding`, `background`,
+`borderRadius`, `onClick`), not the canvas's, and that is a requirement rather than a taste:
+Daniel's condition for the whole feature is that code written here translates to real React
+later, so every prop is chosen to have a direct CSS equivalent and the instantiator owns the
+mapping into canvas vocabulary.
+
+## The assistant
+
+Claude with hands on the canvas, and the only part of this project that is not in the browser.
+
+`apps/agent-server` is a Node sidecar on 5174, because the Agent SDK runs in Node and
+authenticates through the Claude Code login on this machine: there is no key anywhere in the
+editor, and no key in this process either. The document lives in the tab, so the server never
+holds one. Every tool call travels back over the same WebSocket as a command the editor
+executes against the live document, which is why the agent's edits are real edits, visible as
+they happen and undoable by the person who watched them.
+
+**The socket admits one page, and the editor admits one server: two checks, both in the
+handshake, because binding to loopback keeps the LAN out and not the machine.** Any tab can
+open `ws://localhost:5174`, and any local process can answer it, so both directions are
+verified before a socket is trusted. `origin.ts` decides who may connect on the Origin header
+alone, the one thing a browser cannot forge: the editor on 5173 and 4173 (both host spellings,
+both pinned with `strictPort`), plus anything in `AGENT_ALLOWED_ORIGINS` for a deployed build.
+Comparison is exact string equality, since a prefix test would admit
+`http://localhost:5173.evil.com`, and a missing Origin is refused. `token.ts` adds the mirror
+check: the sidecar mints a random per-run token, writes it `0o600` to the OS temp dir, and
+requires it in `verifyClient` after the origin; the editor fetches it (a dev-only Vite endpoint
+under `connect-src 'self'`, `localStorage` for a deployed build) and drops every message until a
+`hello` echoes it back, so an unverified peer's commands never reach the document. Both compares
+are constant time. A refused page or peer reaches no agent code, and the origin is logged, never
+the token. **The honest limit:** on a single-user machine a process running as the user can read
+the token file, so this raises the bar against opportunistic port squatting and closes the
+deployed case, but it is not the defence against a same-user native process. That threat still
+wants "a token, or not listening at all"; the token is the partial half, and `token.ts` and
+`origin.ts` say so plainly rather than overclaiming.
+
+`protocol.ts` is the contract and it is compile enforced in both directions: `CommandMap`
+names every command with its args and its result, the editor's `executor.ts` implements
+`Handlers` over that same map, and a tool added on one side without the other does not build.
+
+**The assistant cannot see the canvas, on purpose.** It had a `screenshot` tool and the
+tool never worked: it read the canvas back through `drawImage` after waiting two animation
+frames, and a WebGPU canvas is readable only until the next frame boundary, so the wait was
+the thing that emptied it. Every screenshot the model ever took was blank, and it moved the
+person's camera with `fitTo` without putting it back. Rather than fix it, the tool was
+removed. `get_document` and `get_node` are the whole of what the model knows, and a model
+that reads back what it built is honest about what it cannot check; one that is handed a
+blank image is not. If seeing the canvas comes back, it should be the person handing over a
+picture deliberately, not the assistant helping itself.
+
+**Asking the person is the SDK's tool, and the card is ours.** There was an `ask_user` of our
+own once, and it lost: it competed with `AskUserQuestion`, which the model is trained to reach
+for, so no amount of prompt copy telling it to ask ever fully stuck. The built-in is offered
+instead and **deliberately kept out of `allowedTools`**, which is the whole mechanism rather
+than an oversight: an allowlisted tool never reaches `canUseTool` at all, and would resolve on
+its own with empty answers and no card ever shown. `handleAsk` is the callback, and it answers
+through `updatedInput` rather than as a tool result, because the built-in owns how a choice is
+worded back to the model. Everything the canvas server exposes is allowlisted past the callback
+by the `mcp__canvas__*` wildcard, so this one tool is all that ever parks there.
+
+What that costs is the tool description, which we used to write and the SDK now owns, so the
+pressure to ask lives in two places instead: the prompt's asking bullet, and `ASK_REMINDER`,
+which rides alongside every message through the `UserPromptSubmit` hook. The same words twice
+on purpose. A system prompt is written once, far from the decision and cached with everything
+else; the hook lands in context at the moment the model is reading a request and choosing
+whether to build or to ask. It is unconditional and carries its own exception, because a regex
+guessing which requests "look open ended" would be a second judgement about the person's words,
+made worse than the model can make it with the whole message in front of it.
+
+`canUseTool` hands the arguments over as `Record<string, unknown>`, so `askInput.ts` is the
+third door after `serialize.ts` and `code/validate.ts` and is held to their standard: hand
+written, every failure naming the path. Unknown keys are ignored rather than refused, so a
+newer SDK adding a field cannot take the assistant down. A call carries one to four questions
+and `ask` carries one, so they are put in turn, one card at a time; stacking them is a protocol
+change on both sides and has not been made.
+
+**A turn is one history step.** `turn_start` opens a history group and `turn_end` closes it,
+so fifty node edits undo together, the same shape a nudge burst has. A socket that dies
+mid-turn force closes the group, because nothing else ever would.
+
+**Every state the person waits in has a name.** `offline`, `connecting`, `idle`, `busy`,
+`stopping`. Two of them are waits the person started and would otherwise look like nothing
+happening: `connecting` (with the countdown to the next automatic attempt, and a retry that
+skips it) and `stopping`, which covers the gap between the stop reaching the server and the
+model noticing it between tool calls. A stop is not a failure, and the server says which it
+was: the SDK reports an interrupted turn as an unsuccessful result, indistinguishable from
+the turn cap, and the only thing that knows is the code that asked for the interrupt.
+
+**`turn_end` carries a reason, not a sentence.** `ok`, `stopped`, `max_turns`, `error`, with
+a `detail` for what the reason cannot hold: an unmapped SDK subtype, or a thrown message. The
+step cap arrives both ways, as a subtype and as a throw, and both map to `max_turns`: read from
+the throw it was being printed raw, which is the sentence this enum exists to avoid and calls a
+notice a failure. `maxTurns` itself is 200 and is a runaway guard rather than a budget, since
+there is no token ceiling on a turn and a model stuck retrying would otherwise run until the
+context did.
+Only the server can tell the three apart, and only the panel can act on the difference, so
+the mapping from subtype to reason is the server's and the words are the editor's, beside
+"Stopped." and the rest of the assistant's copy. It buys the distinction the flattened
+string could not express: a stop and the step cap are notices, because both are states a
+conversation carries on from, and only a real failure is an error.
+
+**A message the server will not run says so.** A chat arriving mid-turn used to be dropped
+where it landed, so the person watched a message that had been typed, sent, and forgotten by
+everything downstream. The server answers `rejected` with the text, and the editor puts it
+back in the composer. The draft lives in the store for that reason and one other: the card
+unmounts when it closes, and a half written message must survive being put away.
+
+**Nothing is sent optimistically.** The socket answers whether it took the message, and a
+message it did not take leaves the transcript untouched and the draft in the composer. The
+panel used to append the person's words and go busy before finding out, which left it waiting
+forever on a reply nobody had been asked for.
+
+**What the model is told about a failure, the person is told too.** A command that throws
+answers the model with the error so it can recover, and appends a line to the transcript. It
+folds in with the run of steps, because a tool the model will retry is process rather than an
+answer, but a closed run says one of its steps failed: a turn that quietly failed half its
+edits must not read as a turn that worked.
+
+**A tool line names its object.** "Create frame" says nothing during a run of fifteen steps,
+so the `tool` message carries the args the `command` after it is about to run, and
+`toolSummary` turns them into "Create frame Header". A table of accessors, one per command,
+each returning the fields that might name the object in the order they should be tried, and
+the command's own name when nothing does. **Accessors rather than dotted paths, so the
+compiler sees the field**: the paths this replaced were unchecked strings, and one of them
+named `fills.0.color` on a paint whose field is `hex`, so every fill summary had quietly
+fallen back to "Set fills" while the test covering it hand-built the args and stayed green.
+That is the drift `protocol.ts` exists to make impossible, and a table of strings opted out
+of it. The summary is made where the message arrives rather than in the panel, because
+the item's text is what a saved transcript holds and the args are not saved with it.
+
+**New chat is a promise about the server, not about the panel.** The conversation lives in
+the SDK session the server holds, so clearing the transcript while the socket is down would
+leave the next turn quietly resuming a conversation the person believes they ended. A reset
+that could not be delivered is held and sent when a connection comes up.
+
+**The transcript outlives the tab, and says when it is only a record.** It is saved to
+`figma-canvas:agent-chat` on the `state/persistence.ts` pattern, 600ms after it stops
+changing and flushed on `pagehide`, capped by count and by bytes because the document needs
+that quota more. It is worth keeping for a reason beyond convenience: the server holds the
+conversation as an SDK session that survives a reload, so without it the model remembers a
+conversation the person cannot see. An unreadable value is dropped rather than quarantined,
+which is the one deliberate difference from the document's rule: a chat is a record of
+something that already happened, not someone's work. `hello` carries whether the server
+still holds a session, and a restored transcript facing a server that does not gets one
+notice saying so, once per page.
+
+**The server keeps one editor, and the tab that loses it is told.** A turn edits one
+document and the person is looking at one of them, so a second tab displaces the first. The
+displacing is not the interesting part: without being told, the closed tab could not tell a
+handover from the server going away, so it reconnected on its backoff, displaced the other
+tab in turn, and the two evicted each other about once a second for as long as both were
+open, appending a notice on every cycle. `evicted` arrives just before the socket closes,
+and `displaced` is the one status here that is not a wait: nothing is coming, and it ends
+when the person asks for the assistant back rather than when the network changes its mind.
+The panel names the place rather than a fault, and its control says "Use it here".
+
+**Cmd/Ctrl+K opens the assistant and puts the caret in it.** Not Cmd+H, which never reaches
+a page on macOS: the system takes it to hide the application. Closing is the composer's own
+job rather than an exception in the window handler, whose first line hands every keystroke
+in a text field back to the field. Focus travels as a token rather than a flag, because the
+same shortcut pressed twice has to focus twice and `open` will not have changed the second
+time.
+
+**The assistant shares the right column with the properties, one tab at a time.** It
+floated over the canvas as a card before that, which cost it the two things a docked column
+gives back: it covered the artwork it was editing, and it collided with the tool bar. What
+it gives up is being on screen beside the properties, and that is the real price rather than
+a detail: a segmented control is mutual exclusion by construction, so the two surfaces
+cannot be read together the way a float allowed. It bought the column's floor as well,
+`ASSISTANT_MIN_WIDTH` in `ui/panelSize.ts`, which is 300 rather than the 240 a panel of
+fields needs, because what has to fit is a sentence. That is 60px of canvas at the narrowest
+setting, and it is charged whichever tab is on, since a width that is only wide enough half
+the time is wrong every time the other tab is showing. `PanelResizer` takes the minimum as a
+prop for that reason; the ceiling and the nudge stay shared.
+
+**Docking took the shadow and left the density.** Every panel here meets the canvas along a
+hairline at 11 and 12 pixels, packed tight because it is dense controls; a conversation is
+read rather than operated, and at that density it looked like a log rather than like
+something someone said. The assistant broke with the panels on three counts and still breaks
+with them on two: a 13px body with a reading line height, and padding of 12 and 16 rather
+than 4 and 8. The third was `--shadow-card` instead of a hairline, and it went with the
+float that earned it, which is the token's rule holding rather than an exception being
+withdrawn. Sharing a column is exactly why the other two have to stand: a surface that gave
+up its own scale to match its neighbour would have nothing left that made it worth docking
+beside one. It is also why tabs rather than a stack. Stacked, the two densities are adjacent
+and invite the comparison, and the one that loses it is the conversation. Colour, radii and
+motion stay the app's own. The person's words are the single bubble, in `--field` rather
+than the sunken grey because on the dark theme the sunken tone is darker than the panel and
+reads as a hole cut in it. A run of steps is a chip rather than a line of grey text, since
+it is the machine's record and has to be openable without being read first, and the assistant's
+own star turning on it is the only moving thing in the panel. Its own mark rather than a dot,
+so what moves while the assistant works is the assistant. A quarter turn a cycle, since the
+star is four ways symmetric about its centre and the loop therefore closes on itself.
+
+**An empty transcript offers three things to press.** That is a deliberate exception to the
+rule that the interface explains itself and carries no helper text, and the exception is
+narrow: the rule holds wherever a person can see what a control does, and nothing on screen
+says what an assistant is able to do. A suggestion fills the composer rather than sending,
+since it is a starting point and not a command.
+
+**Selecting a node brings the properties forward, except during a turn.** Selecting means
+"tell me about this", and the panel that answers is the properties one, so `state/panelFollow.ts`
+switches the tab. The exception is the whole reason the rule needs a home: the assistant
+moves the selection itself, through `set_selection` and by pruning what it deletes, and a
+tab that flipped on either would take the conversation off screen while it is being read.
+So a selection arriving mid turn leaves a dot on the properties tab and waits to be asked
+for. It costs nothing to wait, because the transcript, the draft and the turn all live
+outside the panel: the tab changes what is visible and nothing else. `selectionUnseen` sits
+beside `open` in the agent store rather than in the UI store, since the two are one question
+the tab row asks, and split across two stores that row would subscribe twice to draw itself
+once. Clearing the selection does not pull the tab, having nothing to show. The rule is a
+subscription rather than a call inside `setSelection`, or the pointer, the layers panel, the
+keyboard, undo and every agent command would each have to remember it.
+
+**`open` names the tab now, not a card.** The shortcut, the tool bar's toggle and the
+composer's Escape all still write it, because it still names the same intention. What
+unmounting the conversation actually loses is one thing, where it was scrolled to, and that
+is kept in a module level `restingScrollTop` for the reason the typing history group is at
+module scope: the component is not mounted when the value has to survive. It is not
+persisted, being a position in a list that means nothing once the list is restored from
+storage.
+
+**The transcript is the expensive thing to draw, so nothing that changes on its own
+schedule sits above it.** `RightPanel` reads which tab is on and nothing else. `PropertiesPanel`
+is the whole of what subscribes to the selection in that column, `AssistantBody` mounts on
+its tab and owns the rows, and `PanelTabs`, `Composer` and `ConnectionStrip` are each their
+own subscription. Every one of those boundaries used to re-render every row of the
+conversation: the draft on every keystroke, the reconnect countdown once a second, the whole
+transcript rebuilt behind a closed card for every step of a running turn, and now a dot
+appearing on the other tab. The opener lives in the tool bar, where it is the one control
+that follows the agent's status and so a component of its own rather than a seventh button:
+the bar must not re-render its tools every time a turn starts. A suggestion asks for the
+caret through `openForInput`'s token rather than through a ref, since the field is a
+component away, which is the same mechanism the shortcut uses.
+
+The transcript follows the newest message only while it is the one being read. Pinning
+unconditionally meant it could not be scrolled back during a turn, since every arriving step
+dragged it down again, which is exactly when there is most to read. A `ResizeObserver` keeps
+that promise across a resize, which changes the list's height without firing a scroll event.
+
+**A question card is reached with `?ask`, on the rule `?stress` already follows.** The card
+says the question above it and holds only the options, a mark on the right of each row, the
+free text row and Submit, which every question confirms with, single selection included: a
+click that answered outright would be the one control here with no way back from a slip, and
+it would drop whatever had been typed in the free text row. **A single selection carries
+exactly one mark, and the free text row is one of the things it can be on**, so picking an
+option clears what was typed and typing clears what was picked; a multiple selection has no
+such rule, the typed answer being another of the several. **A row's description is disclosed
+rather than drawn**, since the built-in tool marks it required where our protocol has it
+optional, so every option arrives with a sentence and four of them open at the 300px floor is
+twelve grey lines. Its chevron sits in a fixed leading column, the layers tree's pattern and
+blank included, because beside the label it would land wherever the last word happened to end
+and where a label ends is the model's business: everything in this card that assumed a length
+or a count broke on the first sentence long enough to test it, and what held was stated as a
+column, a gutter and a weight instead. The settled card is the same rows
+with the marks filled and nothing to select, rather than a second vocabulary of chips, so what
+was chosen is read back where it was chosen, what was not is still there to be read, and the
+descriptions still open. Two of
+its three states, answered and ended-without-answering, cannot be reached deliberately at all
+and the third needs a live turn that happens to ask, so `agent/askPreview.ts` seeds all three
+(`?ask=multi` for a multiple selection). It switches off the transcript autosave and the
+socket with it, the first so a throwaway conversation never lands on a real one, the second
+because connecting would set a status over the one a seeded card needs.
 
 ## Rotation, and the one rule it added
 
@@ -686,5 +1106,10 @@ A few things are worth knowing because the code looks finished but is not:
   nothing and neither does this, but the result is not what the handles imply.
 - A resize cannot flip a node through its anchor. `scaleFactors` clamps positive, because a
   negative scale needs the SDF and hit testing to agree on what an inside out shape is.
-- The accent colour is hardcoded in `OverlayInstances` because the renderer has no access to CSS.
-  It needs passing in when the theme toggle exists, since dark uses a lighter blue.
+- The accent colour is hardcoded in `OverlayInstances` because the renderer has no access to CSS,
+  and the theme now follows the system, so on dark it is the light theme's blue rather than the
+  slightly deeper one the chrome switches to. It reads as an inconsistency rather than as a bug
+  because `--backdrop` is deliberately the same mid grey in both themes, so the overlay is drawn
+  against a constant either way. Passing the accent in through `ViewState` is still the fix. The
+  marquee and the text selection tints derive from that one constant rather than restating its
+  channels, so a retune has one place to reach rather than three.

@@ -1,17 +1,24 @@
-import { query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import type { IncomingMessage } from 'node:http'
+import { query, type PermissionResult, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { WebSocketServer, WebSocket } from 'ws'
 import {
   AGENT_PORT,
-  CLOSE_SUPERSEDED,
   MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BYTES,
+  formatAnswer,
+  type AgentQuestion,
   type Attachment,
   type ClientMessage,
   type CommandName,
   type ServerMessage,
+  type TurnEndReason,
 } from './protocol.ts'
-import { createCanvasMcpServer } from './tools.ts'
-import { SYSTEM_PROMPT } from './prompt.ts'
+import { parseAskInput } from './askInput.ts'
+import { createCanvasMcpServer } from './tools/index.ts'
+import { ASK_REMINDER, SYSTEM_PROMPT } from './prompt.ts'
+import { resultReason, thrownReason } from './turnEnd.ts'
+import { allowedOrigins, isOriginAllowed } from './origin.ts'
+import { generateToken, tokenFromUrl, tokensMatch, writeTokenFile } from './token.ts'
 
 /**
  * The agent sidecar: Claude with hands on the canvas.
@@ -24,12 +31,44 @@ import { SYSTEM_PROMPT } from './prompt.ts'
  * therefore real edits, visible as they happen and folded into the editor's own undo.
  */
 
-/** The screenshot waits on two animation frames in the browser, so it gets headroom. */
+/** Generous, because a command runs behind whatever the browser is already doing. */
 const COMMAND_TIMEOUT_MS = 30_000
+
+const ALLOWED_ORIGINS = allowedOrigins(process.env.AGENT_ALLOWED_ORIGINS)
+
+// Minted once per run and written where the editor's delivery path can read it. The value is
+// never logged, only the path is: the file is the one thing here worth not writing down twice.
+const SESSION_TOKEN = generateToken()
+const TOKEN_FILE = writeTokenFile(SESSION_TOKEN)
 
 // Loopback only. The editor connects from this machine, and an open bind would let anyone
 // on the LAN drive the agent: their prompts, this account's subscription, this document.
-const wss = new WebSocketServer({ port: AGENT_PORT, host: '127.0.0.1' })
+// The bind is half of it. A page in any tab can reach loopback too, so `origin.ts` decides
+// which page may, and a native process that spoofs the origin is turned away by the token it
+// cannot present. Both refusals happen in the handshake: nothing below this line, and no
+// agent code at all, ever sees a socket that failed either check.
+const wss = new WebSocketServer({
+  port: AGENT_PORT,
+  host: '127.0.0.1',
+  // Annotated because `verifyClient` is a union of a sync and an async signature, and a
+  // union infers nothing for the parameter.
+  verifyClient: ({ req }: { req: IncomingMessage }) => {
+    const origin = req.headers.origin
+    if (!isOriginAllowed(origin, ALLOWED_ORIGINS)) {
+      // Named, because the one failure this produces in normal use is an editor served from
+      // an origin nobody has listed, and a silent handshake failure says nothing about why.
+      console.warn(`agent server refused a connection from origin ${origin ?? '(none)'}`)
+      return false
+    }
+    if (!tokensMatch(tokenFromUrl(req.url), SESSION_TOKEN)) {
+      // The origin, never the token: the value is the one thing here worth not logging, and a
+      // client that reached the right origin without the secret is the case worth naming.
+      console.warn(`agent server refused a connection from origin ${origin} without a valid token`)
+      return false
+    }
+    return true
+  },
+})
 
 /**
  * One editor at a time. A second tab taking over is deliberate: the alternative is two
@@ -41,6 +80,12 @@ let editor: WebSocket | null = null
 let busy = false
 /** The running query, kept so a stop request can interrupt it mid-turn. */
 let activeQuery: { interrupt: () => Promise<unknown> } | null = null
+/**
+ * Whether the turn now ending was interrupted on request. The SDK reports an interrupt as a
+ * result with an unsuccessful subtype, indistinguishable from the turn cap or a real
+ * failure, so the one thing that knows a stop happened is the code that asked for it.
+ */
+let interrupted = false
 /** Multi-turn memory: the SDK session resumed on the next message. Reset starts fresh. */
 let sessionId: string | undefined
 
@@ -48,6 +93,18 @@ let nextCommandId = 1
 const pending = new Map<
   number,
   { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
+>()
+
+/**
+ * A question waits on a person, not on the editor, so it gets minutes rather than the command
+ * window's seconds. Long enough that a real deliberation never trips it, bounded so a tool that
+ * was forgotten does not pin a turn open forever.
+ */
+const QUESTION_TIMEOUT_MS = 10 * 60_000
+let nextQuestionId = 1
+const pendingQuestions = new Map<
+  number,
+  { resolve: (text: string) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
 >()
 
 function send(message: ServerMessage): void {
@@ -63,6 +120,52 @@ function failPending(reason: string): void {
   }
 }
 
+/**
+ * The same, for questions. Kept separate because their tool call is awaiting a human: a stop
+ * or a lost editor has to unblock it, or the query hangs on a tool that will never answer.
+ */
+function failPendingQuestions(reason: string): void {
+  for (const [id, entry] of pendingQuestions) {
+    clearTimeout(entry.timer)
+    entry.reject(new Error(reason))
+    pendingQuestions.delete(id)
+  }
+}
+
+/**
+ * Puts a question to the editor and resolves with the person's answer as one line. The `ask`
+ * side of the tool: no document command runs, the editor renders a card and answers with
+ * `answer`, and the whole thing is held on the long question timeout.
+ */
+function askQuestion(question: AgentQuestion, signal?: AbortSignal): Promise<string> {
+  if (editor?.readyState !== WebSocket.OPEN) {
+    return Promise.reject(new Error('The editor is not connected.'))
+  }
+  const id = nextQuestionId
+  nextQuestionId += 1
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingQuestions.delete(id)
+      reject(new Error('The person did not answer in time.'))
+    }, QUESTION_TIMEOUT_MS)
+    // The signal is the SDK's own way of taking the turn back, and it is not the same event
+    // as a stop arriving over the socket: an abort that only `failPendingQuestions` knew
+    // about would leave this promise held by a card nothing is waiting on any more.
+    const abort = (): void => {
+      clearTimeout(timer)
+      pendingQuestions.delete(id)
+      reject(new Error('The turn was cancelled.'))
+    }
+    if (signal?.aborted) {
+      abort()
+      return
+    }
+    signal?.addEventListener('abort', abort, { once: true })
+    pendingQuestions.set(id, { resolve, reject, timer })
+    send({ type: 'ask', id, question })
+  })
+}
+
 function forward(name: CommandName, args: unknown): Promise<unknown> {
   if (editor?.readyState !== WebSocket.OPEN) {
     return Promise.reject(new Error('The editor is not connected.'))
@@ -75,7 +178,7 @@ function forward(name: CommandName, args: unknown): Promise<unknown> {
       reject(new Error(`The editor did not answer ${name} within ${COMMAND_TIMEOUT_MS / 1000}s.`))
     }, COMMAND_TIMEOUT_MS)
     pending.set(id, { resolve, reject, timer })
-    send({ type: 'tool', name })
+    send({ type: 'tool', name, args })
     send({ type: 'command', id, name, args })
   })
 }
@@ -107,10 +210,58 @@ function promptWithImages(text: string, attachments: Attachment[]): AsyncIterabl
   return stream()
 }
 
+/**
+ * The permission callback, and the only thing that ever reaches it.
+ *
+ * `AskUserQuestion` is the SDK's own tool, and the model is trained to reach for it, which
+ * the `ask_user` this replaced could only ever compete with. So the tool is the SDK's and the surface
+ * stays ours: the built-in is offered but deliberately left out of `allowedTools`, since an
+ * allowlisted tool never reaches this callback at all. It resolves on its own with no
+ * answers, and no card is ever shown. Everything the canvas server exposes is allowlisted by
+ * the `mcp__canvas__*` wildcard and so runs without asking; only this one parks here.
+ *
+ * The answer goes back through `updatedInput` rather than as a tool result, because the
+ * built-in tool owns how a choice is worded to the model. `answers` is keyed by the question
+ * text and holds a single string per question: the SDK's own output type says a multi select
+ * answer is comma joined, so `formatAnswer` is already the right shape and a label with a
+ * comma in it is a limit of the built-in tool rather than something this can fix.
+ */
+async function handleAsk(
+  toolName: string,
+  input: Record<string, unknown>,
+  options: { signal: AbortSignal },
+): Promise<PermissionResult> {
+  if (toolName !== 'AskUserQuestion') {
+    // Nothing else should arrive: the built-ins are limited to this one tool and the canvas
+    // server is allowlisted past this callback. Named rather than silent, because a tool
+    // parking here is a wiring fault and a denial on its own says nothing about which.
+    console.warn(`agent server denied an unexpected tool at the permission prompt: ${toolName}`)
+    return { behavior: 'deny', message: `${toolName} is not available here.` }
+  }
+  try {
+    const questions = parseAskInput(input)
+    const answers: Record<string, string> = {}
+    // One card at a time. A call carries up to four questions and the protocol's `ask`
+    // carries one, so they are put in turn. Stacking them into a single card is the follow
+    // up, and it is a protocol change on both sides: `ask` needs a `questions[]`.
+    for (const question of questions) {
+      answers[question.question] = await askQuestion(question, options.signal)
+    }
+    return { behavior: 'allow', updatedInput: { questions: input.questions, answers } }
+  } catch (error) {
+    // Denied rather than thrown. A throw out of here is not a refusal the model can read,
+    // and every way this fails is one: the person stopped the turn, the editor went away,
+    // nobody answered, or the arguments did not validate.
+    return { behavior: 'deny', message: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 async function runChat(text: string, attachments?: Attachment[]): Promise<void> {
   busy = true
+  interrupted = false
   send({ type: 'turn_start' })
-  let error: string | undefined
+  // How the turn ended, kept as a reason the protocol names rather than as a sentence.
+  let ending: { reason: TurnEndReason; detail?: string } = { reason: 'ok' }
 
   try {
     // The editor enforces both limits too, but the socket is not the editor's alone to
@@ -129,13 +280,48 @@ async function runChat(text: string, attachments?: Attachment[]): Promise<void> 
       options: {
         ...(sessionId ? { resume: sessionId } : {}),
         systemPrompt: SYSTEM_PROMPT,
-        // No built-ins: an agent embedded in an app gets exactly the tools the app defines,
-        // not Read/Write/Bash on this machine.
-        tools: [],
+        // Adaptive so the model decides when and how much to reason, summarised so what streams
+        // back is a readable account rather than the raw scratchpad. The turn loop below already
+        // forwards `thinking` blocks; without this they never arrive, and the panel's thinking
+        // row stays dead code. It is the one line that makes the assistant show its work.
+        thinking: { type: 'adaptive', display: 'summarized' },
+        // One built-in, and it is a surface rather than a capability: an agent embedded in an
+        // app gets exactly the tools the app defines, never Read/Write/Bash on this machine.
+        // `AskUserQuestion` is the exception because asking the person is not a capability
+        // the app can withhold, and the model already knows how to reach for it.
+        tools: ['AskUserQuestion'],
         mcpServers: { canvas },
+        // Deliberately not naming `AskUserQuestion`: allowlisting it is what would stop it
+        // reaching `canUseTool`, and the callback is the whole mechanism. See `handleAsk`.
         allowedTools: ['mcp__canvas__*'],
-        permissionMode: 'dontAsk',
-        maxTurns: 50,
+        // `dontAsk` auto-denies without ever reaching the callback, which is right when
+        // nothing is meant to park and wrong the moment one thing is.
+        permissionMode: 'default',
+        canUseTool: handleAsk,
+        // The asking bullet again, delivered next to the request instead of at the top of a
+        // cached system prompt. See `ASK_REMINDER` for why the same words are worth saying
+        // twice and why nothing here decides when they apply.
+        hooks: {
+          UserPromptSubmit: [
+            {
+              hooks: [
+                () =>
+                  Promise.resolve({
+                    hookSpecificOutput: {
+                      hookEventName: 'UserPromptSubmit' as const,
+                      additionalContext: ASK_REMINDER,
+                    },
+                  }),
+              ],
+            },
+          ],
+        },
+        // A turn here is a model round trip, not a token: one assistant message and the tool
+        // results that answer it. 50 was set before the agent could read its own work back,
+        // and a screen built node by node and then checked through get_node spends most of
+        // its steps on the checking. It is a runaway guard rather than a budget, so it sits
+        // far above any real turn and well under a loop nobody notices paying for.
+        maxTurns: 200,
       },
     })
     activeQuery = q
@@ -151,15 +337,18 @@ async function runChat(text: string, attachments?: Attachment[]): Promise<void> 
       }
       if (msg.type === 'result') {
         sessionId = 'session_id' in msg ? msg.session_id : sessionId
-        if (msg.subtype !== 'success') error = `The agent stopped: ${msg.subtype}`
+        if (msg.subtype !== 'success') ending = resultReason(msg.subtype)
       }
     }
   } catch (cause) {
-    error = cause instanceof Error ? cause.message : 'The agent failed.'
+    const message = cause instanceof Error ? cause.message : ''
+    ending = message ? thrownReason(message) : { reason: 'error' }
   } finally {
     activeQuery = null
     busy = false
-    send({ type: 'turn_end', ...(error ? { error } : {}) })
+    // A stop wins over whatever the SDK called the turn it cut short: the person asked.
+    if (interrupted) send({ type: 'turn_end', reason: 'stopped' })
+    else send({ type: 'turn_end', ...ending })
   }
 }
 
@@ -174,11 +363,21 @@ function onMessage(raw: string): void {
   switch (message.type) {
     case 'chat': {
       const text = message.text.trim()
-      if (!text || busy) return
+      if (!text) return
+      // Refused out loud. Dropping it silently left the person watching a message that had
+      // been typed, sent and forgotten by everything downstream.
+      if (busy) {
+        send({ type: 'rejected', reason: 'busy', text: message.text })
+        return
+      }
       void runChat(text, message.attachments)
       return
     }
     case 'stop': {
+      if (activeQuery) interrupted = true
+      // Unblock any question the turn is waiting on, or the query hangs interrupting a tool
+      // that is itself waiting on a person who is no longer going to answer.
+      failPendingQuestions('The person stopped the turn.')
       void activeQuery?.interrupt().catch(() => {
         // Interrupting a query that just finished on its own is not a failure.
       })
@@ -197,6 +396,16 @@ function onMessage(raw: string): void {
       else entry.reject(new Error(message.error ?? 'The editor rejected the command.'))
       return
     }
+    case 'answer': {
+      const entry = pendingQuestions.get(message.id)
+      if (!entry) return
+      pendingQuestions.delete(message.id)
+      clearTimeout(entry.timer)
+      // Formatted through the shared helper, so the tool result reads the same as the record
+      // the editor leaves on the answered card.
+      entry.resolve(formatAnswer(message.answer))
+      return
+    }
   }
 }
 
@@ -206,10 +415,20 @@ wss.on('connection', (socket) => {
     // sees the close. Failing them now gives the model a readable error instead of a 30s
     // timeout blaming the editor for a reply it was never going to send.
     failPending('A newer editor connection took over.')
-    editor.close(CLOSE_SUPERSEDED, 'Another editor tab connected.')
+    // Told before it is closed, so it knows this was a handover rather than the server
+    // going away. A tab that cannot tell the two apart reconnects on its backoff and
+    // displaces this one straight back.
+    const displaced = editor
+    if (displaced.readyState === WebSocket.OPEN) {
+      displaced.send(JSON.stringify({ type: 'evicted' } satisfies ServerMessage))
+    }
+    displaced.close()
   }
   editor = socket
-  send({ type: 'hello', busy })
+  // The token rides back so the editor can prove this is the sidecar and not a squatter. A
+  // client only reaches this line by presenting the token in `verifyClient`, so it already
+  // holds what is echoed: nothing new is handed out here.
+  send({ type: 'hello', busy, session: sessionId !== undefined, token: SESSION_TOKEN })
 
   socket.on('message', (data) => {
     onMessage(typeof data === 'string' ? data : data.toString())
@@ -219,9 +438,11 @@ wss.on('connection', (socket) => {
     if (editor !== socket) return
     editor = null
     failPending('The editor disconnected.')
+    failPendingQuestions('The editor disconnected.')
     // The person closed the tab mid-turn; without them there is nothing to design on.
     void activeQuery?.interrupt().catch(() => {})
   })
 })
 
 console.log(`agent server listening on ws://localhost:${AGENT_PORT}`)
+console.log(`agent token written to ${TOKEN_FILE}`)

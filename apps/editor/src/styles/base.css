@@ -31,14 +31,43 @@ button {
   cursor: default;
 }
 
-input {
+input,
+textarea {
   font: inherit;
   color: inherit;
+}
+
+/*
+ * Every column in this app spaces itself with a flex `gap`, and a paragraph's own 1em margins
+ * are a second opinion on top of that one. Worse, they do not collapse inside a flex container,
+ * so two of them add: the agent's step list asked for 4px between lines and got 26, which reads
+ * as a line height nobody chose. The gap is the single source, so the margin goes.
+ */
+p {
+  margin: 0;
 }
 
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
+}
+
+/*
+ * Except on a text field, which never wants one. A ring says "this is where the keyboard is
+ * pointing", and a field with a caret blinking in it has already said that, in the one place
+ * the eye is looking; the ring lands a second time around a box whose own border is what the
+ * field's hover and focus states are drawn on, so it reads as a stray rectangle rather than as
+ * information. Every text field in the app had reached that conclusion on its own and turned it
+ * off locally, in six copies of this declaration, and a rule six surfaces agree on is the
+ * global's job rather than each one's.
+ *
+ * The exceptions are pressable inputs. A checkbox, a radio, a colour swatch or a slider has no
+ * caret and no border of its own to speak with, so the ring is the whole of what says the
+ * keyboard is on it.
+ */
+input:not([type='checkbox'], [type='radio'], [type='color'], [type='range']):focus-visible,
+textarea:focus-visible {
+  outline: none;
 }
 
 /*

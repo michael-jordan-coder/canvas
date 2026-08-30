@@ -9,7 +9,9 @@ import {
   type Vec2,
 } from './math.js'
 import {
+  acceptsManualChildren,
   canHaveChildren,
+  clipsChildren,
   isPainted,
   type NodeId,
   type PaintedNode,
@@ -46,7 +48,9 @@ const SQUARE_CORNERS = uniformCornerRadii()
 
 /** Ellipses have no corner, and a text node's box is its layout bounds, square cornered. */
 function cornerRadiiOf(node: PaintedNode): CornerRadii {
-  return node.type === 'frame' || node.type === 'rectangle' ? node.cornerRadii : SQUARE_CORNERS
+  return node.type === 'frame' || node.type === 'rectangle' || node.type === 'code'
+    ? node.cornerRadii
+    : SQUARE_CORNERS
 }
 
 function withinShape(node: SceneNode, point: Vec2, outset: number): boolean {
@@ -89,7 +93,7 @@ function withinShape(node: SceneNode, point: Vec2, outset: number): boolean {
  * appear in.
  */
 function clipsAway(node: SceneNode, local: Vec2): boolean {
-  return node.type === 'frame' && node.clipsContent && !withinShape(node, local, 0)
+  return clipsChildren(node) && !withinShape(node, local, 0)
 }
 
 /**
@@ -143,7 +147,9 @@ export function containerAt(
       }
     }
 
-    if (!canHaveChildren(node)) return null
+    // Manual, not merely structural: a code node holds children but never takes a drop or a
+    // newly drawn shape, so asking "what would hold this?" has to look straight past it.
+    if (!acceptsManualChildren(node)) return null
     return containsPoint(node, local) ? node : null
   }
 
@@ -215,7 +221,7 @@ export function nodesIn(document: SceneDocument, rect: Rect): SceneNode[] {
         found.push(node)
         return
       }
-      const inner = node.type === 'frame' && node.clipsContent ? shown : clip
+      const inner = clipsChildren(node) ? shown : clip
       for (const child of document.getChildren(node.id)) visit(child, world, inner)
       return
     }

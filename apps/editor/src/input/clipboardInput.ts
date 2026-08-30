@@ -8,6 +8,7 @@ import {
   type SerializedSubtree,
 } from '@canvas/document'
 import { relayout } from '../state/autoLayout'
+import { rerunCodeNodesIn } from '../state/code'
 import { duplicateNodes } from '../state/duplicate'
 import { isEditingText } from './isEditingText'
 
@@ -90,11 +91,13 @@ export function createClipboardInput(options: ClipboardInputOptions): () => void
     }
 
     event.preventDefault()
-    scene.transact(() => {
-      const created = instantiateSubtree(scene, subtree, destination(), PASTE_OFFSET)
-      relayout(scene, created.map((node) => node.id))
-      options.setSelection(created.map((node) => node.id))
+    const created = scene.transact(() => {
+      const pasted = instantiateSubtree(scene, subtree, destination(), PASTE_OFFSET)
+      relayout(scene, pasted.map((node) => node.id))
+      options.setSelection(pasted.map((node) => node.id))
+      return pasted
     })
+    rerunCodeNodesIn(created.map((node) => node.id))
   }
 
   const onKeyDown = (event: KeyboardEvent): void => {
@@ -109,6 +112,7 @@ export function createClipboardInput(options: ClipboardInputOptions): () => void
     // Duplicating reads the current selection rather than the clipboard, so it does not
     // matter what was copied earlier, and it does not overwrite it either.
     const created = duplicateNodes(scene, selection, PASTE_OFFSET)
+    rerunCodeNodesIn(created.map((node) => node.id))
     if (created.length > 0) options.setSelection(created.map((node) => node.id))
   }
 

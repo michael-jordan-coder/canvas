@@ -1,19 +1,41 @@
+/*
+ * The tools float over the canvas, bottom centred, the way Figma's do. That is not only a
+ * placement: a docked bar spends a full row of the window on six buttons, and the row it
+ * spends is the one nearest the artwork. Floating gives it back, and puts the tools where
+ * the pointer already is rather than at the far edge of the screen.
+ *
+ * It is one of the two surfaces in the app allowed `--shadow-card`, under that token's rule:
+ * a shadow here means the same thing it means on the assistant's card, this floats over
+ * the canvas. So it takes the floating vocabulary whole, `--radius-lg` included, rather
+ * than keeping the docked 2px it had while it was chrome.
+ */
 .toolbar {
+  /* Fixed rather than absolute, so the bar holds one place on the window instead of on the
+     canvas column. Dragging a side panel resizes the canvas continuously, and a bar centred
+     on it would slide under the hand for the whole gesture: the tools are not the panels'
+     chrome and have no business moving with them. */
+  position: fixed;
+  bottom: var(--space-4);
+  left: 50%;
+  translate: -50% 0;
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  height: var(--toolbar-height);
-  padding: 0 var(--space-3);
+  padding: var(--space-2);
   background: var(--panel);
-  border-bottom: 1px solid var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
 }
 
 .tool {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius);
+  width: 34px;
+  height: 34px;
+  /* Round-ish, because the bar's own corner is: a sharp 2px chip inside a 12px shell reads
+     as a control that was pasted in. */
+  border-radius: var(--radius-field);
   color: var(--text);
   transition: background var(--duration) var(--ease);
 }
@@ -30,3 +52,24 @@
   background: var(--accent);
   color: var(--on-accent);
 }
+
+/* Working behind a closed card. The accent is the one colour that means active, and it says
+   so as a colour here because the fill is already spoken for by an open card. */
+.tool[data-busy='true']:not([aria-pressed='true']) {
+  color: var(--accent);
+}
+
+/* An inset ring would cut across a 4px corner rather than trace it, the same exception the
+   assistant's round controls make. */
+.tool:focus-visible {
+  outline-offset: 1px;
+}
+
+/* What separates the tools from the one control in here that is not one. */
+.divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 0 var(--space-1);
+  background: var(--line);
+}
+

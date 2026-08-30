@@ -25,7 +25,20 @@ export function reserveNodeIds(ids: Iterable<NodeId>): void {
   }
 }
 
-export type NodeType = 'page' | 'frame' | 'rectangle' | 'ellipse' | 'text'
+export type NodeType = 'page' | 'frame' | 'rectangle' | 'ellipse' | 'text' | 'code'
+
+/**
+ * A value that survives JSON, structured clone and the save file unchanged. Code node props
+ * are constrained to this so the same record can ride the worker boundary, the clipboard and
+ * the document format without a serializer per surface.
+ */
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue }
 
 export type LayoutDirection = 'horizontal' | 'vertical'
 /** `space-between` is meaningful on the main axis only; the cross axis has no run to spread. */
@@ -87,6 +100,13 @@ export interface BaseNode {
   transform: Mat2D
   size: Size
   layoutChild?: LayoutChild
+  /**
+   * The element key path this node was generated from, present only on nodes a code node's
+   * run produced. It is what lets a re-run recognise its own output and update in place
+   * instead of replacing it, so ids stay stable where keys match. Never serialized: generated
+   * nodes are skipped on save entirely.
+   */
+  sourceKey?: string
 }
 
 /**
@@ -162,17 +182,56 @@ export interface TextNode extends BaseNode {
   strokes: Stroke[]
 }
 
-export type SceneNode = PageNode | FrameNode | RectangleNode | EllipseNode | TextNode
+/**
+ * A frame whose children are written by running `source` rather than by hand. The code is
+ * the truth: the children it generates are real nodes in the document, created `locked` and
+ * carrying `sourceKey`, and only `source` and `props` are saved. `size` is a cache of the
+ * generated tree's bounds, under the text node's rule: whatever writes the source writes the
+ * size in the same transaction.
+ */
+export interface CodeNode extends BaseNode {
+  readonly type: 'code'
+  source: string
+  /** Handed to the code's default export on every run. JSON-safe so it saves and clones. */
+  props: Record<string, JsonValue>
+  clipsContent: boolean
+  fills: Paint[]
+  strokes: Stroke[]
+  /** As typed, not as drawn. What is drawn is `resolveCornerRadii` against the size. */
+  cornerRadii: CornerRadii
+}
+
+export type SceneNode = PageNode | FrameNode | RectangleNode | EllipseNode | TextNode | CodeNode
 
 /** Nodes that paint something. Excludes the page, which is only a container. */
-export type PaintedNode = FrameNode | RectangleNode | EllipseNode | TextNode
+export type PaintedNode = FrameNode | RectangleNode | EllipseNode | TextNode | CodeNode
 
 export function isPainted(node: SceneNode): node is PaintedNode {
   return node.type !== 'page'
 }
 
 export function canHaveChildren(node: SceneNode): boolean {
+  return node.type === 'page' || node.type === 'frame' || node.type === 'code'
+}
+
+/**
+ * Whether the user may put children here by hand: drawing inside, dropping a layer row,
+ * pasting into. A code node holds children but owns them, so it answers no. Split from
+ * `canHaveChildren` because the document-level insert has to accept generated children while
+ * every user-facing path refuses them.
+ */
+export function acceptsManualChildren(node: SceneNode): boolean {
   return node.type === 'page' || node.type === 'frame'
+}
+
+/**
+ * Whether this node clips its children to its own geometry. One predicate because three
+ * consumers have to agree on it: the clip chain the shader walks, hit testing, and the
+ * marquee's visibility rect. A site asking `type === 'frame'` by hand would silently leave
+ * the code node out of one of them.
+ */
+export function clipsChildren(node: SceneNode): node is FrameNode | CodeNode {
+  return (node.type === 'frame' || node.type === 'code') && node.clipsContent
 }
 
 const base = (type: NodeType, name: string): BaseNode => ({
@@ -233,6 +292,20 @@ export function createText(init: Partial<Omit<TextNode, 'id' | 'type'>> = {}): T
   }
 }
 
+export function createCode(init: Partial<Omit<CodeNode, 'id' | 'type'>> = {}): CodeNode {
+  return {
+    ...base('code', 'Code'),
+    type: 'code',
+    source: '',
+    props: {},
+    clipsContent: true,
+    fills: [],
+    strokes: [],
+    cornerRadii: uniformCornerRadii(),
+    ...init,
+  }
+}
+
 /** The layout a frame gets when auto layout is switched on with nothing to infer from. */
 export function defaultFrameLayout(direction: LayoutDirection = 'horizontal'): FrameLayout {
   return {
@@ -288,6 +361,26 @@ function cloneEffects(effects: DropShadow[] | undefined): { effects?: DropShadow
 }
 
 /**
+ * Hand-rolled rather than `structuredClone`, which this package's ES-only lib deliberately
+ * does not know about: reaching for a host global here is the boundary being crossed.
+ */
+export function cloneJsonValue(value: JsonValue): JsonValue {
+  if (Array.isArray(value)) return value.map(cloneJsonValue)
+  if (value !== null && typeof value === 'object') {
+    const copy: { [key: string]: JsonValue } = {}
+    for (const [key, entry] of Object.entries(value)) copy[key] = cloneJsonValue(entry)
+    return copy
+  }
+  return value
+}
+
+function cloneProps(props: Record<string, JsonValue>): Record<string, JsonValue> {
+  const copy: Record<string, JsonValue> = {}
+  for (const [key, value] of Object.entries(props)) copy[key] = cloneJsonValue(value)
+  return copy
+}
+
+/**
  * A copy deep enough that nothing in it is shared with the original.
  *
  * History depends on this completely. If a clone kept a reference to the live `children`
@@ -318,6 +411,7 @@ export function cloneNodeAs(node: SceneNode, id: NodeId): SceneNode {
     // Spread conditionally so a node without the field clones without the key, keeping the
     // clone indistinguishable from the original.
     ...(node.layoutChild ? { layoutChild: { ...node.layoutChild } } : {}),
+    ...(node.sourceKey !== undefined ? { sourceKey: node.sourceKey } : {}),
   }
 
   switch (node.type) {
@@ -369,6 +463,18 @@ export function cloneNodeAs(node: SceneNode, id: NodeId): SceneNode {
         characters: node.characters,
         fontSize: node.fontSize,
         autoWidth: node.autoWidth,
+        fills: node.fills.map(clonePaint),
+        strokes: node.strokes.map(cloneStroke),
+      }
+    case 'code':
+      return {
+        ...shared,
+        id,
+        type: 'code',
+        source: node.source,
+        props: cloneProps(node.props),
+        clipsContent: node.clipsContent,
+        cornerRadii: { ...node.cornerRadii },
         fills: node.fills.map(clonePaint),
         strokes: node.strokes.map(cloneStroke),
       }

@@ -7,6 +7,7 @@ import {
   type AxisSizing,
   type ChildSizing,
   type FrameLayout,
+  type JsonValue,
   type LayoutAlign,
   type LayoutChild,
   type LayoutDirection,
@@ -58,12 +59,17 @@ import { uniformCornerRadii, type CornerRadii } from './sdf.js'
  * they existed and one that simply has neither are the same paint, which is what makes the
  * gate unnecessary in both directions.
  *
- * 6 added gradient paints and drop shadows, which landed together and share the bump. Not
- * because a version 5 file needs migrating: an absent gradient and a version 5 file mean
- * the same thing, and `effects` is optional with absence meaning none. The bump is for the
- * other direction, the reason most of the entries above exist: a build from before either
- * feature should refuse a version 6 file rather than silently drop the fills and shadows
- * it cannot read and then overwrite the save without them.
+ * 6 added gradient paints, drop shadows and the code node, which landed together and share
+ * the bump. Gradients and shadows need no migration in either direction: an absent gradient
+ * and a version 5 file mean the same thing, and `effects` is optional with absence meaning
+ * none. The code node is the one part of this bump that does need the version gated rather
+ * than defaulted, since a version 5 file cannot contain one and a build from before it should
+ * refuse a version 6 file by version instead of on an unknown node type. Its generated
+ * children are not in the file at all: only `source` and `props` are the truth, and loading
+ * runs the code again. The rest of the bump, for gradients and shadows, is the same courtesy
+ * text bought at 2: a build from before either feature should refuse a version 6 file rather
+ * than silently drop the fills and shadows it cannot read and then overwrite the save without
+ * them.
  */
 export const SCHEMA_VERSION = 6
 
@@ -361,7 +367,36 @@ function parseLayoutChild(value: unknown, path: string): LayoutChild {
   }
 }
 
-const NODE_TYPES: readonly string[] = ['page', 'frame', 'rectangle', 'ellipse', 'text']
+/**
+ * Props are JSON by construction, so this is shape checking rather than conversion. Depth is
+ * whatever the file holds; a hostile file exhausts the stack long before it confuses this.
+ */
+function parseJsonValue(value: unknown, path: string): JsonValue {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
+  if (typeof value === 'number') return requireNumber(value, path)
+  if (Array.isArray(value)) {
+    return value.map((entry, index) => parseJsonValue(entry, `${path}[${index}]`))
+  }
+  if (isRecord(value)) {
+    const record: { [key: string]: JsonValue } = {}
+    for (const [key, entry] of Object.entries(value)) {
+      record[key] = parseJsonValue(entry, `${path}.${key}`)
+    }
+    return record
+  }
+  throw new InvalidDocumentError(`${path} is not a JSON value`)
+}
+
+function parseProps(value: unknown, path: string): Record<string, JsonValue> {
+  const record = requireRecord(value, path)
+  const props: Record<string, JsonValue> = {}
+  for (const [key, entry] of Object.entries(record)) {
+    props[key] = parseJsonValue(entry, `${path}.${key}`)
+  }
+  return props
+}
+
+const NODE_TYPES: readonly string[] = ['page', 'frame', 'rectangle', 'ellipse', 'text', 'code']
 
 function parseNode(value: unknown, path: string, version: number): SceneNode {
   const n = requireRecord(value, path)
@@ -443,6 +478,23 @@ function parseNode(value: unknown, path: string, version: number): SceneNode {
         fills: parsePaints(n['fills'], `${path}.fills`),
         strokes: parseStrokes(n['strokes'], `${path}.strokes`),
       }
+    case 'code': {
+      // A file claiming an older version cannot contain one; letting it through would be
+      // letting a malformed file through, the same reasoning the autoWidth gate states.
+      if (version < 6) {
+        throw new InvalidDocumentError(`${path}.type "code" is not valid before version 6`)
+      }
+      return {
+        ...shared,
+        type: 'code',
+        source: requireString(n['source'], `${path}.source`),
+        props: parseProps(n['props'], `${path}.props`),
+        clipsContent: requireBoolean(n['clipsContent'], `${path}.clipsContent`),
+        cornerRadii: parseCornerRadii(n, path, version),
+        fills: parsePaints(n['fills'], `${path}.fills`),
+        strokes: parseStrokes(n['strokes'], `${path}.strokes`),
+      }
+    }
   }
 }
 
@@ -492,12 +544,31 @@ export function parseSubtree(value: unknown): SerializedSubtree {
 
 // Writing ---------------------------------------------------------------------------------
 
+/**
+ * The walk that reaches disk. A code node is written, its generated children are not: the
+ * source is the truth and loading runs it again, so saving them would put two copies of the
+ * same fact in the file and let them disagree. The clone's `children` are emptied for the
+ * same reason, or every surviving node would reference ids the file does not contain.
+ */
+function* persistedClones(document: SceneDocument, from: NodeId): Generator<SceneNode> {
+  const node = document.getNode(from)
+  if (!node) return
+  const clone = cloneNode(node)
+  if (clone.type === 'code') {
+    clone.children = []
+    yield clone
+    return
+  }
+  yield clone
+  for (const child of node.children) yield* persistedClones(document, child)
+}
+
 export function serializeDocument(document: SceneDocument): SerializedDocument {
   return {
     kind: 'figma-canvas/document',
     version: SCHEMA_VERSION,
     root: document.rootId,
-    nodes: [...document.walk()].map(cloneNode),
+    nodes: [...persistedClones(document, document.rootId)],
   }
 }
 
@@ -524,7 +595,9 @@ export function serializeSubtree(
   const roots = selection.filter((id) => document.getNode(id) && !hasSelectedAncestor(id))
   const nodes: SceneNode[] = []
   for (const rootId of roots) {
-    for (const node of document.walk(rootId)) nodes.push(cloneNode(node))
+    // The same generated-children rule the document save applies, or a paste would
+    // materialise frozen copies of nodes the code node no longer owns.
+    for (const clone of persistedClones(document, rootId)) nodes.push(clone)
   }
 
   return { kind: 'figma-canvas/subtree', version: SCHEMA_VERSION, roots, nodes }

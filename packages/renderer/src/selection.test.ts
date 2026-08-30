@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   SceneDocument,
+  createCode,
   createFrame,
   createRectangle,
   degrees,
@@ -17,6 +18,7 @@ import {
   handleAt,
   handlePoints,
   handleScreenPoint,
+  resizeHandlesFor,
   rotateHandlePoint,
   selectionBox,
   selectionWorldBounds,
@@ -255,5 +257,22 @@ describe('grabAt', () => {
     expect(grabAt(turnedBox, drawn)).toBe('rotate')
     // Straight above the box is where it would have been had rotation been ignored.
     expect(grabAt(turnedBox, rotateHandlePoint(turnedBox.rect))).not.toBe('rotate')
+  })
+})
+
+describe('resizeHandlesFor', () => {
+  it('gives a code node none, since its size is the measured output', () => {
+    const document = new SceneDocument()
+    const code = document.insert(createCode({ size: { width: 200, height: 120 } }))
+    expect(resizeHandlesFor(document, [code.id])).toEqual([])
+    // And with no handles in the set, nothing along the perimeter is grabbable either.
+    const box = selectionBox(document, [code.id], origin, viewport)
+    if (!box) throw new Error('no box')
+    expect(handleAt(box, fromBoxSpace(box, { x: box.rect.x, y: box.rect.y }), [])).toBeNull()
+  })
+
+  it('still gives an ordinary node all eight', () => {
+    const { document, rectangle } = scene()
+    expect(resizeHandlesFor(document, [rectangle.id])).toHaveLength(8)
   })
 })

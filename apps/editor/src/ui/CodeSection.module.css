@@ -1,0 +1,90 @@
+/*
+ * The editor wears the same field dress every input in the panel wears: sunken background,
+ * quiet border, accent when focused. CodeMirror's classes are styled from outside rather
+ * than themed from inside, so the tokens stay the single source for its colors too.
+ */
+.editor {
+  background: var(--field);
+  border: 1px solid transparent;
+  border-radius: var(--radius-field);
+  overflow: hidden;
+}
+
+.editor:hover {
+  border-color: var(--line-strong);
+}
+
+.editor:focus-within {
+  border-color: var(--accent);
+}
+
+.editor :global(.cm-editor) {
+  max-height: 320px;
+  font-size: var(--text-sm);
+  background: transparent;
+}
+
+.editor :global(.cm-editor.cm-focused) {
+  outline: none;
+}
+
+.editor :global(.cm-scroller) {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  line-height: 1.5;
+  overflow: auto;
+}
+
+.editor :global(.cm-gutters) {
+  background: transparent;
+  border-right: 1px solid var(--line);
+  color: var(--text-secondary);
+}
+
+.editor :global(.cm-activeLine),
+.editor :global(.cm-activeLineGutter) {
+  background: transparent;
+}
+
+.playing {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+/* The same voice every other failure in the app speaks in. */
+.error {
+  color: var(--danger);
+  font-size: var(--text-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.props {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.propsLabel {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.propsInput {
+  padding: var(--space-2);
+  background: var(--field);
+  border: 1px solid transparent;
+  border-radius: var(--radius-field);
+  color: var(--text);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.propsInput:hover {
+  border-color: var(--line-strong);
+}
+
+.propsInput:focus {
+  border-color: var(--accent);
+}

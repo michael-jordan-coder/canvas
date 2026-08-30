@@ -25,6 +25,13 @@ interface UIState {
    * someone's caret is, is theirs, the same way their selection and their tool are.
    */
   editing: TextEditing | null
+  /**
+   * The code node whose prototype is running, or null. One at a time, because pointer
+   * events route to it and two live targets would race for every click. Set through
+   * `beginPlay`/`endPlay` in `state/code.ts`, which own the history bracketing; writing
+   * this field directly would skip it.
+   */
+  play: NodeId | null
   setTool: (tool: ToolId) => void
   setSelection: (ids: readonly NodeId[]) => void
   setContext: (context: SelectionContext) => void
@@ -36,6 +43,7 @@ interface UIState {
   setTextCaret: (caret: number, anchor: number) => void
   setCaretVisible: (caretVisible: boolean) => void
   endTextEdit: () => void
+  setPlay: (play: NodeId | null) => void
 }
 
 export const useUI = create<UIState>()((set) => ({
@@ -44,6 +52,8 @@ export const useUI = create<UIState>()((set) => ({
   collapsed: new Set<NodeId>(),
   context: null,
   editing: null,
+  play: null,
+  setPlay: (play) => set((state) => (state.play === play ? state : { play })),
   // Only the tool. Ending an editing session has rules that live in `state/textEditing.ts`,
   // and clearing the field here would skip them: `selectTool` there is the way in.
   setTool: (tool) => set({ tool }),

@@ -80,8 +80,3 @@
   border-radius: var(--radius);
   transition: background var(--duration) var(--ease);
 }
-
-/* The chip's own border carries hover and focus, so the hex needs no second surface. */
-.hex:focus-visible {
-  outline: none;
-}

@@ -1,0 +1,140 @@
+/*
+ * The right column, which holds the properties and the assistant one at a time.
+ *
+ * Scrolling belongs to whichever body is showing, not to this, so the resize edge and the
+ * tab row both span the full height and stay put while a transcript scrolls under them.
+ */
+.panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+}
+
+/*
+ * The tab row. Docked chrome, so it sits on the panel's own scale rather than a step above
+ * it: this is the same control as `SegmentedField`, at the same 24px and 11px, and it says
+ * so by matching rather than by importing. It takes that file's idioms and not its code,
+ * the way `CornerGrip` took `PanelResizer`'s, because the two differ where it counts: this
+ * one is a `tablist` whose state is `aria-selected`, it carries a dot, and it has no label
+ * column, which is most of what that component is.
+ */
+.tabs {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  height: 40px;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--line);
+}
+
+/* A well in the field tone with the chosen tab raised back to the panel colour, so which
+   one is on reads by contrast alone and the accent stays reserved for focus. */
+.segments {
+  display: flex;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
+  height: var(--row-height);
+  padding: var(--space-1);
+  background: var(--field);
+  /* A literal rather than `--radius-field`, and the one radius in the app that is: the tab
+     row is its own decision at 5, a pixel softer than the fields in the panel below it. A
+     token would be a fourth entry in the scale with one caller. */
+  border-radius: 5px;
+}
+
+.segment {
+  position: relative;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  /* The 1px the selected state adds is taken out of the padding rather than the box, since
+     `box-sizing` is border-box everywhere: without it the label would shift by a pixel as
+     the tab it sits in is chosen. */
+  border: 1px solid transparent;
+  /* The container's radius less its 2px of padding, so the chip's curve sits concentric
+     inside the well rather than being struck from a different centre. */
+  border-radius: calc(5px - var(--space-1));
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 16px;
+  /* Half a percent, as a ratio rather than the 0.055px it works out to at 11px, so it holds
+     if the size ever moves. */
+  letter-spacing: 0.005em;
+  cursor: pointer;
+  transition:
+    background var(--duration) var(--ease),
+    color var(--duration) var(--ease);
+}
+
+.segment:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.segment:active {
+  background: var(--pressed);
+}
+
+.segment[aria-selected='true'] {
+  background: var(--panel);
+  border-color: var(--line);
+  color: var(--text);
+}
+
+.segment:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/*
+ * Rides on the label rather than sitting in the row, so the tab's text stays centred with
+ * the dot present or absent: a label that shifts sideways when a turn touches the selection
+ * is the same flicker the tab switch was avoiding.
+ */
+.unseen {
+  position: absolute;
+  top: 50%;
+  right: var(--space-2);
+  width: 5px;
+  height: 5px;
+  margin-top: -6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.iconButton {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background var(--duration) var(--ease),
+    color var(--duration) var(--ease);
+}
+
+.iconButton:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.iconButton:active {
+  background: var(--pressed);
+}

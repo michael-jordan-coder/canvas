@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { SceneDocument, createFrame, createRectangle, createText } from '@canvas/document'
+import {
+  SceneDocument,
+  createCode,
+  createFrame,
+  createRectangle,
+  createText,
+} from '@canvas/document'
 import {
   deepSelectionTarget,
   descendSelectionTarget,
@@ -130,5 +136,61 @@ describe('descendSelectionTarget', () => {
     const first = descendSelectionTarget(document, text.id, null)
     expect(first).toEqual({ id: text.id, context: middle.id })
     expect(descendSelectionTarget(document, text.id, first?.context ?? null)).toBeNull()
+  })
+})
+
+describe('code node ownership', () => {
+  /** A code node inside a frame, holding the tree a run would have left. */
+  function withCode() {
+    const document = new SceneDocument()
+    const artboard = document.insert(createFrame({ size: { width: 400, height: 400 } }))
+    const code = document.insert(
+      createCode({ source: 'irrelevant', size: { width: 200, height: 100 } }),
+      artboard.id,
+    )
+    const row = document.insert(
+      createFrame({ locked: true, sourceKey: 'root', size: { width: 200, height: 40 } }),
+      code.id,
+    )
+    const label = document.insert(
+      createText({ locked: true, sourceKey: 'root/label', characters: 'hi' }),
+      row.id,
+    )
+    return { document, artboard, code, row, label }
+  }
+
+  it('resolves a hit on generated output to the code node, however deep', () => {
+    const { document, code, label } = withCode()
+    expect(selectionTarget(document, label.id, null).id).toBe(code.id)
+  })
+
+  it('does not let Cmd reach inside either', () => {
+    const { document, code, label } = withCode()
+    expect(deepSelectionTarget(document, label.id).id).toBe(code.id)
+  })
+
+  it('keeps an entered context from selecting generated output', () => {
+    const { document, code, row, label } = withCode()
+    // Entered the code node itself: a click inside it still answers with the code node.
+    expect(selectionTarget(document, label.id, code.id).id).toBe(code.id)
+    // A stale context naming a generated node cannot pull the resolution inside.
+    expect(selectionTarget(document, label.id, row.id).id).toBe(code.id)
+  })
+
+  it('bottoms descent out at the code node', () => {
+    const { document, artboard, code, label } = withCode()
+    // The plain click already stops at the code node one level inside the artboard.
+    const plain = selectionTarget(document, label.id, null)
+    expect(plain).toEqual({ id: code.id, context: artboard.id })
+    const deeper = descendSelectionTarget(document, label.id, plain.context)
+    expect(deeper).toBeNull()
+  })
+
+  it('leaves a code node itself selectable like any container', () => {
+    const { document, artboard, code } = withCode()
+    expect(selectionTarget(document, code.id, null)).toEqual({
+      id: code.id,
+      context: artboard.id,
+    })
   })
 })

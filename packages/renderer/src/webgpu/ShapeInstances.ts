@@ -1,6 +1,7 @@
 import {
   IDENTITY,
   applyToPoint,
+  clipsChildren,
   drawnEffects,
   drawnPaints,
   drawnStrokes,
@@ -212,9 +213,12 @@ export class ShapeInstances {
     // Shadows first, so painter's order puts them behind everything of this node: its fill,
     // its subtree and its stroke. They still land after earlier siblings, which is where a
     // drop shadow composites in Figma too: under the node, over what the node sits on.
-    if (painted) {
-      for (const shadow of drawnEffects(painted.effects)) {
-        this.#submitShadow(painted, world, alpha, shadow, clip)
+    // Code nodes have no `effects` field: their output is generated, not styled by hand, and
+    // a shadow is out of scope for what running source can express.
+    const shadowed = painted && painted.type !== 'code' ? painted : null
+    if (shadowed) {
+      for (const shadow of drawnEffects(shadowed.effects)) {
+        this.#submitShadow(shadowed, world, alpha, shadow, clip)
       }
     }
     // One instance per fill, back to front, so painter's order composites the stack with no
@@ -227,10 +231,9 @@ export class ShapeInstances {
       }
     }
 
-    const inner =
-      node.type === 'frame' && node.clipsContent
-        ? this.#clips.push(world, node.size, node.cornerRadii, clip)
-        : clip
+    const inner = clipsChildren(node)
+      ? this.#clips.push(world, node.size, node.cornerRadii, clip)
+      : clip
 
     for (const child of document.getChildren(node.id)) {
       this.#collect(document, child, world, alpha, inner)

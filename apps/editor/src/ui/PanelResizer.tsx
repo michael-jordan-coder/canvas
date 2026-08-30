@@ -1,37 +1,8 @@
 import { useLayoutEffect, useRef, useState, type ReactElement } from 'react'
+import { readStored, writeStored } from '../state/localStorage'
+import { PANEL_MIN_WIDTH, PANEL_NUDGE, clampPanelWidth } from './panelSize'
+import { setRootLength } from './rootLength'
 import styles from './PanelResizer.module.css'
-
-/** How wide a panel is allowed to be dragged, and where a double click puts it back. */
-const PANEL_MIN_WIDTH = 240
-const PANEL_MAX_WIDTH = 480
-
-const clampWidth = (width: number): number =>
-  Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, width))
-
-/**
- * Storage can throw rather than merely fail: Safari private mode and storage-blocked
- * embeds raise on access, the case `state/persistence.ts` already guards against. A panel
- * width is not worth a blank editor, so these degrade to "this session does not persist".
- */
-const readStored = (key: string): string | null => {
-  try {
-    return window.localStorage.getItem(key)
-  } catch {
-    return null
-  }
-}
-
-const writeStored = (key: string, value: string | null): void => {
-  try {
-    if (value === null) {
-      window.localStorage.removeItem(key)
-    } else {
-      window.localStorage.setItem(key, value)
-    }
-  } catch {
-    // Quota exceeded, or storage blocked. The width simply resets next load.
-  }
-}
 
 interface PanelResizerProps {
   /** Which screen edge the panel is docked to. The grab edge sits on the opposite side. */
@@ -41,19 +12,12 @@ interface PanelResizerProps {
   /** Where the width survives a reload. */
   storageKey: string
   label: string
-}
-
-/**
- * The width lives on a root custom property rather than a style prop, the same shape the
- * scrub cursor takes: the stylesheet stays the only place a component's CSS is written,
- * and the app grid reads the token without knowing the panel resizes at all.
- */
-const applyWidth = (cssVar: string, width: number | null): void => {
-  if (width === null) {
-    document.documentElement.style.removeProperty(cssVar)
-  } else {
-    document.documentElement.style.setProperty(cssVar, `${width}px`)
-  }
+  /**
+   * How narrow this panel may be dragged. A panel holding the conversation needs more room
+   * than one holding fields, and the difference is a property of the panel rather than of
+   * the gesture, so it arrives here instead of being a second constant in `panelSize`.
+   */
+  minWidth?: number
 }
 
 /**
@@ -62,7 +26,14 @@ const applyWidth = (cssVar: string, width: number | null): void => {
  * release and put back on mount. A double click returns the default, which is also what
  * clears the store.
  */
-export function PanelResizer({ side, cssVar, storageKey, label }: PanelResizerProps): ReactElement {
+export function PanelResizer({
+  side,
+  cssVar,
+  storageKey,
+  label,
+  minWidth = PANEL_MIN_WIDTH,
+}: PanelResizerProps): ReactElement {
+  const clampWidth = (width: number): number => clampPanelWidth(width, minWidth)
   const dragging = useRef<number | null>(null)
   // The number is the source of truth and the custom property is only ever written, so
   // nothing has to parse a width back out of the DOM. Null means "the stylesheet default",
@@ -77,13 +48,13 @@ export function PanelResizer({ side, cssVar, storageKey, label }: PanelResizerPr
     const saved = Number.parseFloat(readStored(storageKey) ?? '')
     if (Number.isFinite(saved)) {
       width.current = clampWidth(saved)
-      applyWidth(cssVar, width.current)
+      setRootLength(cssVar, width.current)
     }
-  }, [cssVar, storageKey])
+  }, [cssVar, storageKey, minWidth])
 
   const setWidth = (next: number | null): void => {
     width.current = next
-    applyWidth(cssVar, next)
+    setRootLength(cssVar, next)
   }
 
   const persist = (): void => {
@@ -104,7 +75,7 @@ export function PanelResizer({ side, cssVar, storageKey, label }: PanelResizerPr
     const current =
       width.current ??
       Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(cssVar))
-    setWidth(clampWidth((Number.isFinite(current) ? current : PANEL_MIN_WIDTH) + delta))
+    setWidth(clampWidth((Number.isFinite(current) ? current : minWidth) + delta))
     persist()
   }
 
@@ -144,7 +115,7 @@ export function PanelResizer({ side, cssVar, storageKey, label }: PanelResizerPr
         // whatever is selected on the canvas one step per repeat.
         event.preventDefault()
         event.stopPropagation()
-        nudge(event.key === grow ? 16 : -16)
+        nudge(event.key === grow ? PANEL_NUDGE : -PANEL_NUDGE)
       }}
     />
   )

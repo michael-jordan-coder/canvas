@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { SceneDocument } from './document.js'
 import { translation } from './math.js'
 import {
+  createCode,
   createEllipse,
   createFrame,
   createRectangle,
@@ -714,5 +715,80 @@ describe('gradients and effects on disk', () => {
       { offset: { x: 0, y: 0 }, blur: -1, spread: 0, color: { r: 0, g: 0, b: 0, a: 1 } },
     ]
     expect(() => parseDocument(file)).toThrow(/effects\[0\]\.blur is negative/)
+  })
+})
+
+describe('the code node on disk', () => {
+  function withCode() {
+    const document = new SceneDocument()
+    const code = document.insert(
+      createCode({
+        name: 'Nav',
+        transform: translation(20, 30),
+        size: { width: 200, height: 100 },
+        source: 'export default function App() { return null }',
+        props: { items: ['a', 'b'], depth: { level: 2 } },
+      }),
+    )
+    // What a run leaves behind: a locked child carrying its source key.
+    document.insert(
+      createRectangle({ name: 'Generated', locked: true, sourceKey: 'root' }),
+      code.id,
+    )
+    return { document, code }
+  }
+
+  it('writes the source and props and none of the generated children', () => {
+    const { document, code } = withCode()
+    const file = serializeDocument(document)
+
+    const saved = file.nodes.find((node) => node.id === code.id)
+    expect(saved?.type).toBe('code')
+    if (saved?.type !== 'code') throw new Error('expected a code node')
+    expect(saved.source).toContain('export default')
+    expect(saved.props).toEqual({ items: ['a', 'b'], depth: { level: 2 } })
+    // The child is gone and the code node does not reference it, so every id resolves.
+    expect(file.nodes.some((node) => node.name === 'Generated')).toBe(false)
+    expect(saved.children).toEqual([])
+    expect(JSON.stringify(file)).not.toContain('sourceKey')
+  })
+
+  it('round trips through JSON with the source intact and no children', () => {
+    const { document, code } = withCode()
+    const parsed = parseDocument(JSON.parse(JSON.stringify(serializeDocument(document))))
+    const restored = new SceneDocument()
+    restored.load(parsed.root, parsed.nodes)
+
+    const back = restored.expectNode(code.id)
+    expect(back.type).toBe('code')
+    if (back.type !== 'code') throw new Error('expected a code node')
+    expect(back.source).toBe('export default function App() { return null }')
+    expect(restored.getChildren(code.id)).toHaveLength(0)
+  })
+
+  it('strips generated children from the clipboard too, so a paste cannot carry ghosts', () => {
+    const { document, code } = withCode()
+    const subtree = serializeSubtree(document, [code.id])
+    expect(subtree.nodes).toHaveLength(1)
+    expect(subtree.nodes[0]?.children).toEqual([])
+  })
+
+  it('refuses a code node claiming a version before 6, like the autoWidth gate', () => {
+    const { document } = withCode()
+    const file = JSON.parse(JSON.stringify(serializeDocument(document))) as {
+      version: number
+    }
+    file.version = 5
+    expect(() => parseDocument(file)).toThrow(/"code" is not valid before version 6/)
+  })
+
+  it('names the path of a prop that is not JSON', () => {
+    const { document } = withCode()
+    const file = JSON.parse(JSON.stringify(serializeDocument(document))) as {
+      nodes: { type: string; props?: Record<string, unknown> }[]
+    }
+    const saved = file.nodes.find((node) => node.type === 'code')
+    if (saved) saved.props = { bad: Number.NaN }
+    expect(() => parseDocument(file)).toThrow(/props\.bad is not a finite number/)
   })
 })
