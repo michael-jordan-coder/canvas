@@ -3,9 +3,11 @@ import {
   drawnPaints,
   drawnStrokes,
   fromHex,
+  hsvToRgb,
   isPaintVisible,
   paintOpacity,
   parseHex,
+  rgbToHsv,
   strokesOutset,
   type Paint,
   type Stroke,
@@ -54,6 +56,52 @@ describe('parseHex', () => {
 
   it('carries the alpha argument through', () => {
     expect(parseHex('#ff8800', 0.5)?.color.a).toBe(0.5)
+  })
+})
+
+describe('rgbToHsv / hsvToRgb', () => {
+  it('round trips an arbitrary colour', () => {
+    const rgb = { r: 0.2, g: 0.6, b: 0.9, a: 1 }
+    const back = hsvToRgb(rgbToHsv(rgb), rgb.a)
+    expect(back.r).toBeCloseTo(rgb.r)
+    expect(back.g).toBeCloseTo(rgb.g)
+    expect(back.b).toBeCloseTo(rgb.b)
+  })
+
+  it('reads pure red as hue 0, full saturation and value', () => {
+    const hsv = rgbToHsv({ r: 1, g: 0, b: 0, a: 1 })
+    expect(hsv.h).toBeCloseTo(0)
+    expect(hsv.s).toBeCloseTo(1)
+    expect(hsv.v).toBeCloseTo(1)
+  })
+
+  it('reads pure green as hue 120', () => {
+    expect(rgbToHsv({ r: 0, g: 1, b: 0, a: 1 }).h).toBeCloseTo(120)
+  })
+
+  it('reads pure blue as hue 240', () => {
+    expect(rgbToHsv({ r: 0, g: 0, b: 1, a: 1 }).h).toBeCloseTo(240)
+  })
+
+  it('gives grey zero saturation and keeps the hue it is handed', () => {
+    const grey = rgbToHsv({ r: 0.5, g: 0.5, b: 0.5, a: 1 }, 200)
+    expect(grey.s).toBeCloseTo(0)
+    expect(grey.h).toBe(200)
+  })
+
+  it('renders hue 0 saturation 1 value 1 as pure red', () => {
+    const rgb = hsvToRgb({ h: 0, s: 1, v: 1 })
+    expect(rgb.r).toBeCloseTo(1)
+    expect(rgb.g).toBeCloseTo(0)
+    expect(rgb.b).toBeCloseTo(0)
+  })
+
+  it('renders hue 360 the same as hue 0', () => {
+    expect(hsvToRgb({ h: 360, s: 1, v: 1 })).toEqual(hsvToRgb({ h: 0, s: 1, v: 1 }))
+  })
+
+  it('carries the alpha argument through', () => {
+    expect(hsvToRgb({ h: 0, s: 1, v: 1 }, 0.4).a).toBe(0.4)
   })
 })
 

@@ -195,12 +195,24 @@
 /*
  * The gradient ramp: an SVG because its colours are data, and the convention keeps dynamic
  * colour on presentation attributes. Tall enough that the stop handles are grabbable.
+ *
+ * The checker stands in for the page behind the paint, the same reason any editor draws one
+ * under a translucent swatch: a stop fading to alpha 0 would otherwise be indistinguishable
+ * from one fading to the opaque field colour behind it.
+ *
+ * Overflow is visible and the track is inset from both ends by more than a handle's own
+ * bleed (radius plus half its stroke), because the two stops of every new gradient sit
+ * exactly at 0% and 100%: clipped to the box, as the default `overflow: hidden` on an SVG
+ * left them, they drew as the two handles you would reach for first, each cut to a
+ * half-circle by the edge they sat on.
  */
 .ramp {
   display: block;
   height: 16px;
+  margin-inline: var(--space-3);
+  overflow: visible;
   border-radius: 4px;
-  background: var(--field);
+  background: repeating-conic-gradient(var(--hover) 0% 25%, var(--field) 0% 50%) 0 0 / 8px 8px;
   cursor: pointer;
 }
 

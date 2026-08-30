@@ -261,3 +261,40 @@ export function toHex(color: RGBA): string {
       .padStart(2, '0')
   return `#${channel(color.r)}${channel(color.g)}${channel(color.b)}`
 }
+
+/**
+ * Hue in degrees, saturation and value 0..1, the picker's own space rather than the
+ * document's: a saturation/value square and a hue ring both move one channel at a time,
+ * which RGB has no axis for.
+ */
+export interface HSV {
+  h: number
+  s: number
+  v: number
+}
+
+/** Grey (`max === 0` or `delta === 0`) keeps whatever hue it is handed, so dragging value
+ *  down to black and back up returns a picker to the hue it started from rather than red. */
+export function rgbToHsv({ r, g, b }: RGBA, hueForGrey = 0): HSV {
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  const delta = max - min
+  let h = hueForGrey
+  if (delta > 0) {
+    if (max === r) h = 60 * (((g - b) / delta) % 6)
+    else if (max === g) h = 60 * ((b - r) / delta + 2)
+    else h = 60 * ((r - g) / delta + 4)
+    if (h < 0) h += 360
+  }
+  return { h, s: max === 0 ? 0 : delta / max, v: max }
+}
+
+export function hsvToRgb({ h, s, v }: HSV, a = 1): RGBA {
+  const c = v * s
+  const hh = ((h % 360) + 360) % 360 / 60
+  const x = c * (1 - Math.abs((hh % 2) - 1))
+  const [r1, g1, b1] =
+    hh < 1 ? [c, x, 0] : hh < 2 ? [x, c, 0] : hh < 3 ? [0, c, x] : hh < 4 ? [0, x, c] : hh < 5 ? [x, 0, c] : [c, 0, x]
+  const m = v - c
+  return { r: r1 + m, g: g1 + m, b: b1 + m, a }
+}

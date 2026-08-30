@@ -35,37 +35,29 @@
 }
 
 /*
- * A native colour input, sized down to a swatch. Its own value carries the colour, which is
- * how a per-node colour reaches the screen without ever becoming an inline style.
+ * A button sized down to a swatch, opening our own picker rather than the browser's. The
+ * colour itself lives on the inner rect's `fill`, a presentation attribute rather than a
+ * style prop, the rule every dynamic colour in the app follows.
  */
 .swatch {
+  display: grid;
+  place-items: center;
   flex: none;
   width: 14px;
   height: 14px;
   padding: 0;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius);
+  border: 0;
   background: none;
   cursor: pointer;
-  transition: border-color var(--duration) var(--ease);
 }
 
-.swatch:hover {
-  border-color: var(--text-secondary);
+.swatchRect {
+  stroke: var(--line-strong);
+  transition: stroke var(--duration) var(--ease);
 }
 
-.swatch::-webkit-color-swatch-wrapper {
-  padding: 0;
-}
-
-.swatch::-webkit-color-swatch {
-  border: none;
-  border-radius: 1px;
-}
-
-.swatch:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+.swatch:hover .swatchRect {
+  stroke: var(--text-secondary);
 }
 
 .hex {

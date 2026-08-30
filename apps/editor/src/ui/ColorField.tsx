@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react'
-import { fromHex, parseHex, toHex, type RGBA } from '@canvas/document'
-import { scene } from '../state/scene'
+import { useRef, useState, type ReactElement } from 'react'
+import { parseHex, toHex, type RGBA } from '@canvas/document'
+import { ColorPicker } from './ColorPicker'
 import styles from './ColorField.module.css'
 
 interface ColorFieldProps {
@@ -10,42 +10,18 @@ interface ColorFieldProps {
 }
 
 /**
- * The swatch is the control, not a preview of one.
- *
- * A native colour input fires on every movement inside the picker, so the whole session is
- * folded into one history group and closed on blur, which is the same shape a canvas drag
- * uses. Without that, opening the picker once would leave a hundred undo steps behind.
+ * The swatch is the control, not a preview of one: clicking it opens our own picker rather
+ * than the browser's, so a fill, a stroke, a shadow and a gradient stop all pick colour the
+ * same way the rest of the canvas draws, in SVG with the colour on a presentation attribute.
+ * The picker keeps its own history group per drag; this field only ever commits the hex text
+ * as one discrete edit.
  */
 export function ColorField({ label, color, onChange }: ColorFieldProps): ReactElement {
-  const grouped = useRef(false)
+  const [open, setOpen] = useState(false)
+  const swatchRef = useRef<HTMLButtonElement>(null)
   const [hexDraft, setHexDraft] = useState<string | null>(null)
   // Mirrors `hexDraft` so a commit can clear it synchronously. See `commitHex`.
   const draftRef = useRef<string | null>(null)
-
-  const pick = (hex: string): void => {
-    if (!grouped.current) {
-      scene.beginHistoryGroup()
-      grouped.current = true
-    }
-    // The picker has no alpha channel, so whatever the paint already had is kept.
-    onChange({ ...fromHex(hex).color, a: color.a })
-  }
-
-  const end = (): void => {
-    if (!grouped.current) return
-    grouped.current = false
-    scene.endHistoryGroup()
-  }
-
-  // A row removed from a paint stack while its picker is open never blurs, and a group left
-  // open silently swallows every later edit in the session. Same net `NumberField` keeps
-  // under a scrub whose node is deselected out from under it.
-  useEffect(
-    () => () => {
-      if (grouped.current) scene.endHistoryGroup()
-    },
-    [],
-  )
 
   const editHex = (value: string | null): void => {
     draftRef.current = value
@@ -53,9 +29,6 @@ export function ColorField({ label, color, onChange }: ColorFieldProps): ReactEl
   }
 
   /**
-   * A single valid hex commit is one discrete change, unlike the swatch's continuous drag
-   * session above, so it needs no history group of its own.
-   *
    * The draft is cleared through the ref before anything else, because committing on Enter
    * calls `blur()`, and that dispatches focusout synchronously: `onBlur` would re-enter this
    * with the state from the current render, where `hexDraft` is still set, and commit the same
@@ -67,20 +40,26 @@ export function ColorField({ label, color, onChange }: ColorFieldProps): ReactEl
     if (draft === null) return
     editHex(null)
     const parsed = parseHex(draft)
+    // The picker has no hex field of its own, so whatever alpha the colour already had is
+    // kept: typing a hex value changes the colour, not how much of it shows through.
     if (parsed) onChange({ ...parsed.color, a: color.a })
   }
 
   return (
     <div className={styles.field}>
       <span className={styles.label}>{label}</span>
-      <input
+      <button
+        ref={swatchRef}
+        type="button"
         className={styles.swatch}
-        type="color"
         aria-label={`${label} colour`}
-        value={toHex(color)}
-        onChange={(event) => pick(event.target.value)}
-        onBlur={end}
-      />
+        aria-expanded={open}
+        onClick={() => setOpen((was) => !was)}
+      >
+        <svg width={14} height={14} viewBox="0 0 14 14" aria-hidden="true">
+          <rect className={styles.swatchRect} x="0.5" y="0.5" width="13" height="13" rx="2" fill={toHex(color)} />
+        </svg>
+      </button>
       <input
         className={styles.hex}
         type="text"
@@ -100,6 +79,15 @@ export function ColorField({ label, color, onChange }: ColorFieldProps): ReactEl
           }
         }}
       />
+      {open && swatchRef.current && (
+        <ColorPicker
+          label={label}
+          color={color}
+          anchor={swatchRef.current}
+          onChange={onChange}
+          onClose={() => setOpen(false)}
+        />
+      )}
     </div>
   )
 }

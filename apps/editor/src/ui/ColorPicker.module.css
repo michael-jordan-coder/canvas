@@ -1,0 +1,69 @@
+/*
+ * Placed once, on open: `--x` and `--y` come from the swatch's own rect, clamped to the
+ * viewport. `visibility` stays hidden until that write lands, the same guard the code node's
+ * Play button uses, so a popover with nowhere to be yet does not flash at the top left.
+ */
+.popover {
+  position: fixed;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+  translate: var(--x, 0) var(--y, 0);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 200px;
+  padding: var(--space-4);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+}
+
+.popover[data-placed] {
+  visibility: visible;
+}
+
+/*
+ * Both tracks and the square itself let their handles bleed past the track's own edge
+ * rather than clip them there: a handle sitting exactly at 0 or 1 is stroked and radiused,
+ * so clipping it at the box edge would cut it to a half circle, the same bug the gradient
+ * ramp had before its stops were inset. The popover's own padding is generous enough that
+ * the bleed never reaches its border.
+ */
+.field {
+  display: block;
+  width: 100%;
+  height: 140px;
+  overflow: visible;
+  cursor: crosshair;
+}
+
+.track {
+  display: block;
+  width: 100%;
+  height: 12px;
+  overflow: visible;
+  cursor: pointer;
+}
+
+/* The chequer stands in for the page behind the paint, so alpha 0 reads as transparent
+   rather than as one more shade of the field colour. Same pattern as the gradient ramp. */
+.alphaTrack {
+  border-radius: 6px;
+  background: repeating-conic-gradient(var(--hover) 0% 25%, var(--field) 0% 50%) 0 0 / 8px 8px;
+}
+
+.trackBody {
+  pointer-events: none;
+}
+
+/* One handle style for all three controls: a white dot ringed in a translucent dark
+   stroke, so it reads against a bright hue and a dark one alike. */
+.handle {
+  fill: #fff;
+  stroke: rgb(0 0 0 / 0.4);
+  stroke-width: 1.5;
+  pointer-events: none;
+}
