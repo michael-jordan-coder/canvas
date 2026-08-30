@@ -1,5 +1,6 @@
 import {
   drawnPaints,
+  paintColor,
   drawnStrokes,
   isPainted,
   toHex,
@@ -51,8 +52,10 @@ export function tallySelectionColors(
   for (const rootId of selectionRoots(scene, selection)) {
     for (const node of scene.walk(rootId)) {
       if (!isPainted(node)) continue
-      for (const paint of drawnPaints(node.fills)) bump(toHex(paint.color))
-      for (const stroke of drawnStrokes(node.strokes)) bump(toHex(stroke.paint.color))
+      // A gradient tallies as its first stop, the same one colour that stands for it
+      // everywhere else a paint has to be a single swatch.
+      for (const paint of drawnPaints(node.fills)) bump(toHex(paintColor(paint)))
+      for (const stroke of drawnStrokes(node.strokes)) bump(toHex(paintColor(stroke.paint)))
     }
   }
 

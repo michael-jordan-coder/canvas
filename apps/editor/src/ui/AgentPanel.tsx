@@ -4,15 +4,31 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
+  type ClipboardEvent,
+  type DragEvent,
   type KeyboardEvent,
   type ReactElement,
   type SyntheticEvent,
 } from 'react'
-import { agentClient } from '../agent/connection'
+import {
+  MAX_ATTACHMENTS,
+  MAX_ATTACHMENT_BYTES,
+  type Attachment,
+} from '@canvas/agent-server/protocol'
+import { agentClient, toDataUrl } from '../agent/connection'
 import { isConnected, isWorking, useAgent, type ChatItem } from '../agent/agentStore'
 import { failureCount, isNearBottom, showsPendingWork, stepsLabel, toRows } from '../agent/chatRows'
 import { isAssistantShortcut } from '../input/assistantShortcut'
-import { AssistantIcon, CheckIcon, ChevronIcon, CloseIcon, SendIcon, StopIcon } from './icons'
+import {
+  AssistantIcon,
+  CheckIcon,
+  ChevronIcon,
+  CloseIcon,
+  PaperclipIcon,
+  SendIcon,
+  StopIcon,
+} from './icons'
 import styles from './AgentPanel.module.css'
 
 /**
@@ -28,6 +44,13 @@ import styles from './AgentPanel.module.css'
  * unmounting the conversation loses nothing but where it was scrolled to, and that is kept
  * below.
  */
+
+/** The image types the API accepts; anything else is refused before it is read. */
+const ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const
+
+function isAcceptedType(type: string): type is Attachment['mimeType'] {
+  return (ACCEPTED_TYPES as readonly string[]).includes(type)
+}
 
 /**
  * One folded run. Closed it is a single line: the step count once done, or the step in
@@ -105,9 +128,16 @@ function Working(): ReactElement {
 
 function Item({ item }: { item: ChatItem }): ReactElement {
   return (
-    <p className={styles.message} data-kind={item.kind}>
+    <div className={styles.message} data-kind={item.kind}>
+      {item.images && item.images.length > 0 && (
+        <div className={styles.messageImages}>
+          {item.images.map((src, index) => (
+            <img key={index} className={styles.messageImage} src={src} alt="Attached reference" />
+          ))}
+        </div>
+      )}
       {item.text}
-    </p>
+    </div>
   )
 }
 
@@ -395,6 +425,8 @@ function Composer(): ReactElement {
   const setOpen = useAgent((state) => state.setOpen)
   const focusToken = useAgent((state) => state.focusToken)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [attachments, setAttachments] = useState<Attachment[]>([])
   const connected = isConnected(status)
 
   // Whatever asked for the caret gets it, however the panel was already standing: the token
@@ -403,13 +435,61 @@ function Composer(): ReactElement {
     if (focusToken > 0) inputRef.current?.focus()
   }, [focusToken])
 
+  /**
+   * The one funnel for paste, drop and the picker, so the type filter, the size limit and
+   * the cap live in one place. A refused file says why, the way a turn error already does.
+   */
+  const addFiles = (files: FileList | File[]): void => {
+    const refuse = (text: string): void => useAgent.getState().append('error', text)
+    let room = MAX_ATTACHMENTS - attachments.length
+    for (const file of Array.from(files)) {
+      if (!isAcceptedType(file.type)) {
+        refuse(`${file.name || 'That file'} is not a PNG, JPEG, GIF or WebP image.`)
+        continue
+      }
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        refuse(
+          `${file.name || 'That image'} is over ${Math.round(MAX_ATTACHMENT_BYTES / 1_000_000)} MB.`,
+        )
+        continue
+      }
+      if (room <= 0) {
+        refuse(`Up to ${MAX_ATTACHMENTS} images go with one message.`)
+        break
+      }
+      room -= 1
+      const mimeType = file.type
+      const reader = new FileReader()
+      reader.onload = () => {
+        const result = reader.result
+        if (typeof result !== 'string') return
+        // A data URL is "data:<mime>;base64,<data>"; the wire wants the data alone.
+        const base64 = result.slice(result.indexOf(',') + 1)
+        setAttachments((current) =>
+          current.length < MAX_ATTACHMENTS ? [...current, { base64, mimeType }] : current,
+        )
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+
   const submit = (event: SyntheticEvent): void => {
     event.preventDefault()
     const text = draft.trim()
-    if (!text || status !== 'idle') return
-    // The draft is cleared only once the socket has taken it. A message the server never
+    if (status !== 'idle') return
+    if (!text && attachments.length === 0) return
+    // An image alone is a legitimate message, but an empty text block is not valid content,
+    // and the draft is cleared only once the socket has taken it: a message the server never
     // heard would otherwise vanish from the composer and from the transcript alike.
-    if (agentClient.send(text)) setDraft('')
+    if (
+      agentClient.send(
+        text || 'Use this image as a design reference.',
+        attachments.length > 0 ? attachments : undefined,
+      )
+    ) {
+      setDraft('')
+      setAttachments([])
+    }
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -431,8 +511,51 @@ function Composer(): ReactElement {
     }
   }
 
+  const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>): void => {
+    if (event.clipboardData.files.length === 0) return
+    // Only a file paste is intercepted; pasted text keeps its default behaviour.
+    event.preventDefault()
+    addFiles(event.clipboardData.files)
+  }
+
+  const onDrop = (event: DragEvent<HTMLElement>): void => {
+    event.preventDefault()
+    if (!connected) return
+    addFiles(event.dataTransfer.files)
+  }
+
+  const onPick = (event: ChangeEvent<HTMLInputElement>): void => {
+    if (event.target.files) addFiles(event.target.files)
+    // Reset so picking the same file again still fires a change.
+    event.target.value = ''
+  }
+
   return (
-    <form className={styles.composer} onSubmit={submit}>
+    <form
+      className={styles.composer}
+      onSubmit={submit}
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={onDrop}
+    >
+      {attachments.length > 0 && (
+        <div className={styles.chips}>
+          {attachments.map((attachment, index) => (
+            <div key={index} className={styles.chip}>
+              <img className={styles.chipImage} src={toDataUrl(attachment)} alt="" />
+              <button
+                type="button"
+                className={styles.chipRemove}
+                aria-label="Remove image"
+                onClick={() =>
+                  setAttachments((current) => current.filter((_, at) => at !== index))
+                }
+              >
+                <CloseIcon size={10} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <div className={styles.field}>
         <textarea
           ref={inputRef}
@@ -449,7 +572,25 @@ function Composer(): ReactElement {
           disabled={!connected}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={onKeyDown}
+          onPaste={onPaste}
         />
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          multiple
+          hidden
+          onChange={onPick}
+        />
+        <button
+          type="button"
+          className={styles.attach}
+          aria-label="Attach image"
+          disabled={!connected}
+          onClick={() => fileRef.current?.click()}
+        >
+          <PaperclipIcon />
+        </button>
         {isWorking(status) ? (
           <button
             type="button"
@@ -465,7 +606,7 @@ function Composer(): ReactElement {
             type="submit"
             className={styles.action}
             aria-label="Send"
-            disabled={!connected || draft.trim() === ''}
+            disabled={!connected || (draft.trim() === '' && attachments.length === 0)}
           >
             <SendIcon />
           </button>

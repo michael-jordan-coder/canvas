@@ -15,7 +15,17 @@ import {
   type NodeType,
   type SceneNode,
 } from './node.js'
-import type { Paint, RGBA, Stroke, StrokeAlign } from './paint.js'
+import {
+  MAX_GRADIENT_STOPS,
+  sortStops,
+  type DropShadow,
+  type GradientPaint,
+  type GradientStop,
+  type Paint,
+  type RGBA,
+  type Stroke,
+  type StrokeAlign,
+} from './paint.js'
 import { uniformCornerRadii, type CornerRadii } from './sdf.js'
 
 /**
@@ -49,11 +59,17 @@ import { uniformCornerRadii, type CornerRadii } from './sdf.js'
  * they existed and one that simply has neither are the same paint, which is what makes the
  * gate unnecessary in both directions.
  *
- * 6 added the code node. Nothing migrates in the reading direction, since a version 5 file
- * cannot contain one; the bump is the same courtesy text bought at 2, a build from before
- * code refusing a version 6 file by version instead of on an unknown node type. The node's
- * generated children are not in the file at all: only `source` and `props` are the truth,
- * and loading runs the code again.
+ * 6 added gradient paints, drop shadows and the code node, which landed together and share
+ * the bump. Gradients and shadows need no migration in either direction: an absent gradient
+ * and a version 5 file mean the same thing, and `effects` is optional with absence meaning
+ * none. The code node is the one part of this bump that does need the version gated rather
+ * than defaulted, since a version 5 file cannot contain one and a build from before it should
+ * refuse a version 6 file by version instead of on an unknown node type. Its generated
+ * children are not in the file at all: only `source` and `props` are the truth, and loading
+ * runs the code again. The rest of the bump, for gradients and shadows, is the same courtesy
+ * text bought at 2: a build from before either feature should refuse a version 6 file rather
+ * than silently drop the fills and shadows it cannot read and then overwrite the save without
+ * them.
  */
 export const SCHEMA_VERSION = 6
 
@@ -152,6 +168,39 @@ function parseColor(value: unknown, path: string): RGBA {
   }
 }
 
+function parseVec2(value: unknown, path: string): Vec2 {
+  const v = requireRecord(value, path)
+  return {
+    x: requireNumber(v['x'], `${path}.x`),
+    y: requireNumber(v['y'], `${path}.y`),
+  }
+}
+
+/**
+ * Zero stops are rejected here, so a degenerate gradient never reaches the shader: one stop
+ * is the smallest gradient, and it draws as a solid of that colour. The positions must be in
+ * 0..1 but need not arrive sorted; sorting on the way in is what makes "stops are sorted" an
+ * invariant everything downstream can lean on rather than a hope.
+ */
+function parseStops(value: unknown, path: string): GradientStop[] {
+  const raw = requireArray(value, path)
+  if (raw.length === 0) throw new InvalidDocumentError(`${path} is empty`)
+  if (raw.length > MAX_GRADIENT_STOPS) {
+    throw new InvalidDocumentError(`${path} has more than ${MAX_GRADIENT_STOPS} stops`)
+  }
+  const stops = raw.map((stop, index) => {
+    const s = requireRecord(stop, `${path}[${index}]`)
+    const position = requireNumber(s['position'], `${path}[${index}].position`)
+    if (position < 0 || position > 1) {
+      throw new InvalidDocumentError(`${path}[${index}].position is not in 0..1`)
+    }
+    return { position, color: parseColor(s['color'], `${path}[${index}].color`) }
+  })
+  return sortStops(stops)
+}
+
+const GRADIENT_TYPES: readonly string[] = ['linear', 'radial']
+
 /**
  * `opacity` and `visible` are absent-means-default in the model itself, so a version 5 file
  * that predates them and a paint that simply carries neither read identically and no version
@@ -160,10 +209,7 @@ function parseColor(value: unknown, path: string): RGBA {
 function parsePaint(value: unknown, path: string): Paint {
   const p = requireRecord(value, path)
   const type = requireString(p['type'], `${path}.type`)
-  if (type !== 'solid') throw new InvalidDocumentError(`${path}.type "${type}" is not supported`)
-  return {
-    type: 'solid',
-    color: parseColor(p['color'], `${path}.color`),
+  const base = {
     ...(p['opacity'] !== undefined
       ? { opacity: requireNumber(p['opacity'], `${path}.opacity`) }
       : {}),
@@ -171,6 +217,50 @@ function parsePaint(value: unknown, path: string): Paint {
       ? { visible: requireBoolean(p['visible'], `${path}.visible`) }
       : {}),
   }
+  if (type === 'solid') {
+    return { type: 'solid', color: parseColor(p['color'], `${path}.color`), ...base }
+  }
+  if (GRADIENT_TYPES.includes(type)) {
+    return {
+      type: type as GradientPaint['type'],
+      from: parseVec2(p['from'], `${path}.from`),
+      to: parseVec2(p['to'], `${path}.to`),
+      stops: parseStops(p['stops'], `${path}.stops`),
+      ...base,
+    }
+  }
+  throw new InvalidDocumentError(`${path}.type "${type}" is not supported`)
+}
+
+function parseEffect(value: unknown, path: string): DropShadow {
+  const e = requireRecord(value, path)
+  const blur = requireNumber(e['blur'], `${path}.blur`)
+  if (blur < 0) throw new InvalidDocumentError(`${path}.blur is negative`)
+  return {
+    offset: parseVec2(e['offset'], `${path}.offset`),
+    blur,
+    spread: requireNumber(e['spread'], `${path}.spread`),
+    color: parseColor(e['color'], `${path}.color`),
+    ...(e['visible'] !== undefined
+      ? { visible: requireBoolean(e['visible'], `${path}.visible`) }
+      : {}),
+  }
+}
+
+function parseEffects(value: unknown, path: string): DropShadow[] {
+  return requireArray(value, path).map((effect, index) =>
+    parseEffect(effect, `${path}[${index}]`),
+  )
+}
+
+/** Absence means no effects in the model itself, so this needs no version gate either. */
+function parseOptionalEffects(
+  node: Record<string, unknown>,
+  path: string,
+): { effects?: DropShadow[] } {
+  return node['effects'] !== undefined
+    ? { effects: parseEffects(node['effects'], `${path}.effects`) }
+    : {}
 }
 
 /**
@@ -354,6 +444,7 @@ function parseNode(value: unknown, path: string, version: number): SceneNode {
         cornerRadii: parseCornerRadii(n, path, version),
         fills: parsePaints(n['fills'], `${path}.fills`),
         strokes: parseStrokes(n['strokes'], `${path}.strokes`),
+        ...parseOptionalEffects(n, path),
         ...(n['layout'] !== undefined
           ? { layout: parseFrameLayout(n['layout'], `${path}.layout`) }
           : {}),
@@ -365,6 +456,7 @@ function parseNode(value: unknown, path: string, version: number): SceneNode {
         cornerRadii: parseCornerRadii(n, path, version),
         fills: parsePaints(n['fills'], `${path}.fills`),
         strokes: parseStrokes(n['strokes'], `${path}.strokes`),
+        ...parseOptionalEffects(n, path),
       }
     case 'ellipse':
       return {
@@ -372,6 +464,7 @@ function parseNode(value: unknown, path: string, version: number): SceneNode {
         type: 'ellipse',
         fills: parsePaints(n['fills'], `${path}.fills`),
         strokes: parseStrokes(n['strokes'], `${path}.strokes`),
+        ...parseOptionalEffects(n, path),
       }
     case 'text':
       return {

@@ -2,20 +2,25 @@ import {
   IDENTITY,
   applyToPoint,
   clipsChildren,
+  drawnEffects,
   drawnPaints,
   drawnStrokes,
   invert,
   isPainted,
   multiply,
+  paintColor,
   paintOpacity,
   resolveCornerRadii,
+  shadowReach,
   strokeOffset,
   strokeOutset,
   transformRect,
   uniformCornerRadii,
   type CornerRadii,
+  type DropShadow,
   type FontMetrics,
   type Mat2D,
+  type Paint,
   type PaintedNode,
   type RGBA,
   type Rect,
@@ -27,7 +32,13 @@ import {
 } from '@canvas/document'
 import { viewMatrix, type Camera, type Viewport } from '../camera.js'
 import { NO_CLIP, type ClipRegions } from './ClipRegions.js'
-import { BYTES_PER_INSTANCE, FLOATS_PER_INSTANCE } from './instanceLayout.js'
+import { NO_GRADIENT, type GradientRamps } from './GradientRamps.js'
+import {
+  BIT_GRADIENT,
+  BIT_SHADOW,
+  BYTES_PER_INSTANCE,
+  FLOATS_PER_INSTANCE,
+} from './instanceLayout.js'
 
 const KIND_RECTANGULAR = 0
 const KIND_ELLIPTICAL = 1
@@ -106,6 +117,7 @@ function expand(rect: Rect, fraction: number): Rect {
 export class ShapeInstances {
   #device: GPUDevice
   #clips: ClipRegions
+  #ramps: GradientRamps
   #buffer: GPUBuffer | null = null
   #capacity = 0
   #data = new Float32Array(0)
@@ -125,11 +137,13 @@ export class ShapeInstances {
   constructor(
     device: GPUDevice,
     clips: ClipRegions,
+    ramps: GradientRamps,
     metrics: FontMetrics,
     layouts: TextLayoutCache,
   ) {
     this.#device = device
     this.#clips = clips
+    this.#ramps = ramps
     this.#metrics = metrics
     this.#layouts = layouts
   }
@@ -159,6 +173,9 @@ export class ShapeInstances {
     this.#count = 0
     this.#culled = 0
     this.#clips.reset()
+    // Cleared exactly where the clips are, and for the same reason: both tables describe
+    // this build of the buffer and nothing else.
+    this.#ramps.reset()
     // This walk is the only one that visits every node, so it is what ages the layout cache.
     this.#layouts.sweep()
 
@@ -171,6 +188,7 @@ export class ShapeInstances {
 
     this.#upload()
     this.#clips.upload()
+    this.#ramps.upload()
   }
 
   #collect(
@@ -192,13 +210,24 @@ export class ShapeInstances {
     if (node.type === 'text') this.#submitText(node, world, alpha, clip)
 
     const painted = isPainted(node) && node.type !== 'text' ? node : null
+    // Shadows first, so painter's order puts them behind everything of this node: its fill,
+    // its subtree and its stroke. They still land after earlier siblings, which is where a
+    // drop shadow composites in Figma too: under the node, over what the node sits on.
+    // Code nodes have no `effects` field: their output is generated, not styled by hand, and
+    // a shadow is out of scope for what running source can express.
+    const shadowed = painted && painted.type !== 'code' ? painted : null
+    if (shadowed) {
+      for (const shadow of drawnEffects(shadowed.effects)) {
+        this.#submitShadow(shadowed, world, alpha, shadow, clip)
+      }
+    }
     // One instance per fill, back to front, so painter's order composites the stack with no
     // second pass and no blending to arrange. The frame's own paint answers to the clip it
     // sits in, not to its own: a frame does not clip itself, which is what lets an outward
     // stroke on a clipping frame still show.
     if (painted) {
       for (const fill of drawnPaints(painted.fills)) {
-        this.#submit(painted, world, alpha * paintOpacity(fill), fill.color, clip)
+        this.#submit(painted, world, alpha * paintOpacity(fill), fill, clip)
       }
     }
 
@@ -216,7 +245,7 @@ export class ShapeInstances {
     if (painted) {
       for (const stroke of drawnStrokes(painted.strokes)) {
         const paint = stroke.paint
-        this.#submit(painted, world, alpha * paintOpacity(paint), paint.color, clip, stroke)
+        this.#submit(painted, world, alpha * paintOpacity(paint), paint, clip, stroke)
       }
     }
   }
@@ -242,6 +271,9 @@ export class ShapeInstances {
 
     for (const fill of fills) {
       const paintAlpha = alpha * paintOpacity(fill)
+      // A glyph's spare slots carry its patch of the atlas, so there is nowhere to put a
+      // gradient index: a gradient fill on text draws as a solid of its first stop.
+      const color = paintColor(fill)
       for (const line of layout.lines) {
         for (const placed of line.glyphs) {
           // Whitespace advances the pen and has nothing to draw.
@@ -262,7 +294,7 @@ export class ShapeInstances {
             continue
           }
 
-          this.#pushGlyph(world, box, fill.color, paintAlpha, quad.uv, clip)
+          this.#pushGlyph(world, box, color, paintAlpha, quad.uv, clip)
         }
       }
     }
@@ -333,7 +365,7 @@ export class ShapeInstances {
     node: BoxNode,
     world: Mat2D,
     alpha: number,
-    color: RGBA,
+    paint: Paint,
     clip: number,
     stroke?: Stroke,
   ): void {
@@ -352,16 +384,126 @@ export class ShapeInstances {
       this.#culled += 1
       return
     }
-    this.#push(node, world, alpha, color, clip, stroke)
+    this.#push(node, world, alpha, paint, clip, stroke)
   }
 
   #push(
     node: BoxNode,
     world: Mat2D,
     alpha: number,
-    color: RGBA,
+    paint: Paint,
     clip: number,
     stroke?: Stroke,
+  ): void {
+    this.#reserve(this.#count + 1)
+    const at = this.#count * FLOATS_PER_INSTANCE
+    // Pushed after the cull, so an off-screen gradient costs the table nothing.
+    const gradient = paint.type === 'solid' ? NO_GRADIENT : this.#ramps.push(paint)
+    const color = paintColor(paint)
+
+    this.#data[at + 0] = world.a
+    this.#data[at + 1] = world.b
+    this.#data[at + 2] = world.c
+    this.#data[at + 3] = world.d
+
+    this.#data[at + 4] = world.tx
+    this.#data[at + 5] = world.ty
+    this.#data[at + 6] = node.size.width
+    this.#data[at + 7] = node.size.height
+
+    // For a gradient the colour slot still carries a real colour, the first stop's, so the
+    // slot means something on every instance and is a sensible fallback if the bit is ever
+    // unset. Its alpha is the inherited one alone: each stop carries its own alpha in the
+    // ramp, and the shader multiplies the two, which is how a solid composes them too.
+    this.#data[at + 8] = color.r
+    this.#data[at + 9] = color.g
+    this.#data[at + 10] = color.b
+    this.#data[at + 11] = paint.type === 'solid' ? color.a * alpha : alpha
+
+    // The gradient's index in the ramps table, or NO_GRADIENT for a solid.
+    this.#data[at + 12] = gradient
+    this.#data[at + 13] = node.type === 'ellipse' ? KIND_ELLIPTICAL : KIND_RECTANGULAR
+    // Weight 0 marks a fill. Anything above it is a band around the shape's edge, and the
+    // offset says where that band sits relative to the edge.
+    this.#data[at + 14] = stroke ? stroke.weight : 0
+    this.#data[at + 15] = stroke ? strokeOffset(stroke) : 0
+
+    // Which clipping frame this instance answers to, or NO_CLIP. The other three floats are
+    // padding the vertex format needs anyway, so the next per instance flag is free.
+    this.#data[at + 16] = clip
+    // A drop shadow's blur and spread; zero on everything that is not one.
+    this.#data[at + 17] = 0
+    this.#data[at + 18] = 0
+    // The feature bitfield, read as a u32 by the shader. Bit 0 means the paint is a
+    // gradient; bit 1, set only in #pushShadow, that the instance is a drop shadow.
+    this.#data[at + 19] = gradient === NO_GRADIENT ? 0 : BIT_GRADIENT
+
+    // Resolved here rather than in the shader: resolution needs all four radii and both
+    // sides at once, gives the same answer for every pixel, and is what makes the packer,
+    // the clip table and hit testing agree instead of clamping three separate ways.
+    const radii = resolveCornerRadii(node.size, cornerRadiiOf(node))
+    this.#data[at + 20] = radii.topLeft
+    this.#data[at + 21] = radii.topRight
+    this.#data[at + 22] = radii.bottomRight
+    this.#data[at + 23] = radii.bottomLeft
+
+    this.#count += 1
+  }
+
+  /**
+   * Culls a shadow against its own reach in its own place, which is not the node's: the
+   * offset moves it and blur plus spread grow it, so a shadow can be on screen while its
+   * node is not.
+   */
+  #submitShadow(
+    node: BoxNode,
+    world: Mat2D,
+    alpha: number,
+    shadow: DropShadow,
+    clip: number,
+  ): void {
+    const shadowWorld = this.#offsetWorld(world, shadow)
+    const reach = shadowReach(shadow)
+    const bounds = transformRect(shadowWorld, {
+      x: -reach,
+      y: -reach,
+      width: node.size.width + reach * 2,
+      height: node.size.height + reach * 2,
+    })
+
+    if (!this.#coverage || !intersects(this.#coverage, bounds)) {
+      this.#culled += 1
+      return
+    }
+    this.#pushShadow(node, shadowWorld, alpha, shadow, clip)
+  }
+
+  /**
+   * The offset goes in the transform, not in the quad padding. Both padding computations,
+   * `outset()` in the vertex stage and the reach above, assume uniform four-side padding,
+   * and an offset is directional: folding it in here leaves both untouched. Pushed through
+   * the world's linear part so it is in the node's own units, turning and scaling with the
+   * node the way its stroke does.
+   */
+  #offsetWorld(world: Mat2D, shadow: DropShadow): Mat2D {
+    return {
+      ...world,
+      tx: world.tx + world.a * shadow.offset.x + world.c * shadow.offset.y,
+      ty: world.ty + world.b * shadow.offset.x + world.d * shadow.offset.y,
+    }
+  }
+
+  /**
+   * A shadow is a third instance kind alongside fill and stroke: same size, same radii, the
+   * transform translated by the offset, the shadow's own colour, bit 1 set, and blur and
+   * spread in the two flags slots a box instance never used. The SDF gives it nearly free.
+   */
+  #pushShadow(
+    node: BoxNode,
+    world: Mat2D,
+    alpha: number,
+    shadow: DropShadow,
+    clip: number,
   ): void {
     this.#reserve(this.#count + 1)
     const at = this.#count * FLOATS_PER_INSTANCE
@@ -376,34 +518,21 @@ export class ShapeInstances {
     this.#data[at + 6] = node.size.width
     this.#data[at + 7] = node.size.height
 
-    this.#data[at + 8] = color.r
-    this.#data[at + 9] = color.g
-    this.#data[at + 10] = color.b
-    this.#data[at + 11] = color.a * alpha
+    this.#data[at + 8] = shadow.color.r
+    this.#data[at + 9] = shadow.color.g
+    this.#data[at + 10] = shadow.color.b
+    this.#data[at + 11] = shadow.color.a * alpha
 
-    // Free since the corner radius left for an attribute of its own. Reserved for the index
-    // of this instance's gradient, which will write -1 here when the paint is a solid.
-    this.#data[at + 12] = 0
+    this.#data[at + 12] = NO_GRADIENT
     this.#data[at + 13] = node.type === 'ellipse' ? KIND_ELLIPTICAL : KIND_RECTANGULAR
-    // Weight 0 marks a fill. Anything above it is a band around the shape's edge, and the
-    // offset says where that band sits relative to the edge.
-    this.#data[at + 14] = stroke ? stroke.weight : 0
-    this.#data[at + 15] = stroke ? strokeOffset(stroke) : 0
+    this.#data[at + 14] = 0
+    this.#data[at + 15] = 0
 
-    // Which clipping frame this instance answers to, or NO_CLIP. The other three floats are
-    // padding the vertex format needs anyway, so the next per instance flag is free.
     this.#data[at + 16] = clip
-    // Reserved for a drop shadow's blur and spread.
-    this.#data[at + 17] = 0
-    this.#data[at + 18] = 0
-    // The feature bitfield, read as a u32 by the shader. Bit 0 will mean the paint is a
-    // gradient and bit 1 that the instance is a drop shadow. Neither exists yet, and "no
-    // features" is the zero that is already being written.
-    this.#data[at + 19] = 0
+    this.#data[at + 17] = shadow.blur
+    this.#data[at + 18] = shadow.spread
+    this.#data[at + 19] = BIT_SHADOW
 
-    // Resolved here rather than in the shader: resolution needs all four radii and both
-    // sides at once, gives the same answer for every pixel, and is what makes the packer,
-    // the clip table and hit testing agree instead of clamping three separate ways.
     const radii = resolveCornerRadii(node.size, cornerRadiiOf(node))
     this.#data[at + 20] = radii.topLeft
     this.#data[at + 21] = radii.topRight

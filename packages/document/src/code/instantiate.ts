@@ -179,7 +179,11 @@ function samePaints(a: readonly Paint[], b: readonly Paint[]): boolean {
   if (a.length !== b.length) return false
   return a.every((paint, index) => {
     const other = b[index]
-    if (!other) return false
+    if (!other || paint.type !== other.type) return false
+    // fillsOf and strokesOf only ever build solid paints from a hex prop, so a gradient
+    // never reaches here from this reconciler; the guard keeps the comparison honest about
+    // that rather than reaching into color fields a gradient does not have.
+    if (paint.type !== 'solid' || other.type !== 'solid') return false
     return (
       near(paint.color.r, other.color.r) &&
       near(paint.color.g, other.color.g) &&

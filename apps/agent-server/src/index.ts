@@ -1,10 +1,13 @@
 import type { IncomingMessage } from 'node:http'
-import { query, type PermissionResult } from '@anthropic-ai/claude-agent-sdk'
+import { query, type PermissionResult, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { WebSocketServer, WebSocket } from 'ws'
 import {
   AGENT_PORT,
+  MAX_ATTACHMENTS,
+  MAX_ATTACHMENT_BYTES,
   formatAnswer,
   type AgentQuestion,
+  type Attachment,
   type ClientMessage,
   type CommandName,
   type ServerMessage,
@@ -183,6 +186,31 @@ function forward(name: CommandName, args: unknown): Promise<unknown> {
 const canvas = createCanvasMcpServer(forward)
 
 /**
+ * The SDK's structured entry: one user message carrying the images and the text as content
+ * blocks. Images first, then the text, because a model reads the instruction better when
+ * the thing it refers to is already in context.
+ */
+function promptWithImages(text: string, attachments: Attachment[]): AsyncIterable<SDKUserMessage> {
+  async function* stream(): AsyncGenerator<SDKUserMessage> {
+    yield {
+      type: 'user',
+      parent_tool_use_id: null,
+      message: {
+        role: 'user',
+        content: [
+          ...attachments.map((a) => ({
+            type: 'image' as const,
+            source: { type: 'base64' as const, media_type: a.mimeType, data: a.base64 },
+          })),
+          { type: 'text' as const, text },
+        ],
+      },
+    }
+  }
+  return stream()
+}
+
+/**
  * The permission callback, and the only thing that ever reaches it.
  *
  * `AskUserQuestion` is the SDK's own tool, and the model is trained to reach for it, which
@@ -228,7 +256,7 @@ async function handleAsk(
   }
 }
 
-async function runChat(text: string): Promise<void> {
+async function runChat(text: string, attachments?: Attachment[]): Promise<void> {
   busy = true
   interrupted = false
   send({ type: 'turn_start' })
@@ -236,8 +264,19 @@ async function runChat(text: string): Promise<void> {
   let ending: { reason: TurnEndReason; detail?: string } = { reason: 'ok' }
 
   try {
+    // The editor enforces both limits too, but the socket is not the editor's alone to
+    // speak on: a malformed message should end as a readable error, not a rejected API call.
+    const images = attachments?.slice(0, MAX_ATTACHMENTS) ?? []
+    for (const image of images) {
+      if (Buffer.from(image.base64, 'base64').length > MAX_ATTACHMENT_BYTES) {
+        throw new Error(
+          `An attached image exceeds ${Math.round(MAX_ATTACHMENT_BYTES / 1_000_000)} MB.`,
+        )
+      }
+    }
+
     const q = query({
-      prompt: text,
+      prompt: images.length > 0 ? promptWithImages(text, images) : text,
       options: {
         ...(sessionId ? { resume: sessionId } : {}),
         systemPrompt: SYSTEM_PROMPT,
@@ -331,7 +370,7 @@ function onMessage(raw: string): void {
         send({ type: 'rejected', reason: 'busy', text: message.text })
         return
       }
-      void runChat(text)
+      void runChat(text, message.attachments)
       return
     }
     case 'stop': {
@@ -372,6 +411,10 @@ function onMessage(raw: string): void {
 
 wss.on('connection', (socket) => {
   if (editor && editor !== socket) {
+    // Commands in flight were sent to the old tab, which will stop answering the moment it
+    // sees the close. Failing them now gives the model a readable error instead of a 30s
+    // timeout blaming the editor for a reply it was never going to send.
+    failPending('A newer editor connection took over.')
     // Told before it is closed, so it knows this was a handover rather than the server
     // going away. A tab that cannot tell the two apart reconnects on its backoff and
     // displaces this one straight back.

@@ -273,6 +273,17 @@ export function formatAnswer(answer: QuestionAnswer): string {
 
 // Messages -------------------------------------------------------------------------------
 
+/** An image the person attached to a chat message, as reference material for the agent. */
+export interface Attachment {
+  /** Base64 without the data-URL prefix, which is what the SDK wants. */
+  base64: string
+  mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
+}
+
+export const MAX_ATTACHMENTS = 4
+/** Bytes, before base64. Comfortably under the 8 MiB the SDK will take per image. */
+export const MAX_ATTACHMENT_BYTES = 5_000_000
+
 /** Why a turn ended. `ok` is the ordinary case and says nothing to the person. */
 export type TurnEndReason = 'ok' | 'stopped' | 'max_turns' | 'error'
 
@@ -339,7 +350,7 @@ export type ServerMessage =
   | { type: 'rejected'; reason: 'busy'; text: string }
 
 export type ClientMessage =
-  | { type: 'chat'; text: string }
+  | { type: 'chat'; text: string; attachments?: Attachment[] }
   | { type: 'stop' }
   | { type: 'reset' }
   | { type: 'result'; id: number; ok: boolean; value?: unknown; error?: string }

@@ -1,3 +1,5 @@
+import type { Vec2 } from './math.js'
+
 /**
  * Channels are 0..1 rather than 0..255 because that is what the GPU wants. Converting
  * per frame for every node is waste, so the document stores the GPU-native form and the
@@ -33,11 +35,64 @@ export interface SolidPaint extends PaintBase {
   color: RGBA
 }
 
-export type Paint = SolidPaint
+export interface GradientStop {
+  /** 0 to 1 along the gradient's axis. */
+  position: number
+  color: RGBA
+}
+
+/**
+ * The most stops one gradient may carry. The shader walks the stops and a walk needs a
+ * bound for the same reason `MAX_CLIP_DEPTH` has one: a malformed record must not hang the
+ * GPU. Eight is generous for real documents, and the parser refuses more rather than
+ * silently dropping the ninth.
+ */
+export const MAX_GRADIENT_STOPS = 8
+
+export interface GradientPaint extends PaintBase {
+  type: 'linear' | 'radial'
+  /**
+   * The axis, in the node's own 0..1 box space. Linear runs from `from` to `to`. Radial
+   * centres on `from` with `to` naming the edge of the ellipse, so both kinds need the
+   * same two points and one geometry path serves them.
+   *
+   * Box space rather than world units, so a gradient survives a resize without
+   * recomputation. Because the box is normalised, a circle here is an ellipse in node
+   * units, stretched with the node's own aspect.
+   *
+   * `stops` is sorted by position, and that is an invariant: the shader walks them in
+   * order, and an unsorted array reads as a scrambled ramp, which looks like a shader bug
+   * and is not one. Everything that writes stops sorts them on the way in.
+   */
+  from: Vec2
+  to: Vec2
+  stops: GradientStop[]
+}
+
+export type Paint = SolidPaint | GradientPaint
 
 /** A paint's own opacity, which multiplies with its colour's alpha and with the node's. */
 export function paintOpacity(paint: Paint): number {
   return paint.opacity ?? 1
+}
+
+/**
+ * The one colour that stands for the paint: a solid's own, a gradient's first stop.
+ *
+ * This is what the instance's colour slot carries even when the paint is a gradient, so
+ * everything that wants one swatch per paint (the selection colours tally, the agent's hex
+ * report, the shader if the gradient bit is ever unset) asks here instead of narrowing the
+ * union three separate ways. A gradient with no stops cannot be constructed through the
+ * parser or the panel, so the fallback black is unreachable rather than a default.
+ */
+export function paintColor(paint: Paint): RGBA {
+  if (paint.type === 'solid') return paint.color
+  return paint.stops[0]?.color ?? { r: 0, g: 0, b: 0, a: 1 }
+}
+
+/** In place, because every caller has just built or cloned the array it hands over. */
+export function sortStops(stops: GradientStop[]): GradientStop[] {
+  return stops.sort((a, b) => a.position - b.position)
 }
 
 /** Whether the paint draws at all. A hidden paint keeps its place in the stack. */
@@ -125,6 +180,53 @@ export function strokesOutset(strokes: readonly Stroke[]): number {
   let outset = 0
   for (const stroke of drawnStrokes(strokes)) outset = Math.max(outset, strokeOutset(stroke))
   return outset
+}
+
+/**
+ * A drop shadow. Offset is in the node's own units and travels with its transform, so a
+ * shadow turns and scales with the node the way its stroke does.
+ *
+ * Deliberately not part of hit testing or the selection bounds: a shadow is not clickable,
+ * in Figma either, and it does not enlarge the box that zoom-to-fit and multi-select frame.
+ * `strokesOutset` stays the only thing that grows a node's clickable area; do not add an
+ * `effectsOutset`, the omission is the design.
+ */
+export interface DropShadow {
+  offset: Vec2
+  /** Never negative. Zero is a sharp-edged shadow, not an invalid one. */
+  blur: number
+  spread: number
+  color: RGBA
+  /** Absent means shown, matching a paint's `visible`. */
+  visible?: boolean
+}
+
+export function isEffectVisible(effect: DropShadow): boolean {
+  return effect.visible !== false
+}
+
+/**
+ * The shadows a node actually draws, back to front, hidden ones dropped. Reversed for the
+ * same reason `drawnPaints` is: the panel lists the topmost effect first, the buffer paints
+ * what it is handed first at the bottom.
+ */
+export function drawnEffects(effects: readonly DropShadow[] | undefined): DropShadow[] {
+  if (!effects) return []
+  const drawn: DropShadow[] = []
+  for (let index = effects.length - 1; index >= 0; index -= 1) {
+    const effect = effects[index]
+    if (effect && isEffectVisible(effect)) drawn.push(effect)
+  }
+  return drawn
+}
+
+/**
+ * How far a shadow's edge reaches past the node's own, never negative. The offset is not
+ * part of it on purpose: it rides in the shadow instance's transform, so the quad padding
+ * this feeds stays uniform on all four sides.
+ */
+export function shadowReach(effect: DropShadow): number {
+  return Math.max(0, effect.spread + effect.blur)
 }
 
 export function solid(r: number, g: number, b: number, a = 1): SolidPaint {

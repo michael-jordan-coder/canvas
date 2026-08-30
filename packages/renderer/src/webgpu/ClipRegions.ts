@@ -21,10 +21,13 @@ const BYTES_PER_CLIP = FLOATS_PER_CLIP * 4
 /** The chain terminator. A clip with no parent is the outermost one. */
 export const NO_CLIP = -1
 
-/** One layout for the clip table, held by the shape pipeline alone. */
-export function createClipBindGroupLayout(device: GPUDevice): GPUBindGroupLayout {
+/**
+ * One layout for the document's variable-length tables, held by the shape pipeline alone:
+ * the clip table at binding 0 and the gradient ramps at binding 1.
+ */
+export function createStorageBindGroupLayout(device: GPUDevice): GPUBindGroupLayout {
   return device.createBindGroupLayout({
-    label: 'clips',
+    label: 'storage tables',
     entries: [
       {
         binding: 0,
@@ -33,6 +36,32 @@ export function createClipBindGroupLayout(device: GPUDevice): GPUBindGroupLayout
         visibility: GPUShaderStage.FRAGMENT,
         buffer: { type: 'read-only-storage' },
       },
+      {
+        binding: 1,
+        visibility: GPUShaderStage.FRAGMENT,
+        buffer: { type: 'read-only-storage' },
+      },
+    ],
+  })
+}
+
+/**
+ * The group naming both tables. Neither `ClipRegions` nor `GradientRamps` can own it,
+ * because either buffer growing invalidates it: the renderer watches both identities and
+ * calls this again when one has changed.
+ */
+export function createStorageBindGroup(
+  device: GPUDevice,
+  layout: GPUBindGroupLayout,
+  clips: GPUBuffer,
+  ramps: GPUBuffer,
+): GPUBindGroup {
+  return device.createBindGroup({
+    label: 'storage tables',
+    layout,
+    entries: [
+      { binding: 0, resource: { buffer: clips } },
+      { binding: 1, resource: { buffer: ramps } },
     ],
   })
 }
@@ -51,16 +80,13 @@ export function createClipBindGroupLayout(device: GPUDevice): GPUBindGroupLayout
  */
 export class ClipRegions {
   #device: GPUDevice
-  #layout: GPUBindGroupLayout
   #buffer: GPUBuffer | null = null
-  #bindGroup: GPUBindGroup | null = null
   #capacity = 0
   #data = new Float32Array(0)
   #count = 0
 
-  constructor(device: GPUDevice, layout: GPUBindGroupLayout) {
+  constructor(device: GPUDevice) {
     this.#device = device
-    this.#layout = layout
     // Bound even when nothing clips, because a pipeline's bind groups are not optional.
     this.#reserve(1)
   }
@@ -69,8 +95,8 @@ export class ClipRegions {
     return this.#count
   }
 
-  get bindGroup(): GPUBindGroup | null {
-    return this.#bindGroup
+  get buffer(): GPUBuffer | null {
+    return this.#buffer
   }
 
   reset(): void {
@@ -129,23 +155,18 @@ export class ClipRegions {
     this.#data = data
     this.#capacity = capacity
 
+    // A grown buffer is a new buffer, and the bind group naming it dies with it. The
+    // renderer watches this identity and rebuilds the shared storage group.
     this.#buffer?.destroy()
     this.#buffer = this.#device.createBuffer({
       label: 'clip regions',
       size: capacity * BYTES_PER_CLIP,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     })
-    // A bind group names a buffer, so a grown buffer needs a new one.
-    this.#bindGroup = this.#device.createBindGroup({
-      label: 'clips',
-      layout: this.#layout,
-      entries: [{ binding: 0, resource: { buffer: this.#buffer } }],
-    })
   }
 
   destroy(): void {
     this.#buffer?.destroy()
     this.#buffer = null
-    this.#bindGroup = null
   }
 }

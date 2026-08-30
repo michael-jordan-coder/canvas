@@ -622,10 +622,71 @@
   color: var(--text-disabled);
 }
 
+/* Thumbnails a user message carried, above its text. */
+.messageImages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.messageImage {
+  display: block;
+  max-width: 120px;
+  max-height: 80px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
 .composer {
   flex: none;
   padding: var(--space-4);
   padding-top: 0;
+}
+
+/* Attached references waiting to send. These chips are the only sign anything is attached,
+   so they are real thumbnails, not filenames. */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+
+.chip {
+  position: relative;
+  flex: none;
+}
+
+.chipImage {
+  display: block;
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.chipRemove {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--text-secondary);
+  transition:
+    color var(--duration) var(--ease),
+    background var(--duration) var(--ease);
+}
+
+.chipRemove:hover {
+  color: var(--text);
+  background: var(--hover);
 }
 
 /* The border lives on this wrapper rather than on the textarea, so the send button sits
@@ -658,6 +719,30 @@
 
 .input::placeholder {
   color: var(--text-disabled);
+}
+
+/* Quiet next to the accent send button: attaching is an option, sending is the action. */
+.attach {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: var(--text-secondary);
+  transition:
+    color var(--duration) var(--ease),
+    background var(--duration) var(--ease);
+}
+
+.attach:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.attach:disabled {
+  color: var(--text-disabled);
+  background: none;
 }
 
 .action {

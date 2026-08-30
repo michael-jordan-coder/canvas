@@ -1,5 +1,10 @@
 import { AGENT_PORT } from '@canvas/agent-server/protocol'
-import type { ClientMessage, QuestionAnswer, ServerMessage } from '@canvas/agent-server/protocol'
+import type {
+  Attachment,
+  ClientMessage,
+  QuestionAnswer,
+  ServerMessage,
+} from '@canvas/agent-server/protocol'
 import { TOKEN_QUERY_KEY } from '@canvas/agent-server/tokenFile'
 import { scene } from '../state/scene'
 import { isWorking, useAgent } from './agentStore'
@@ -14,6 +19,13 @@ import { loadAgentToken, tokensEqual } from './agentToken'
  * The editor's end of the bridge: one WebSocket to the agent server, reconnecting quietly
  * for as long as the tab lives, since the server may start after the editor or restart
  * under `--watch` mid-session.
+ *
+ * One close is different: `evicted` means a newer tab took the socket, and the timer must
+ * not answer it. The server keeps one editor and closes the previous, so two tabs both
+ * reconnecting on timers steal the connection from each other every two seconds, forever,
+ * with turn messages landing in whichever tab holds it at that instant. The displaced tab
+ * goes passive instead, and only the person asking for the assistant back in that tab takes
+ * the socket back on purpose.
  *
  * Two responsibilities meet here and are deliberately kept together, because they share the
  * turn's lifecycle: relaying chat between the panel and the server, and executing the
@@ -275,20 +287,25 @@ export function createAgentConnection(): () => void {
   }
 }
 
+/** Back to a data URL for display; the stripped base64 is what goes over the wire. */
+export function toDataUrl(attachment: Attachment): string {
+  return `data:${attachment.mimeType};base64,${attachment.base64}`
+}
+
 /** What the panel calls. Module level so the panel needs no handle threaded through props. */
 export const agentClient = {
   /**
    * Sends, and answers whether it went. False leaves the transcript untouched, so the panel
    * can keep the draft in the composer: a message nobody received must not look sent.
    */
-  send(text: string): boolean {
+  send(text: string, attachments?: Attachment[]): boolean {
     const agent = useAgent.getState()
     if (agent.status !== 'idle') return false
-    if (!send({ type: 'chat', text })) {
+    if (!send({ type: 'chat', text, attachments })) {
       agent.append('notice', 'Not sent: the agent server is not connected.')
       return false
     }
-    agent.append('user', text)
+    agent.append('user', text, attachments?.map(toDataUrl))
     // Optimistic: the server's turn_start confirms it, but the input should lock now.
     agent.setStatus('busy')
     return true

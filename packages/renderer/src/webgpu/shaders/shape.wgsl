@@ -35,6 +35,15 @@ struct Clip {
 
 @group(1) @binding(0) var<storage, read> clips: array<Clip>;
 
+// The gradient ramps, a stream of 8 float records viewed as vec4 pairs rather than a
+// struct: a gradient's stops are variable length, so a header record names where its stops
+// start and how many there are, and each stop is a colour and a position. The instance's
+// gradient slot is the header's index into this array.
+//
+//   header: [from.xy, to.xy], [stopStart, stopCount, kind, pad]
+//   stop:   [r, g, b, a],     [position, pad, pad, pad]
+@group(1) @binding(1) var<storage, read> ramps: array<vec4f>;
+
 // The baked glyph atlas. Text is not a separate pipeline: a glyph is one more instance in
 // the same buffer, so it lands in painter's order beside the shapes it is drawn among and a
 // rectangle on top of a word actually covers it.
@@ -43,6 +52,14 @@ struct Clip {
 
 // A malformed chain must not hang the GPU. Nothing real nests this deep.
 const MAX_CLIP_DEPTH = 8;
+
+// The bound on the stop walk, for the same reason the clip walk has one. The document
+// refuses more stops than this at the parser, so a real ramp is never truncated.
+const MAX_GRADIENT_STOPS = 8u;
+
+// The feature bitfield in flags.w, mirrored from instanceLayout.ts.
+const BIT_GRADIENT = 1u;
+const BIT_SHADOW = 2u;
 
 // What an instance is, read from params.y: 0 rectangular, 1 elliptical, 2 a glyph. Tested by
 // midpoint below rather than by equality, so a future kind cannot alias onto an existing one.
@@ -86,12 +103,13 @@ struct VertexOutput {
   @location(5) @interpolate(flat) clip: f32,
   // Where in the atlas this pixel falls. Meaningless on a shape instance, which never reads it.
   @location(6) uv: vec2f,
-  // Width of the glyph's distance field, in atlas pixels. Also meaningless on a shape.
-  @location(7) @interpolate(flat) pxRange: f32,
+  // flags.y and flags.z, forwarded whole because two kinds of instance read them as two
+  // different things: a glyph's distance range in .y, a shadow's blur in .x and spread
+  // in .y. Each kind ignores the reading that is not its own.
+  @location(7) @interpolate(flat) aux: vec2f,
   @location(8) @interpolate(flat) radii: vec4f,
-  // The feature bitfield, carried as a float and read as a u32. Nothing sets a bit yet, so
-  // nothing reads it yet either; it is forwarded now because the alternative is a stride
-  // change later, and this is the phase that pays for one.
+  // The feature bitfield, carried as a float and read as a u32: bit 0 marks a gradient
+  // paint, bit 1 a drop shadow instance.
   @location(9) @interpolate(flat) bits: f32,
 }
 
@@ -104,12 +122,18 @@ const CORNERS = array(
 
 // How far the band reaches past the shape's edge: half a weight for a centred stroke, a
 // whole one for an outside stroke, nothing for an inside one or a fill.
-fn outset(params: vec4f) -> f32 {
+fn outset(params: vec4f, flags: vec4f) -> f32 {
   // A glyph's quad is exactly its patch of the atlas, and the slots this reads hold texture
   // coordinates rather than a stroke. Padding by them would grow every letter by a fraction
   // of its own size, which looks like imprecision rather than like a bug.
   if params.y > 1.5 {
     return 0.0;
+  }
+  // A shadow reaches past the edge by its spread and then blurs over that, both uniform on
+  // all four sides. The offset is deliberately not here: it rides in the instance's
+  // transform, which is what keeps this padding uniform at all.
+  if (u32(flags.w) & BIT_SHADOW) != 0u {
+    return max(0.0, flags.y + flags.z);
   }
   return max(0.0, params.w + params.z * 0.5);
 }
@@ -120,7 +144,7 @@ fn vs(@builtin(vertex_index) index: u32, instance: Instance) -> VertexOutput {
   // The quad has to cover everything the fragment stage will draw, and an outward stroke
   // reaches past the node's own box. Growing the quad instead of the shape keeps `size` the
   // node's real size, so the SDF below is unchanged.
-  let pad = outset(instance.params);
+  let pad = outset(instance.params, instance.flags);
   let local = CORNERS[index] * (size + 2.0 * pad) - pad;
 
   let worldFromLocal = mat3x3f(
@@ -144,7 +168,7 @@ fn vs(@builtin(vertex_index) index: u32, instance: Instance) -> VertexOutput {
   let uv0 = vec2f(instance.params.x, instance.params.z);
   let uv1 = vec2f(instance.params.w, instance.flags.y);
   out.uv = mix(uv0, uv1, CORNERS[index]);
-  out.pxRange = instance.flags.z;
+  out.aux = instance.flags.yz;
   out.radii = instance.radii;
   out.bits = instance.flags.w;
   return out;
@@ -223,6 +247,51 @@ fn clipCoverage(start: f32, world: vec2f, dx: vec2f, dy: vec2f) -> f32 {
   return coverage;
 }
 
+/**
+ * The gradient's colour at `p`, the pixel's position in the node's 0..1 box space.
+ *
+ * The projection onto the axis is a dot product for linear and a length for radial, and
+ * because the box is normalised a radial ramp is an ellipse in node units, stretched with
+ * the node's own aspect. The walk mixes through the stops in order with each step clamped,
+ * which evaluates the piecewise ramp exactly: spans wholly below t contribute their end
+ * colour, spans above contribute nothing, and only the bracketing pair actually mixes. It
+ * also clamps outside the first and last stop rather than extrapolating, with no branch to
+ * diverge on.
+ *
+ * No derivatives in here, and none needed: colour, unlike coverage, does not want a pixel
+ * footprint. If a ramp ever needs one, it is taken at the top of fs with the other three
+ * and passed in, exactly as glyphCoverage and clipCoverage take theirs.
+ */
+fn sampleGradient(header: u32, p: vec2f) -> vec4f {
+  // `from` and `meta` read better but both are reserved words in WGSL.
+  let a = ramps[header].xy;
+  let b = ramps[header].zw;
+  let info = ramps[header + 1u];
+
+  var t: f32;
+  if info.z < 0.5 {
+    let axis = b - a;
+    // A degenerate axis has no direction to project onto; everything reads as the start.
+    let len2 = max(dot(axis, axis), 1e-12);
+    t = dot(p - a, axis) / len2;
+  } else {
+    t = length(p - a) / max(length(b - a), 1e-6);
+  }
+
+  let start = u32(info.x);
+  let count = min(u32(info.y), MAX_GRADIENT_STOPS);
+
+  var color = ramps[start];
+  var prev = ramps[start + 1u].x;
+  for (var index = 1u; index < count; index += 1u) {
+    let at = start + index * 2u;
+    let next = ramps[at + 1u].x;
+    color = mix(color, ramps[at], clamp((t - prev) / max(next - prev, 1e-6), 0.0, 1.0));
+    prev = next;
+  }
+  return color;
+}
+
 /** The true distance, from three channels that each carry the distance to a different edge. */
 fn median(v: vec3f) -> f32 {
   return max(min(v.r, v.g), min(max(v.r, v.g), v.b));
@@ -286,9 +355,28 @@ fn fs(in: VertexOutput) -> @location(0) vec4f {
   // every thick stroke.
   let fw = max(fwidth(d), 1e-6);
 
+  let bits = u32(in.bits);
+
   var coverage: f32;
   if in.params.y > 1.5 {
-    coverage = glyphCoverage(in.uv, in.pxRange, uvFootprint);
+    // Tested before the shadow bit on purpose: a glyph's coverage comes from the atlas, not
+    // from the box SDF, so a text shadow is a different feature and the packer never emits
+    // one. The order here is what makes that a decision rather than a wrongly-drawn letter.
+    coverage = glyphCoverage(in.uv, in.aux.y, uvFootprint);
+  } else if (bits & BIT_SHADOW) != 0u {
+    let blur = in.aux.x;
+    let spread = in.aux.y;
+    if blur > 0.0 {
+      // The same signed distance the fill uses, pushed out by the spread and smoothed over
+      // the blur radius. That is the whole economy of the approach: no second pass, no
+      // offscreen target, no blur kernel.
+      coverage = 1.0 - smoothstep(-blur, blur, d - spread);
+    } else {
+      // smoothstep with equal edges is undefined, so a zero blur falls through to the
+      // normal coverage path and stays sharp. This is also what makes a spread-only shadow
+      // work as an outline glow.
+      coverage = clamp(0.5 - (d - spread) / fw, 0.0, 1.0);
+    }
   } else {
     let weight = in.params.z;
     if weight > 0.0 {
@@ -304,10 +392,21 @@ fn fs(in: VertexOutput) -> @location(0) vec4f {
 
   coverage *= clipCoverage(in.clip, in.world, dWorldX, dWorldY);
 
+  var rgba = in.color;
+  if (bits & BIT_GRADIENT) != 0u {
+    // The pixel's place in the node's own 0..1 box. `in.local` and not the quad position,
+    // which for an outward stroke reaches past the box at both ends: a gradient on a stroke
+    // ramps across the node, not across the band. The instance's colour slot carries the
+    // inherited alpha alone, so the stop's own alpha and the tree's compose here exactly as
+    // a solid composes them at pack time.
+    let g = sampleGradient(u32(in.params.x), in.local / in.size);
+    rgba = vec4f(g.rgb, g.a * in.color.a);
+  }
+
   // Premultiplied, and the pipeline's blend state expects it. Straight alpha survives a
   // source-over blend but is wrong for every other one: `screen` reads the colour channels
   // directly, so an antialiased edge at half coverage would contribute its full colour and
   // draw a dark fringe around every shape.
-  let a = in.color.a * coverage;
-  return vec4f(in.color.rgb * a, a);
+  let a = rgba.a * coverage;
+  return vec4f(rgba.rgb * a, a);
 }

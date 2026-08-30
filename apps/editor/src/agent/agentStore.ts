@@ -62,6 +62,8 @@ export interface ChatItem {
    * `text` still shows something sensible and the extra structure below is additive.
    */
   text: string
+  /** Data URLs, for the thumbnails on a user message. Only ever set on kind 'user'. */
+  images?: string[]
   /**
    * On a `question` item only. `askId` is the server's id for the question, echoed back in the
    * answer; `question` is what to render; `answer` is the person's choice once they have made
@@ -116,7 +118,7 @@ interface AgentState {
   setOpen: (open: boolean) => void
   setSelectionUnseen: (selectionUnseen: boolean) => void
   setNextAttemptAt: (at: number | null) => void
-  append: (kind: ChatItem['kind'], text: string) => void
+  append: (kind: ChatItem['kind'], text: string, images?: string[]) => void
   /** Append a question card and mark it the one awaiting an answer. */
   ask: (askId: number, question: AgentQuestion) => void
   /** Record the person's answer on its card and, if it was the pending one, clear that. */
@@ -167,10 +169,10 @@ export const useAgent = create<AgentState>()((set) => ({
     set((state) => (state.selectionUnseen === selectionUnseen ? state : { selectionUnseen })),
   setNextAttemptAt: (nextAttemptAt) =>
     set((state) => (state.nextAttemptAt === nextAttemptAt ? state : { nextAttemptAt })),
-  append: (kind, text) =>
+  append: (kind, text, images) =>
     set((state) => {
       nextItemId += 1
-      return { items: [...state.items, { id: nextItemId, kind, text }] }
+      return { items: [...state.items, { id: nextItemId, kind, text, ...(images ? { images } : {}) }] }
     }),
   ask: (askId, question) =>
     set((state) => {

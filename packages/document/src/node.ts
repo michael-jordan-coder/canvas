@@ -1,5 +1,5 @@
 import { IDENTITY, type Mat2D, type Size } from './math.js'
-import type { Paint, RGBA, Stroke } from './paint.js'
+import type { DropShadow, Paint, RGBA, Stroke } from './paint.js'
 import { uniformCornerRadii, type CornerRadii } from './sdf.js'
 
 /** Branded so a plain string cannot be passed where a node id is expected. */
@@ -133,6 +133,14 @@ export interface FrameNode extends BaseNode {
   strokes: Stroke[]
   /** As typed, not as drawn. What is drawn is `resolveCornerRadii` against the size. */
   cornerRadii: CornerRadii
+  /**
+   * Drop shadows, topmost first the way `fills` is. Optional with absence meaning none, so
+   * a file from before effects and a node that simply has none read identically. A list
+   * rather than a single field because a second shadow later is then not a schema change.
+   * Text deliberately has no `effects`: a glyph's coverage comes from the atlas rather than
+   * the box SDF, so a text shadow is a different feature, out of scope for this pass.
+   */
+  effects?: DropShadow[]
   layout?: FrameLayout
 }
 
@@ -142,12 +150,14 @@ export interface RectangleNode extends BaseNode {
   strokes: Stroke[]
   /** As typed, not as drawn. What is drawn is `resolveCornerRadii` against the size. */
   cornerRadii: CornerRadii
+  effects?: DropShadow[]
 }
 
 export interface EllipseNode extends BaseNode {
   readonly type: 'ellipse'
   fills: Paint[]
   strokes: Stroke[]
+  effects?: DropShadow[]
 }
 
 /**
@@ -323,11 +333,31 @@ function clonePaint(paint: Paint): Paint {
   switch (paint.type) {
     case 'solid':
       return { ...paint, color: { ...paint.color } }
+    case 'linear':
+    case 'radial':
+      // The stops get their own array and each stop its own colour. Sharing either would
+      // have history and autosave mutating each other's state, which is the exact bug this
+      // switch exists to prevent.
+      return {
+        ...paint,
+        from: { ...paint.from },
+        to: { ...paint.to },
+        stops: paint.stops.map((stop) => ({ position: stop.position, color: { ...stop.color } })),
+      }
   }
 }
 
 function cloneStroke(stroke: Stroke): Stroke {
   return { paint: clonePaint(stroke.paint), weight: stroke.weight, align: stroke.align }
+}
+
+function cloneEffect(effect: DropShadow): DropShadow {
+  return { ...effect, offset: { ...effect.offset }, color: { ...effect.color } }
+}
+
+/** Conditional for the same reason `layoutChild` is: absence has to survive the clone. */
+function cloneEffects(effects: DropShadow[] | undefined): { effects?: DropShadow[] } {
+  return effects ? { effects: effects.map(cloneEffect) } : {}
 }
 
 /**
@@ -401,6 +431,7 @@ export function cloneNodeAs(node: SceneNode, id: NodeId): SceneNode {
         cornerRadii: { ...node.cornerRadii },
         fills: node.fills.map(clonePaint),
         strokes: node.strokes.map(cloneStroke),
+        ...cloneEffects(node.effects),
         ...(node.layout
           ? { layout: { ...node.layout, padding: { ...node.layout.padding } } }
           : {}),
@@ -413,6 +444,7 @@ export function cloneNodeAs(node: SceneNode, id: NodeId): SceneNode {
         cornerRadii: { ...node.cornerRadii },
         fills: node.fills.map(clonePaint),
         strokes: node.strokes.map(cloneStroke),
+        ...cloneEffects(node.effects),
       }
     case 'ellipse':
       return {
@@ -421,6 +453,7 @@ export function cloneNodeAs(node: SceneNode, id: NodeId): SceneNode {
         type: 'ellipse',
         fills: node.fills.map(clonePaint),
         strokes: node.strokes.map(cloneStroke),
+        ...cloneEffects(node.effects),
       }
     case 'text':
       return {

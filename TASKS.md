@@ -256,17 +256,17 @@ New sections
 Deferred from this pass, with the reason:
 
 The three below were designed in full and then deliberately dropped, to finish the visible panel
-work first. The design for all of them is written up and can be picked up as it stands; none of
-it is UI work, which is what took them out of scope rather than any problem with the approach.
+work first. Gradients and the drop shadow have since shipped exactly as designed (schema
+version 6, described in CLAUDE.md); blend modes remain open.
 
-- [ ] Gradient paint types, linear and radial. `Paint` is already written as a union so the type
+- [x] Gradient paint types, linear and radial. `Paint` is already written as a union so the type
       slots in, but stops are variable length, so they need a storage buffer at
       `@group(1) @binding(1)` indexed from the instance, following the `ClipRegions` precedent
       rather than inflating every instance in the stress grid. `params.x` is reserved for the
       index and bit 0 of the `flags.w` bitfield marks it. Note `clonePaint` is a `switch` that
       will stop compiling when the union grows, which is the intended alarm: a gradient's stops
       array needs its own deep copy or history and autosave share it.
-- [ ] Effects: drop shadow. An SDF gives the shadow nearly free (offset the distance, smooth it
+- [x] Effects: drop shadow. An SDF gives the shadow nearly free (offset the distance, smooth it
       over the blur), and bit 1 of the bitfield plus the two spare `flags` slots are reserved for
       it. The design's one non-obvious move: the offset goes in the instance's transform, not in
       the quad padding, because both padding computations assume uniform four-side padding and
