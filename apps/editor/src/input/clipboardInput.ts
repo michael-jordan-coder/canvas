@@ -1,8 +1,11 @@
 import {
   canHaveChildren,
+  createText,
+  fromHex,
   instantiateSubtree,
   parseSubtree,
   serializeSubtree,
+  translation,
   type NodeId,
   type SceneDocument,
   type SerializedSubtree,
@@ -10,6 +13,7 @@ import {
 import { relayout } from '../state/autoLayout'
 import { rerunCodeNodesIn } from '../state/code'
 import { duplicateNodes } from '../state/duplicate'
+import { updateText } from '../state/font'
 import { isEditingText } from './isEditingText'
 
 export interface ClipboardInputOptions {
@@ -82,22 +86,35 @@ export function createClipboardInput(options: ClipboardInputOptions): () => void
     const text = event.clipboardData?.getData('text/plain')
     if (!text) return
 
-    let subtree: SerializedSubtree
+    let subtree: SerializedSubtree | undefined
     try {
       subtree = parseSubtree(JSON.parse(text) as unknown)
     } catch {
-      // Someone pasted text from somewhere else. Not an error, just not for us.
-      return
+      // Someone pasted text from somewhere else. Not a Canvas subtree.
     }
 
     event.preventDefault()
-    const created = scene.transact(() => {
-      const pasted = instantiateSubtree(scene, subtree, destination(), PASTE_OFFSET)
-      relayout(scene, pasted.map((node) => node.id))
-      options.setSelection(pasted.map((node) => node.id))
-      return pasted
-    })
-    rerunCodeNodesIn(created.map((node) => node.id))
+    if (subtree) {
+      const created = scene.transact(() => {
+        const pasted = instantiateSubtree(scene, subtree, destination(), PASTE_OFFSET)
+        relayout(scene, pasted.map((node) => node.id))
+        options.setSelection(pasted.map((node) => node.id))
+        return pasted
+      })
+      rerunCodeNodesIn(created.map((node) => node.id))
+    } else {
+      scene.transact(() => {
+        const parentId = destination()
+        const node = createText({
+          characters: text,
+          fills: [fromHex('#1a1a1a')],
+          transform: translation(PASTE_OFFSET.x, PASTE_OFFSET.y),
+        })
+        scene.insert(node, parentId)
+        updateText(node, {})
+        options.setSelection([node.id])
+      })
+    }
   }
 
   const onKeyDown = (event: KeyboardEvent): void => {
