@@ -96,6 +96,8 @@ Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) has the short vers
 [good first issue](https://github.com/michael-jordan-coder/canvas/labels/good%20first%20issue)
 label has contained starting points with file pointers, and the deferred lists in
 [TASKS.md](TASKS.md) are full of designed-but-unbuilt features looking for an owner.
+Participation is covered by the [Code of Conduct](CODE_OF_CONDUCT.md); found a security issue
+instead, see [SECURITY.md](SECURITY.md).
 
 ## License
 
